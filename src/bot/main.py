@@ -1,45 +1,33 @@
-"""
-Arquivo de inicialização do projeto
-Execute: python -m src.bot.main
-"""
-
-import asyncio
 import os
+import logging
 from dotenv import load_dotenv
 
-# Carrega variáveis de ambiente
+import discord
+from discord.ext import commands
+
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("x1-bot")
 
-# Import após carregar variáveis
-from src.bot.main import bot
-from src.database.mongodb import connect_db, close_db
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
 
-async def main():
-    """Inicializa o bot"""
-    print("=" * 50)
-    print("🤖 X1 FREE FIRE DISCORD BOT")
-    print("=" * 50)
-    
-    # Conecta ao MongoDB
-    try:
-        await connect_db()
-        print("✓ Banco de dados conectado")
-    except Exception as e:
-        print(f"✗ Erro ao conectar ao MongoDB: {e}")
-        return
-    
-    # Inicia o bot
+bot = commands.Bot(command_prefix=os.getenv("DISCORD_PREFIX", "!"), intents=intents)
+
+@bot.event
+async def on_ready():
+    logger.info("Bot online: %s", bot.user)
+
+@bot.command()
+async def ping(ctx):
+    await ctx.send(f"Pong! {round(bot.latency * 1000)}ms")
+
+def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        print("✗ DISCORD_TOKEN não configurado em .env")
-        return
-    
-    try:
-        await bot.start(token)
-    except Exception as e:
-        print(f"✗ Erro ao iniciar bot: {e}")
-    finally:
-        await close_db()
+        raise RuntimeError("DISCORD_TOKEN vazio no .env")
+    bot.run(token)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

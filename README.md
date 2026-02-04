@@ -178,7 +178,6 @@ kill -9 <PID>  # Matar processo
 ```
 
 ## 🤝 Contribuindo
-
 1. Fork o repositório
 2. Crie uma branch (`git checkout -b feature/AmazingFeature`)
 3. Commit mudanças (`git commit -m 'Add some AmazingFeature'`)
@@ -189,16 +188,3 @@ kill -9 <PID>  # Matar processo
 
 Este projeto está licenciado sob a MIT License - veja o arquivo LICENSE.
 
-## 👨‍💻 Autor
-
-Desenvolvido por [Seu Nome] em 2026
-
-## 📞 Suporte
-
-- GitHub Issues para bugs
-- Discord: [Seu servidor]
-- Email: seu-email@example.com
-
----
-
-**Made with ❤️ for the X1 Free Fire Community**
