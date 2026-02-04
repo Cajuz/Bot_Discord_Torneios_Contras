@@ -1,0 +1,82 @@
+version: '3.9'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: x1_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: x1_user
+      MONGO_INITDB_ROOT_PASSWORD: x1_secure_password_123
+      MONGO_INITDB_DATABASE: x1_bot
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - x1_network
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Discord Bot
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: x1_discord_bot
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_PREFIX: ${DISCORD_PREFIX:-.}
+      DISCORD_SERVER_ID: ${DISCORD_SERVER_ID}
+      MONGO_URI: mongodb://x1_user:x1_secure_password_123@mongodb:27017/x1_bot?authSource=admin
+      MONGO_DB_NAME: x1_bot
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - x1_network
+    restart: unless-stopped
+
+  # FastAPI REST API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: x1_api
+    command: python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      MONGO_URI: mongodb://x1_user:x1_secure_password_123@mongodb:27017/x1_bot?authSource=admin
+      MONGO_DB_NAME: x1_bot
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - x1_network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+
+networks:
+  x1_network:
+    driver: bridge
