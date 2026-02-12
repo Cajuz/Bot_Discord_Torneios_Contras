@@ -138,6 +138,7 @@ pytest-watch
 
 ```bash
 # Feature branch
+git clone https://github.com/Cajuz/X1_frifas-Discord_bot.git
 git checkout -b feature/victor
 git pull origin main
 git branch
