@@ -138,10 +138,12 @@ pytest-watch
 
 ```bash
 # Feature branch
-git checkout -b feature/nova-feature
+git checkout -b feature/victor
+git pull origin main
+git branch
 git add .
-git commit -m "feat: descrição da feature"
-git push origin feature/nova-feature
+git commit -m "subindo alterações victor"
+git push origin feature/victor
 
 # Pull request → merge → CI/CD automático
 ```

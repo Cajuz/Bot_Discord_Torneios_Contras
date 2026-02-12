@@ -1,7 +1,3 @@
- CONFIGURAR VARIÁVEIS DE AMBIENTE:
-    cp .env.example .env
-   (Edite .env com suas credenciais)
-
 # Docker
 docker-compose up -d              # Inicia tudo
 docker-compose logs -f bot        # Ver logs do bot
