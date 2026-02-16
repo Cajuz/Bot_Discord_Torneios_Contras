@@ -6,8 +6,8 @@ services:
     image: mongo:7.0
     container_name: x1_mongodb
     environment:
-      MONGO_INITDB_ROOT_USERNAME: x1_user
-      MONGO_INITDB_ROOT_PASSWORD: x1_secure_password_123
+      MONGO_INITDB_ROOT_USERNAME: adm
+      MONGO_INITDB_ROOT_PASSWORD: frifas123
       MONGO_INITDB_DATABASE: x1_bot
     ports:
       - "27017:27017"
@@ -29,16 +29,19 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: x1_discord_bot
+    command: python src/main.py
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_PREFIX: ${DISCORD_PREFIX:-.}
       DISCORD_SERVER_ID: ${DISCORD_SERVER_ID}
-      MONGO_URI: mongodb://x1_user:x1_secure_password_123@mongodb:27017/x1_bot?authSource=admin
-      MONGO_DB_NAME: x1_bot
+      # Mongo DB
+      MONGODB_URI: mongodb+srv://x1_bot_user:frifas123@x1-bot-cluster.p1wq1wh.mongodb.net/?retryWrites=true&w=majority&appName=X1-Bot-Cluster
+      MONGODB_DB_NAME: x1_bot
       API_HOST: 0.0.0.0
       API_PORT: 8000
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app/src
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
@@ -48,28 +51,27 @@ services:
     networks:
       - x1_network
     restart: unless-stopped
-
-  # FastAPI REST API
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: x1_api
-    command: python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-    environment:
-      MONGO_URI: mongodb://x1_user:x1_secure_password_123@mongodb:27017/x1_bot?authSource=admin
-      MONGO_DB_NAME: x1_bot
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./src:/app/src
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    networks:
-      - x1_network
-    restart: unless-stopped
+     build:
+       context: .
+       dockerfile: Dockerfile
+     container_name: x1_api
+     command: python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+     environment:
+       MONGODB_URI: mongodb+srv://x1_bot_user:frifas123@x1-bot-cluster.p1wq1wh.mongodb.net/?retryWrites=true&w=majority&appName=X1-Bot-Cluster
+       MONGODB_DB_NAME: x1_bot
+       ENVIRONMENT: ${ENVIRONMENT:-development}
+       PYTHONPATH: /app
+     ports:
+       - "8000:8000"
+     volumes:
+       - ./src:/app/src
+     depends_on:
+       mongodb:
+         condition: service_healthy
+     networks:
+       - x1_network
+     restart: unless-stopped
 
 volumes:
   mongodb_data:

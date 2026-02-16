@@ -1,25 +1,27 @@
 FROM python:3.11-slim
 
+# Definir variáveis de ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
+
+# Definir diretório de trabalho
 WORKDIR /app
 
-# Instala dependências do sistema
+# Instalar dependências do sistema (se necessário)
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia requirements
+# Copiar requirements e instalar dependências Python
 COPY requirements.txt .
-
-# Instala dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia código fonte
-COPY . .
+# Copiar código fonte
+COPY src/ /app/src/
 
-# Variáveis de ambiente
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+# Criar diretório de logs
+RUN mkdir -p /app/logs
 
-# Comando para iniciar o bot
-CMD ["python", "-m", "src.bot.main"]
+# Comando padrão (será sobrescrito pelo docker-compose)
+CMD ["python", "-m", "src.main"]
