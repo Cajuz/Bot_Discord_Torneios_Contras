@@ -2,37 +2,47 @@ from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
 
+
 class MatchQueue:
     """Modelo para fila de partidas"""
-    
+
+    # ✏️ Constantes de status (evita strings soltas no código)
+    STATUS_WAITING    = "waiting"
+    STATUS_CONFIRMING = "confirming"
+    STATUS_EXPIRED    = "expired"
+
     def __init__(
         self,
         channel_name: str,
         bet_value: float,
-        gel_type: str,  # "normal" ou "infinito"
+        gel_type: str,
         max_players: int,
         players: List[int] = None,
-        status: str = "waiting",  # waiting, confirming, expired
+        status: str = "waiting",
         created_at: datetime = None,
         expires_at: datetime = None,
         confirmation_message_id: Optional[int] = None,
         confirmations: List[int] = None,
+        # ✏️ Novos campos para rastrear thread criada e guild
+        thread_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
         _id: ObjectId = None
     ):
-        self._id = _id or ObjectId()
-        self.channel_name = channel_name
-        self.bet_value = bet_value
-        self.gel_type = gel_type
-        self.max_players = max_players
-        self.players = players or []
-        self.status = status
-        self.created_at = created_at or datetime.utcnow()
-        self.expires_at = expires_at
-        self.confirmation_message_id = confirmation_message_id
-        self.confirmations = confirmations or []
-    
-    def to_dict(self):
-        """Converter para dicionário"""
+        self._id                      = _id or ObjectId()
+        self.channel_name             = channel_name
+        self.bet_value                = bet_value
+        self.gel_type                 = gel_type
+        self.max_players              = max_players
+        self.players                  = players or []
+        self.status                   = status
+        self.created_at               = created_at or datetime.utcnow()
+        self.expires_at               = expires_at
+        self.confirmation_message_id  = confirmation_message_id
+        self.confirmations            = confirmations or []
+        self.thread_id                = thread_id   # ✏️ novo
+        self.guild_id                 = guild_id    # ✏️ novo
+
+    def to_dict(self) -> dict:
         return {
             "_id": self._id,
             "channel_name": self.channel_name,
@@ -44,12 +54,13 @@ class MatchQueue:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "confirmation_message_id": self.confirmation_message_id,
-            "confirmations": self.confirmations
+            "confirmations": self.confirmations,
+            "thread_id": self.thread_id,    # ✏️ novo
+            "guild_id": self.guild_id,      # ✏️ novo
         }
-    
+
     @staticmethod
-    def from_dict(data: dict):
-        """Criar instância a partir de dicionário"""
+    def from_dict(data: dict) -> "MatchQueue":
         return MatchQueue(
             _id=data.get("_id"),
             channel_name=data.get("channel_name"),
@@ -61,34 +72,52 @@ class MatchQueue:
             created_at=data.get("created_at"),
             expires_at=data.get("expires_at"),
             confirmation_message_id=data.get("confirmation_message_id"),
-            confirmations=data.get("confirmations", [])
+            confirmations=data.get("confirmations", []),
+            thread_id=data.get("thread_id"),    # ✏️ novo
+            guild_id=data.get("guild_id"),      # ✏️ novo
         )
-    
+
+    # ── Helpers existentes (sem alteração) ──────────────────────
+
     def is_full(self) -> bool:
-        """Verificar se a fila está cheia"""
         return len(self.players) >= self.max_players
-    
+
     def add_player(self, player_id: int) -> bool:
-        """Adicionar jogador à fila"""
         if player_id not in self.players and not self.is_full():
             self.players.append(player_id)
             return True
         return False
-    
+
     def remove_player(self, player_id: int) -> bool:
-        """Remover jogador da fila"""
         if player_id in self.players:
             self.players.remove(player_id)
             return True
         return False
-    
+
     def add_confirmation(self, player_id: int) -> bool:
-        """Adicionar confirmação de jogador"""
         if player_id in self.players and player_id not in self.confirmations:
             self.confirmations.append(player_id)
             return True
         return False
-    
+
     def all_confirmed(self) -> bool:
-        """Verificar se todos confirmaram"""
         return len(self.confirmations) == len(self.players)
+
+    # ✏️ Novos helpers ────────────────────────────────────────────
+
+    def pending_confirmations(self) -> List[int]:
+        """Retorna IDs dos jogadores que ainda não confirmaram"""
+        return [p for p in self.players if p not in self.confirmations]
+
+    def is_expired(self) -> bool:
+        """Verifica se o tempo de confirmação já passou"""
+        if self.expires_at is None:
+            return False
+        return datetime.utcnow() > self.expires_at
+
+    def __repr__(self) -> str:
+        return (
+            f"<MatchQueue {self.channel_name} R${self.bet_value} "
+            f"{self.gel_type} {len(self.players)}/{self.max_players} "
+            f"status={self.status}>"
+        )
