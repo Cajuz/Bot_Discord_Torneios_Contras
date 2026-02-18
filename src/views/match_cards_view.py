@@ -6,16 +6,16 @@ from config.channels_config import ChannelsConfig
 
 from utils.logger import logger
 
+
 class MatchCardView(View):
     """View com cards de partidas para cada valor"""
     
     def __init__(self, channel_service, channel_name: str):
-        super().__init__(timeout=None)  # Persistente
+        super().__init__(timeout=None)
         self.channel_service = channel_service
         self.channel_name = channel_name
         self.channel_info = ChannelsConfig.get_channel_info(channel_name)
         
-        # Adicionar botões para cada valor
         for value in ChannelsConfig.BET_VALUES:
             button = Button(
                 label=f"R$ {value},00",
@@ -27,7 +27,6 @@ class MatchCardView(View):
             self.add_item(button)
     
     def _get_button_style(self, value: int) -> discord.ButtonStyle:
-        """Definir estilo do botão baseado no valor"""
         if value <= 10:
             return discord.ButtonStyle.secondary
         elif value <= 50:
@@ -38,54 +37,60 @@ class MatchCardView(View):
             return discord.ButtonStyle.danger
     
     def _create_callback(self, bet_value: int):
-        """Criar callback para cada botão"""
         async def callback(interaction: discord.Interaction):
-            await self._handle_match_creation(interaction, bet_value)
+            await self._handle_join_queue(interaction, bet_value)  # ✏️ renomeado
         return callback
     
-    async def _handle_match_creation(self, interaction: discord.Interaction, bet_value: int):
-        """Processar criação de partida"""
+    async def _handle_join_queue(self, interaction: discord.Interaction, bet_value: int):
+        """
+        ✏️ Antes criava a partida direto, agora adiciona o jogador à fila.
+        A thread só é criada quando a fila encher e todos confirmarem.
+        """
         try:
+            from services.match_queue_service import match_queue_service
+
             user = interaction.user
-            
-            # Criar modal para coletar informações adicionais (se necessário)
-            # Por enquanto, criar partida diretamente
-            
             await interaction.response.defer(ephemeral=True)
-            
-            # Criar partida e tópico
-            result = await self.channel_service.create_match_with_thread(
+
+            channel_info = self.channel_info
+            max_players = channel_info.get('max_players', 2)  # ✏️ respeita o max da config
+            gel_type = channel_info.get('gel_type', 'normal')
+
+            success, queue, message = await match_queue_service.add_player_to_queue(
                 channel_name=self.channel_name,
-                bet_value=bet_value,
-                creator=user,
-                channel=interaction.channel
+                bet_value=float(bet_value),
+                gel_type=gel_type,
+                max_players=max_players,
+                player_id=user.id
             )
-            
-            if result['success']:
-                thread = result['thread']
-                match_id = result['match_id']
-                
-                embed = discord.Embed(
-                    title="✅ Partida Criada!",
-                    description=(
-                        f"Sua partida foi criada com sucesso!\n\n"
-                        f"**Valor:** R$ {bet_value},00\n"
-                        f"**Canal:** {self.channel_name}\n"
-                        f"**Tópico:** {thread.mention}\n"
-                        f"**ID:** `{match_id}`"
-                    ),
-                    color=discord.Color.green()
-                )
-                
-                await interaction.followup.send(embed=embed, ephemeral=True)
-            else:
+
+            if not success:
                 await interaction.followup.send(
-                    f"❌ Erro ao criar partida: {result.get('error', 'Erro desconhecido')}",
+                    f"⚠️ {message}",
                     ephemeral=True
                 )
-        
+                return
+
+            if message == "full":
+                # Fila cheia → inicia timer de confirmação (ainda no canal, não na thread)
+                await match_queue_service.start_confirmation_timer(
+                    queue=queue,
+                    bot=interaction.client,
+                    channel=interaction.channel
+                )
+                await interaction.followup.send(
+                    "⚡ Fila completa! Confirme a partida na mensagem acima.",
+                    ephemeral=True
+                )
+            else:
+                # Ainda aguardando jogadores
+                await interaction.followup.send(
+                    f"✅ {message}",
+                    ephemeral=True
+                )
+
         except Exception as e:
-            logger.error(f"Erro ao criar partida: {e}")
+            logger.error(f"Erro ao entrar na fila: {e}")
             try:
                 await interaction.followup.send(
                     f"❌ Erro ao processar solicitação: {str(e)}",
@@ -97,21 +102,19 @@ class MatchCardView(View):
 
 class MatchInfoEmbed:
     """Criador de embeds para informações de partidas"""
-    
+
     @staticmethod
     def create_welcome_card(channel_name: str, channel_info: Dict) -> discord.Embed:
         """Criar card de boas-vindas do canal"""
-        
         match_type = channel_info['type'].value
         platform = channel_info['platform'].value
-        
-        # Emoji baseado na plataforma
+
         platform_emoji = {
             "mob": "📱",
             "emu": "🖥️",
             "misto": "🔀"
         }.get(platform, "🎮")
-        
+
         embed = discord.Embed(
             title=f"{platform_emoji} {channel_name.upper()}",
             description=(
@@ -120,15 +123,15 @@ class MatchInfoEmbed:
                 f"na plataforma **{platform.upper()}**.\n\n"
                 f"**Como funciona:**\n"
                 f"1️⃣ Escolha o valor da aposta clicando em um dos botões abaixo\n"
-                f"2️⃣ Um tópico será criado automaticamente\n"
-                f"3️⃣ Um mediador será atribuído à sua partida\n"
-                f"4️⃣ Aguarde os outros jogadores entrarem\n"
+                f"2️⃣ Aguarde outro jogador entrar na mesma fila\n"       # ✏️
+                f"3️⃣ Confirme a partida quando solicitado\n"             # ✏️
+                f"4️⃣ Um tópico será criado com o mediador atribuído\n"  # ✏️
                 f"5️⃣ Boa sorte! 🍀\n\n"
                 f"**Valores disponíveis:** R$ 2 a R$ 200"
             ),
             color=discord.Color.gold()
         )
-        
+
         embed.add_field(
             name="📋 Regras",
             value=(
@@ -139,71 +142,69 @@ class MatchInfoEmbed:
             ),
             inline=False
         )
-        
-        embed.set_footer(text="Selecione um valor abaixo para começar")
+
+        embed.set_footer(text="Selecione um valor abaixo para entrar na fila")  # ✏️
         embed.timestamp = datetime.now()
-        
+
         return embed
-    
+
     @staticmethod
     def create_thread_welcome(
         match_id: str,
         bet_value: int,
         channel_name: str,
-        mediator_name: str,
-        mediator_id: str,
-        creator: discord.Member
+        mediator_id: int,           # ✏️ era str, agora int (consistente com o resto)
+        time_blue: List[int],       # ✏️ novo parâmetro
+        time_red: List[int],        # ✏️ novo parâmetro
+        player_ids: List[int]       # ✏️ novo parâmetro (lista completa)
     ) -> discord.Embed:
-        """Criar embed de boas-vindas do tópico"""
-        
+        """
+        ✏️ Atualizado para mostrar times e não depender mais de um único criador.
+        O mediator_member é mencionado via ID diretamente.
+        """
+
+        blue_str = "\n".join(f"• <@{uid}>" for uid in time_blue) or "—"
+        red_str  = "\n".join(f"• <@{uid}>" for uid in time_red)  or "—"
+
         embed = discord.Embed(
-            title="🎮 Informações da Partida",
-            description=f"Partida criada por {creator.mention}",
-            color=discord.Color.blue()
+            title="⚔️ Partida Criada!",
+            description=f"**Modo:** `{channel_name}` | **Valor:** R$ {bet_value},00",
+            color=discord.Color.gold()
         )
-        
+
+        embed.add_field(name="🔵 Time Blue", value=blue_str, inline=True)
+        embed.add_field(name="🔴 Time Red",  value=red_str,  inline=True)
+
         embed.add_field(
-            name="💰 Valor da Aposta",
-            value=f"**R$ {bet_value},00**",
-            inline=True
+            name="👨‍⚖️ Mediador",
+            value=f"<@{mediator_id}>",
+            inline=False
         )
-        
+
         embed.add_field(
-            name="📺 Canal",
-            value=f"`{channel_name}`",
-            inline=True
+            name="📊 Status",
+            value="💰 **Aguardando Pagamento**",   # ✏️ status inicial correto
+            inline=False
         )
-        
+
         embed.add_field(
             name="🎯 ID da Partida",
             value=f"`{match_id}`",
             inline=True
         )
-        
-        embed.add_field(
-            name="👨‍⚖️ Mediador",
-            value=f"<@{mediator_id}> ({mediator_name})",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="📊 Status",
-            value="🟡 **Aguardando Jogadores**",
-            inline=False
-        )
-        
+
         embed.add_field(
             name="ℹ️ Instruções",
             value=(
                 "• Use este tópico para se comunicar\n"
                 "• O mediador irá coordenar a partida\n"
-                "• Aguarde todos os jogadores confirmarem\n"
+                "• Aguarde o mediador confirmar o pagamento\n"
                 "• Boa sorte! 🍀"
             ),
             inline=False
         )
-        
-        embed.set_footer(text=f"Criada em")
+
+        embed.set_footer(text="Criada em")
         embed.timestamp = datetime.now()
-        
+
         return embed
