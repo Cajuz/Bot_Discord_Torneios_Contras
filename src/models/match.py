@@ -12,7 +12,7 @@ class Match:
     STATUS_EM_ANDAMENTO         = 'em_andamento'
     STATUS_AGUARDANDO_RESULTADO = 'aguardando_resultado'
     STATUS_AGUARDANDO_PREMIO    = 'aguardando_premio'
-    STATUS_CONCLUIDO            = 'concluido'
+    STATUS_CONCLUIDO            = 'finalizado'
     STATUS_CANCELADO            = 'cancelado'
 
     # ✏️ Lista de estados considerados "ativos" (útil para queries)
