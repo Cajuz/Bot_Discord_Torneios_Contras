@@ -6,11 +6,7 @@ from utils.logger import logger
 
 
 def create_mediator_panel_embed(info: dict | None = None) -> discord.Embed:
-    """
-    Criar embed do painel de mediadores (compatível com código antigo).
-    info pode ser o resultado de mediator_queue.get_queue_info().
-    """
-    # Se não passar info, usa default vazio (evita coroutine aqui)
+   
     total_active = info.get("total_active", 0) if info else 0
     in_queue = info.get("in_queue", 0) if info else 0
 
@@ -23,7 +19,6 @@ def create_mediator_panel_embed(info: dict | None = None) -> discord.Embed:
     embed.add_field(
         name="📊 Status Atual",
         value=(
-            f"**Mediadores Ativos:** {total_active}\n"
             f"**Na Fila:** {in_queue}"
         ),
         inline=False
