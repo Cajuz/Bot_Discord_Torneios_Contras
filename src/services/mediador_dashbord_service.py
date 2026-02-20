@@ -1,6 +1,10 @@
 import discord
 from datetime import datetime, timedelta
 from config.database import db
+import models.match
+import models.mediator
+import models.queue
+
 from utils.logger import logger
 import matplotlib.pyplot as plt
 import io

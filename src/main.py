@@ -25,6 +25,7 @@ from config.channels_config import ChannelsConfig
 from utils.logger import logger, log_success
 from services.channel_service import ChannelService, AVISOS_CHANNEL_NAME
 from services.onboarding_service import OnboardingService
+from config.dashbord import Dashboard
 
 
 load_dotenv()
@@ -84,6 +85,12 @@ async def on_member_remove(member: discord.Member):
 async def menu_partida(ctx):
     await cmd_menu_partida(ctx)
 
+@bot.command(name='dashboard')
+async def dashboard(self, ctx):
+    try:
+        await ctx.send("Dashboard command is working!")
+    except Exception as e:
+        logger.error(f"Erro no comando dashboard: {e}")
 
 @bot.command(name='winner_team')
 async def winner_team(ctx, team: str = None):

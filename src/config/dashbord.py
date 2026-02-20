@@ -1,5 +1,6 @@
 from discord.ext import commands # Adicionado o 'commands' aqui
 from services.mediador_dashbord_service import mediator_dashboard_service
+from views.mediator_dashboard_view import MediatorDashboardView
 
 class Dashboard(commands.Cog): # Adicionado o 'commands.' antes de Cog
 
