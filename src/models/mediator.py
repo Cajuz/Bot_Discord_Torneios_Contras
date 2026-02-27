@@ -48,7 +48,7 @@ class Mediator:
             'is_active':  self.is_active,
             'statistics': {
                 'total_matches':             self.total_matches,
-                'last_assigned_at':          self.last_assigned_at,
+                'last_assigned_1t':          self.last_assigned_at,
                 'matches_in_last_8_minutes': self.matches_in_last_8_minutes,
                 'last_reset_at':             self.last_reset_at
             },
