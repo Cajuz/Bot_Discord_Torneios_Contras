@@ -1,37 +1,34 @@
 import discord
 import matplotlib.pyplot as plt
 import io 
-
-from services.mediador_dashbord_service import mediator_dashboard_service
 from utils.logger import logger
 
-
-
-
 class MediatorDashboardView(discord.ui.View):
-
-    def __init__(self, bot):
+    def __init__(self, service, titulo, dias):
         super().__init__(timeout=None)
-        self.bot = bot
+        self.service = service
+        self.titulo = titulo
+        self.dias = dias
 
-
-    @discord.ui.button(label="Atualizar", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🔄 Atualizar Agora", style=discord.ButtonStyle.primary)
     async def atualizar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Indica que o bot está processando (evita erro de 3 segundos do Discord)
+        await interaction.response.defer(ephemeral=True) 
+        
         try:
-        # Removido o 'self.bot'
-            embed, file = await mediator_dashboard_service.create_embed()
-
+            embed, file = await self.service.create_embed(self.titulo, self.dias)
             if embed:
-            # Importante: ao editar com anexo, usamos 'attachments'
-                await interaction.response.edit_message(
-                embed=embed,
-                attachments=[file],
-                view=self
-            )
+                # Como usamos defer(), agora usamos edit_original_response
+                await interaction.edit_original_response(
+                    content="✅ Dashboard atualizado!",
+                    embed=embed,
+                    attachments=[file],
+                    view=self
+                )
             else:
-                await interaction.response.send_message("Erro ao gerar gráfico.", ephemeral=True)
+                await interaction.followup.send("❌ Erro ao gerar gráfico.", ephemeral=True)
 
         except Exception as e:
             logger.error(f"Erro ao atualizar dashboard: {e}")
-        # O response só pode ser usado uma vez. Se o edit falhar, usamos followup
-            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Erro crítico: {e}", ephemeral=True)
+
