@@ -22,6 +22,7 @@ RULES_CHANNEL_NAME  = "📜regras"
 AVISOS_CHANNEL_NAME = "📢avisos"
 MEDIATOR_ROLE_NAME  = "Controller"
 MEDIATOR_PANEL_NAME = "painel-mediadores"
+DASHBOARD_CHANNEL_NAME = "dashboard-mediadores"
 
 INFO_CATEGORY_NAME  = "ℹ️ INFORMAÇÕES"
 GAME_CATEGORY_BASE  = None  # usa as categorias do ChannelsConfig
@@ -143,9 +144,33 @@ class ChannelService:
                     )
                 }
             )
-            await self._post_mediator_panel(guild, mediator_channel, mediator_role)
+            # ── 6. Canal Dashborad-mediadores ───────────────────────────────
+            dashboard_channel = await self._ensure_text_channel(
+                guild,
+                name=DASHBOARD_CHANNEL_NAME,
+                category=info_category,
+                topic="Dashboard de mediadores.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    member_role:        discord.PermissionOverwrite(read_messages=False),
+                    mediator_role:      discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True
+                    )
+                }
+            )
+            
 
-            # ── 6. Categorias e canais de jogo ────────────────────
+
+
+
+
+            await self._post_mediator_panel(guild, mediator_channel, mediator_role)
+            # ── 7. Categorias e canais de jogo ────────────────────
             for category_name, category_data in ChannelsConfig.CATEGORIES.items():
                 game_category = await self._ensure_category(guild, category_name)
 
@@ -384,7 +409,7 @@ class ChannelService:
         self,
         guild: discord.Guild,
         panel_channel: discord.TextChannel,
-        mediator_role: discord.Role
+        mediator_role: discord.Role,
     ):
         """Posta (ou atualiza) o painel de mediadores"""
         from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView

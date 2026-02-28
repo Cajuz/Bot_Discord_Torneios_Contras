@@ -1,9 +1,12 @@
 import asyncio
 import discord
+from discord import interactions
 from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime
-from discord.errors import NotFound 
+from discord.errors import NotFound
+from discord.ext import commands
+
 
 
 from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
@@ -27,6 +30,8 @@ from utils.logger import logger, log_success
 from services.channel_service import ChannelService, AVISOS_CHANNEL_NAME
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
+from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView
+from datetime import datetime, timedelta
 
 
 
@@ -36,10 +41,18 @@ load_dotenv()
 bot = create_discord_bot()
 
 
+
 onboarding_service = None
 channel_service    = None
 
-
+async def buscar_partidas_do_banco(colecao_db, mediador_id):
+    # Agora a função recebe a coleção por parâmetro
+        cursor = colecao_db.find({'guild_id': mediador_id})
+        partidas = []
+        async for documento in cursor:
+            partidas.append(documento)
+        return partidas
+    
 
 # ==================== EVENTOS ====================
 
@@ -136,6 +149,66 @@ async def cancelar_match_cmd(ctx):
 
 # ==================== COMANDOS ADMINISTRATIVOS ====================
 
+import discord
+from discord.ext import commands
+# IMPORTANTE: Importe de onde você salvou o código anterior (ex: faturamento_service)
+
+# ... configuração do bot ...
+@bot.command(name="faturamento")
+@commands.has_permissions(administrator=True)
+async def faturamento(ctx, mediador_alvo: discord.Member = None):
+    
+    # 1. Defina quem será analisado (quem digitou ou o mencionado)
+    alvo = mediador_alvo or ctx.author
+    
+    # 2. VERIFICAÇÃO DE CARGO
+    cargo_controller = discord.utils.get(ctx.guild.roles, name="Controller")
+    
+    if not cargo_controller or cargo_controller not in ctx.author.roles:
+        await ctx.send(
+            f"❌ {ctx.author.mention}, você precisa do cargo **Controller** para usar este comando!"
+        )
+        return
+
+    try:
+        # --- CHAMADA REAL AO BANCO DE DADOS ---
+        # Certifique-se de que esta função existe no seu código
+        partidas_reais = await buscar_partidas_do_banco(str(alvo.id))
+        
+        # ------------------------------------
+
+        service = FaturamentoMediadorService()
+        
+        # Envia a mensagem inicial usando o 'alvo' e os dados REAIS
+        view = FaturamentoView(
+            service=service,
+            partidas=partidas_reais, 
+            mediador_id=str(alvo.id),
+            nome_mediador=alvo.display_name,
+            avatar_url=alvo.display_avatar.url,
+            # autor_comando=ctx.author # <-- Adicione isso na FaturamentoView para restringir
+        )
+        
+        # Calcula valor inicial (padrão 7 dias)
+        total_inicial = await service.calcular_por_periodo(partidas_reais, str(alvo.id), 7)
+        valor_fmt = f"R$ {total_inicial:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+        embed = discord.Embed(color=0xffa500)
+        embed.title = f"Faturamento de @{alvo.display_name}"
+        embed.add_field(name="Período", value=f"`7 dias`", inline=False)
+        embed.add_field(name="Total", value=f"`{valor_fmt}`", inline=False)
+        embed.set_footer(text="Página 3 de 3")
+        embed.set_thumbnail(url=alvo.display_avatar.url)
+
+        # --- CORREÇÃO AQUI: Use ctx.send em vez de interaction.followup ---
+        await ctx.send(embed=embed, view=view)
+        logger.info(f"✅ Comando de faturamento executado para {alvo.display_name}")
+
+    except Exception as e:
+        logger.error(f"Erro no comando faturamento: {e}")
+        # --- CORREÇÃO AQUI: Use ctx.send em vez de interaction.followup ---
+        await ctx.send(f"❌ Erro ao calcular faturamento: {e}")
+
 
 @bot.command(name='setupcanais')
 @commands.has_permissions(administrator=True)
@@ -154,7 +227,7 @@ async def setup_canais(ctx):
         )
         embed.add_field(
             name="ℹ️ INFORMAÇÕES",
-            value="• 📜regras\n• 📢avisos\n• painel-mediadores",
+            value="• 📜regras\n• 📢avisos\n• painel-mediadores", 
             inline=True
         )
         embed.add_field(

@@ -14,15 +14,18 @@ from discord.errors import NotFound
 from discord.ext import tasks
 from zoneinfo import ZoneInfo # Disponível no Python 3.9+
 from discord.ext import tasks
+from config.channels_config import ChannelsConfig
 
 # Configuração para rodar em ambiente Docker/Linux
 matplotlib.use('Agg')
-horario_brasilia = time(3, 0, 0) 
-channel_id_dashboard = 1473728494503596084 # Coloque o ID do canal aqui
+horario_brasilia = time(3, 0, 0) # 03:00 UTC é 00:00 em Brasília (considerando horário de verão)
+
+channel_dashboard = 147328494503596084 # ID do canal onde o dashboard será enviado
+
 class MediatorDashboardService:
     def __init__(self):
         # ID do canal onde o dashboard será enviado
-        self.channel_id_dashboard = channel_id_dashboard
+        self.channel_id_dashboard = channel_dashboard 
         self.bot = None  # Será setado no setup_hook do bot
 
 
@@ -191,7 +194,7 @@ class MediatorDashboardService:
         """Executa a limpeza, gera e envia os novos dashboards"""
         
         # 1. Defina o ID em uma constante separada
-        ID_DO_CANAL = 1473728494503596084
+        ID_DO_CANAL = 147328494503596084
         
         try:
             # 2. Tente buscar o objeto Canal
