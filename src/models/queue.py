@@ -6,9 +6,9 @@ from bson import ObjectId
 class MatchQueue:
     """Modelo para fila de partidas"""
 
-    # ✏️ Constantes de status (evita strings soltas no código)
     STATUS_WAITING    = "waiting"
     STATUS_CONFIRMING = "confirming"
+    STATUS_MATCHED    = "matched"    # fila virou partida com sucesso
     STATUS_EXPIRED    = "expired"
 
     def __init__(
@@ -23,46 +23,52 @@ class MatchQueue:
         expires_at: datetime = None,
         confirmation_message_id: Optional[int] = None,
         confirmations: List[int] = None,
-        # ✏️ Novos campos para rastrear thread criada e guild
         thread_id: Optional[int] = None,
         guild_id: Optional[int] = None,
+        match_id: Optional[str] = None,   # ← referência à partida gerada
         _id: ObjectId = None
     ):
-        self._id                      = _id or ObjectId()
-        self.channel_name             = channel_name
-        self.bet_value                = bet_value
-        self.gel_type                 = gel_type
-        self.max_players              = max_players
-        self.players                  = players or []
-        self.status                   = status
-        self.created_at               = created_at or datetime.utcnow()
-        self.expires_at               = expires_at
-        self.confirmation_message_id  = confirmation_message_id
-        self.confirmations            = confirmations or []
-        self.thread_id                = thread_id   # ✏️ novo
-        self.guild_id                 = guild_id    # ✏️ novo
+        self._id                     = _id or ObjectId()
+        self.channel_name            = channel_name
+        self.bet_value               = bet_value
+        self.gel_type                = gel_type
+        self.max_players             = max_players
+        self.players                 = players or []
+        self.status                  = status
+        self.created_at              = created_at or datetime.utcnow()
+        self.expires_at              = expires_at
+        self.confirmation_message_id = confirmation_message_id
+        self.confirmations           = confirmations or []
+        self.thread_id               = thread_id
+        self.guild_id                = guild_id
+        self.match_id                = match_id    # ← novo
 
     def to_dict(self) -> dict:
         return {
-            "_id": self._id,
-            "channel_name": self.channel_name,
-            "bet_value": self.bet_value,
-            "gel_type": self.gel_type,
-            "max_players": self.max_players,
-            "players": self.players,
-            "status": self.status,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
+            "_id":                     self._id,
+            "channel_name":            self.channel_name,
+            "bet_value":               self.bet_value,
+            "gel_type":                self.gel_type,
+            "max_players":             self.max_players,
+            "players":                 self.players,
+            "status":                  self.status,
+            "created_at":              self.created_at,
+            "expires_at":              self.expires_at,
             "confirmation_message_id": self.confirmation_message_id,
-            "confirmations": self.confirmations,
-            "thread_id": self.thread_id,    # ✏️ novo
-            "guild_id": self.guild_id,      # ✏️ novo
+            "confirmations":           self.confirmations,
+            "thread_id":               self.thread_id,
+            "guild_id":                self.guild_id,
+            "match_id":                self.match_id,   # ← novo
         }
 
     @staticmethod
     def from_dict(data: dict) -> "MatchQueue":
+        raw_id = data.get("_id")
+        if isinstance(raw_id, str):
+            raw_id = ObjectId(raw_id)
+
         return MatchQueue(
-            _id=data.get("_id"),
+            _id=raw_id,
             channel_name=data.get("channel_name"),
             bet_value=data.get("bet_value"),
             gel_type=data.get("gel_type"),
@@ -73,11 +79,12 @@ class MatchQueue:
             expires_at=data.get("expires_at"),
             confirmation_message_id=data.get("confirmation_message_id"),
             confirmations=data.get("confirmations", []),
-            thread_id=data.get("thread_id"),    # ✏️ novo
-            guild_id=data.get("guild_id"),      # ✏️ novo
+            thread_id=data.get("thread_id"),
+            guild_id=data.get("guild_id"),
+            match_id=data.get("match_id"),   # ← novo
         )
 
-    # ── Helpers existentes (sem alteração) ──────────────────────
+    # ── Helpers ─────────────────────────────────────────────────
 
     def is_full(self) -> bool:
         return len(self.players) >= self.max_players
@@ -103,17 +110,19 @@ class MatchQueue:
     def all_confirmed(self) -> bool:
         return len(self.confirmations) == len(self.players)
 
-    # ✏️ Novos helpers ────────────────────────────────────────────
-
     def pending_confirmations(self) -> List[int]:
-        """Retorna IDs dos jogadores que ainda não confirmaram"""
+        """Jogadores que ainda não confirmaram."""
         return [p for p in self.players if p not in self.confirmations]
 
     def is_expired(self) -> bool:
-        """Verifica se o tempo de confirmação já passou"""
         if self.expires_at is None:
             return False
         return datetime.utcnow() > self.expires_at
+
+    def mark_as_matched(self, match_id: str):
+        """Sela a fila como convertida em partida."""
+        self.status   = self.STATUS_MATCHED
+        self.match_id = match_id
 
     def __repr__(self) -> str:
         return (

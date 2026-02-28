@@ -4,10 +4,10 @@ import discord
 class ServerRules:
     """Configuração das regras do servidor"""
 
-    RULES_TITLE = "📜 Regras do Servidor — X1 Frifas"
+    RULES_TITLE = "📜 Regras do Servidor — TSUKI-SERVER"
 
     RULES_TEXT = """
-**Bem-vindo(a) ao X1 Frifas!**
+**Bem-vindo(a) ao TSUKI-SERVER!**
 
 Leia com atenção antes de entrar no servidor.
 
@@ -58,7 +58,7 @@ Caso não aceite, **você será expulso automaticamente** do servidor.
 O que deseja fazer?
 """
 
-    WELCOME_TITLE = "✅ Bem-vindo(a) ao X1 Frifas!"
+    WELCOME_TITLE = "✅ Bem-vindo(a) ao TSUKI-SERVER!"
     WELCOME_TEXT = """
 **Parabéns! Você agora é um Membro oficial!**
 
@@ -70,7 +70,6 @@ O que deseja fazer?
 
 📋 **Comandos Úteis:**
 • `!help` — Ver todos os comandos
-• `!fila` — Ver fila de mediadores
 • `!perfil` — Ver seu perfil
 
 **Boa sorte nas partidas!** 🏆
