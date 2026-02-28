@@ -27,7 +27,7 @@ logs/
 *.log
 
 # Docker
-docker-compose.override.yml
+docker-compose.yml
 
 # MongoDB
 mongodb_data/
