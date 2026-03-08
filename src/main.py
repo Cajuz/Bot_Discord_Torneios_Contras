@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 from services.thread_log_service import init_thread_log_service
-from src.services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
+from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
 from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
 from services.thread_reuse_service import init_thread_reuse_service
 from views.match_thread_view import (
