@@ -1,14 +1,10 @@
 import asyncio
 import discord
-from discord import interactions
 from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime
-from discord.errors import NotFound
-from discord.ext import commands
 
-
-
+from src.services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
 from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
 from views.match_thread_view import (
     PrizeConfirmView,
@@ -41,10 +37,8 @@ from services.channel_service import (
 )
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
-from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
-from datetime import datetime, timedelta
-
-
+from services.anti_spam_service import AntiSpamService, SPAM_BLOCK_ROLE_NAME
+from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service 
 
 
 load_dotenv()
@@ -53,10 +47,10 @@ load_dotenv()
 bot = create_discord_bot()
 
 
-
 onboarding_service = None
 channel_service    = None
-
+anti_spam_service  = AntiSpamService(bot)
+set_anti_spam_service(anti_spam_service)
     
 
 # ==================== EVENTOS ====================

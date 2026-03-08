@@ -13,12 +13,11 @@ from utils.logger import logger, log_success
 # Constantes
 # ─────────────────────────────────────────────
 
-MEMBER_ROLE_NAME    = "Membro"
-RULES_CHANNEL_NAME  = "📜regras"
-AVISOS_CHANNEL_NAME = "📢avisos"
-MEDIATOR_ROLE_NAME  = "Controller"
-MEDIATOR_PANEL_NAME = "painel-mediadores"
-DASHBOARD_CHANNEL_NAME = "dashboard-mediadores"
+MEMBER_ROLE_NAME   = "Membro"
+MEDIATOR_ROLE_NAME = "Controller"
+SUPPORT_ROLE_NAME  = "Suporte"
+ADM_ROLE_NAME      = "ADM"
+SPAM_BLOCK_ROLE_NAME = "Bloqueado"
 
 MEDIATOR_PANEL_CHANNEL_NAME = "painel-mediadores"
 MEDIATOR_CHAT_CHANNEL_NAME  = "chat-mediadores"
@@ -183,41 +182,19 @@ class ChannelService:
                     )
                 }
             )
-            # ── 6. Canal Dashborad-mediadores ───────────────────────────────
-            dashboard_channel = await self._ensure_text_channel(
-                guild,
-                name=DASHBOARD_CHANNEL_NAME,
-                category=info_category,
-                topic="Dashboard de mediadores.",
-                overwrites={
-                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                    member_role:        discord.PermissionOverwrite(read_messages=False),
-                    mediator_role:      discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=False
-                    ),
-                    guild.me: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True
-                    )
-                }
-            )
-            
-
-
-
-
-
             await self._post_mediator_panel(guild, mediator_channel, mediator_role)
-            # ── 7. Categorias e canais de jogo ────────────────────
-            for category_name, category_data in ChannelsConfig.CATEGORIES.items():
-                game_category = await self._ensure_category(guild, category_name)
 
-                # Canais de jogo: @everyone bloqueado, Membro liberado
-                game_overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(
-                        read_messages=False,
-                        send_messages=False
+            await self._ensure_text_channel(
+                guild,
+                name=MEDIATOR_CHAT_CHANNEL_NAME,
+                category=controller_category,
+                topic="Chat interno da equipe de mediadores.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    member_role:        discord.PermissionOverwrite(view_channel=False),
+                    mediator_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
                     ),
                     adm_role: discord.PermissionOverwrite(
                         view_channel=True,
@@ -228,7 +205,7 @@ class ChannelService:
                         send_messages=True
                     )
                 }
-            
+            )
 
             # ── 6. SUPORTE (posição 4) ─────────────────────────────
             await self._setup_support_category(
@@ -674,13 +651,7 @@ class ChannelService:
         )
         await rules_channel.send(embeds=[rules_embed, info_embed])
 
-    async def _post_mediator_panel(
-        self,
-        guild: discord.Guild,
-        panel_channel: discord.TextChannel,
-        mediator_role: discord.Role,
-    ):
-        """Posta (ou atualiza) o painel de mediadores"""
+    async def _post_mediator_panel(self, guild, panel_channel, mediator_role):
         from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
 
         async for msg in panel_channel.history(limit=10):
