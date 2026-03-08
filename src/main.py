@@ -30,8 +30,9 @@ from utils.logger import logger, log_success
 from services.channel_service import ChannelService, AVISOS_CHANNEL_NAME
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
-from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView
+from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
 from datetime import datetime, timedelta
+
 
 
 
@@ -45,13 +46,6 @@ bot = create_discord_bot()
 onboarding_service = None
 channel_service    = None
 
-async def buscar_partidas_do_banco(colecao_db, mediador_id):
-    # Agora a função recebe a coleção por parâmetro
-        cursor = colecao_db.find({'guild_id': mediador_id})
-        partidas = []
-        async for documento in cursor:
-            partidas.append(documento)
-        return partidas
     
 
 # ==================== EVENTOS ====================
@@ -147,68 +141,62 @@ async def cancelar_match_cmd(ctx):
 
 
 
+@bot.command(name="faturamentos_geral")
+@commands.has_permissions(administrator=True) # Recomendado: apenas admins podem ver o geral
+async def faturamentos_geral(ctx):
+    """Exibe a interface para gerar o relatório de faturamento de todos os mediadores."""
+    
+    # Criamos um embed simples para apresentar o botão
+    embed = discord.Embed(
+        title="📊 Central de Faturamento Geral",
+        description=(
+            "Clique no botão abaixo para processar os dados de todos os mediadores "
+            "e gerar o ranking atualizado em formato `.txt`."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="O processamento pode levar alguns segundos dependendo do volume de dados.")
+
+    # Instancia a view que você já criou
+    view = RelatorioGeralView()
+    
+    await ctx.send(embed=embed, view=view)
+
+# Opcional: Tratamento de erro caso alguém sem permissão use o comando
+@faturamentos_geral.error
+async def faturamentos_geral_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Você não tem permissão para visualizar o faturamento geral.")
+
+
+
 # ==================== COMANDOS ADMINISTRATIVOS ====================
 
-import discord
-from discord.ext import commands
-# IMPORTANTE: Importe de onde você salvou o código anterior (ex: faturamento_service)
 
-# ... configuração do bot ...
+
 @bot.command(name="faturamento")
-@commands.has_permissions(administrator=True)
-async def faturamento(ctx, mediador_alvo: discord.Member = None):
+async def faturamento(ctx, mediador_id: str = None):
+    """Comando !faturamento ID"""
     
-    # 1. Defina quem será analisado (quem digitou ou o mencionado)
-    alvo = mediador_alvo or ctx.author
+    # Se não passar ID, usa o ID de quem chamou
+    target_id = mediador_id if mediador_id else str(ctx.author.id)
     
-    # 2. VERIFICAÇÃO DE CARGO
-    cargo_controller = discord.utils.get(ctx.guild.roles, name="Controller")
+    # Busca membro para pegar nome e avatar
+    member = ctx.guild.get_member(int(target_id))
+    nome = member.display_name if member else "Mediador"
+    avatar = member.display_avatar.url if member else ctx.author.display_avatar.url
+
+    service = FaturamentoMediadorService()
+    partidas = await service.buscar_partidas_do_banco(target_id)
     
-    if not cargo_controller or cargo_controller not in ctx.author.roles:
-        await ctx.send(
-            f"❌ {ctx.author.mention}, você precisa do cargo **Controller** para usar este comando!"
-        )
-        return
+    view = FaturamentoView(service, partidas, target_id, nome, avatar)
+    embed = await view.gerar_embed(1) # Padrão Hoje
+    
+    await ctx.send(embed=embed, view=view)
 
-    try:
-        # --- CHAMADA REAL AO BANCO DE DADOS ---
-        # Certifique-se de que esta função existe no seu código
-        partidas_reais = await buscar_partidas_do_banco(str(alvo.id))
-        
-        # ------------------------------------
 
-        service = FaturamentoMediadorService()
-        
-        # Envia a mensagem inicial usando o 'alvo' e os dados REAIS
-        view = FaturamentoView(
-            service=service,
-            partidas=partidas_reais, 
-            mediador_id=str(alvo.id),
-            nome_mediador=alvo.display_name,
-            avatar_url=alvo.display_avatar.url,
-            # autor_comando=ctx.author # <-- Adicione isso na FaturamentoView para restringir
-        )
-        
-        # Calcula valor inicial (padrão 7 dias)
-        total_inicial = await service.calcular_por_periodo(partidas_reais, str(alvo.id), 7)
-        valor_fmt = f"R$ {total_inicial:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
 
-        embed = discord.Embed(color=0xffa500)
-        embed.title = f"Faturamento de @{alvo.display_name}"
-        embed.add_field(name="Período", value=f"`7 dias`", inline=False)
-        embed.add_field(name="Total", value=f"`{valor_fmt}`", inline=False)
-        embed.set_footer(text="Página 3 de 3")
-        embed.set_thumbnail(url=alvo.display_avatar.url)
-
-        # --- CORREÇÃO AQUI: Use ctx.send em vez de interaction.followup ---
-        await ctx.send(embed=embed, view=view)
-        logger.info(f"✅ Comando de faturamento executado para {alvo.display_name}")
-
-    except Exception as e:
-        logger.error(f"Erro no comando faturamento: {e}")
-        # --- CORREÇÃO AQUI: Use ctx.send em vez de interaction.followup ---
-        await ctx.send(f"❌ Erro ao calcular faturamento: {e}")
-
+    
 
 @bot.command(name='setupcanais')
 @commands.has_permissions(administrator=True)

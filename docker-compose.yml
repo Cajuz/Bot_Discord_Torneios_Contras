@@ -1,0 +1,84 @@
+version: '3.9'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: x1_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: adm
+      MONGO_INITDB_ROOT_PASSWORD: frifas123
+      MONGO_INITDB_DATABASE: x1_bot
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - x1_network
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Discord Bot
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: x1_discord_bot
+    command: python src/main.py
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_PREFIX: ${DISCORD_PREFIX:-.}
+      DISCORD_SERVER_ID: ${DISCORD_SERVER_ID}
+      # Mongo DB
+      MONGODB_URI: mongodb+srv://x1_bot_user:frifas123@x1-bot-cluster.p1wq1wh.mongodb.net/?retryWrites=true&w=majority&appName=X1-Bot-Cluster
+      MONGODB_DB_NAME: x1_bot
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - x1_network
+    restart: unless-stopped
+  api:
+     build:
+       context: .
+       dockerfile: Dockerfile
+     container_name: x1_api
+     command: python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+     environment:
+       MONGODB_URI: mongodb+srv://x1_bot_user:frifas123@x1-bot-cluster.p1wq1wh.mongodb.net/?retryWrites=true&w=majority&appName=X1-Bot-Cluster
+       MONGODB_DB_NAME: x1_bot
+       ENVIRONMENT: ${ENVIRONMENT:-development}
+       PYTHONPATH: /app
+     ports:
+       - "8000:8000"
+     volumes:
+       - ./src:/app/src
+     depends_on:
+       mongodb:
+         condition: service_healthy
+     networks:
+       - x1_network
+     restart: unless-stopped
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+
+networks:
+  x1_network:
+    driver: bridge
