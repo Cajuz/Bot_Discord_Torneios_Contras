@@ -1,10 +1,14 @@
+# main.py
+
 import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime
 
+from services.thread_log_service import init_thread_log_service
 from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
+from services.thread_reuse_service import init_thread_reuse_service
 from views.match_thread_view import (
     PrizeConfirmView,
     cmd_menu_partida,
@@ -37,19 +41,19 @@ from services.channel_service import (
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
 from services.anti_spam_service import AntiSpamService, SPAM_BLOCK_ROLE_NAME
-from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service 
+from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service
 
 
 load_dotenv()
 
-
 bot = create_discord_bot()
 
-
-onboarding_service = None
-channel_service    = None
-anti_spam_service  = AntiSpamService(bot)
+thread_reuse_service = None
+onboarding_service   = None
+channel_service      = None
+anti_spam_service    = AntiSpamService(bot)
 set_anti_spam_service(anti_spam_service)
+
 
 # ==================== EVENTOS ====================
 
@@ -58,27 +62,42 @@ set_anti_spam_service(anti_spam_service)
 async def on_ready():
     print(f'✅ Bot conectado como {bot.user}')
     await mediator_queue.initialize()
+
     for guild in bot.guilds:
         await mediator_queue.sync_mediators_by_role(guild, MEDIATOR_ROLE_NAME)
         print(f"✅ Mediadores sincronizados em {guild.name}")
 
-        # Anti-spam: garante cargo + permissões e restaura bloqueados do banco
         try:
             await anti_spam_service.ensure_role_and_overwrites(guild)
             await anti_spam_service.restore_blocked_members(guild)
         except Exception as e:
             logger.error(f"Erro ao inicializar AntiSpam em {guild.name}: {e}")
 
-    # Views persistentes — sobrevivem ao reinício do bot
+    # ── NOVO: inicializa o serviço de reuso de threads ────────
+    global thread_reuse_service
+    thread_reuse_service = init_thread_reuse_service(bot)
+    logger.info("✅ ThreadReuseService inicializado")
+    init_thread_log_service(bot)   
+    logger.info("✅ ThreadLogService inicializado")
+
+    # Valida pool ao iniciar (remove entradas inválidas do banco)
+    for guild in bot.guilds:
+        try:
+            result = await thread_reuse_service.validate_pool(guild)
+            logger.info(f"Pool validado em {guild.name}: {result}")
+        except Exception as e:
+            logger.error(f"Erro ao validar pool em {guild.name}: {e}")
+
+    # ── Views persistentes ────────────────────────────────────
     bot.add_view(PrizeConfirmView(match_id="placeholder", winner_players=[], winner_team="blue"))
-    bot.add_view(TicketPanelView(bot))       # botões de #suporte
-    bot.add_view(SupportCardView())          # botão Assumir nos cards
-    bot.add_view(SpamBlockCardView())       # botão Desbloquear por Spam nos cards
+    bot.add_view(TicketPanelView(bot))
+    bot.add_view(SupportCardView())
+    bot.add_view(SpamBlockCardView())
 
     if not mediator_dashboard_service.daily_update.is_running():
         mediator_dashboard_service.bot = bot
         mediator_dashboard_service.daily_update.start()
-
+    
     print('🚀 Bot pronto!')
 
 
@@ -100,7 +119,6 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_member_join(member: discord.Member):
     try:
-        # reaplica bloqueio se já estiver bloqueado no banco
         if anti_spam_service:
             await anti_spam_service.handle_member_join(member)
 
@@ -206,7 +224,6 @@ async def setup_canais(ctx):
         msg = await ctx.send("⏳ Configurando servidor completo... (pode demorar alguns segundos)")
         await channel_service.setup_all_channels(ctx.guild)
 
-        # Anti-spam: reforça overwrites após o setup
         try:
             await anti_spam_service.ensure_role_and_overwrites(ctx.guild)
         except Exception as e:
@@ -217,31 +234,15 @@ async def setup_canais(ctx):
             description="Toda a estrutura foi criada/atualizada com sucesso.",
             color=discord.Color.green()
         )
-        embed.add_field(
-            name="📈 ANALYTICS",
-            value="• dashboard-partidas",
-            inline=True
-        )
-        embed.add_field(
-            name="ℹ️ INFORMAÇÕES",
-            value="• 📜regras\n• 📢avisos",
-            inline=True
-        )
-        embed.add_field(
-            name="🧑‍⚖️ MEDIADORES",
-            value="• painel-mediadores\n• chat-mediadores",
-            inline=True
-        )
+        embed.add_field(name="📈 ANALYTICS",    value="• dashboard-partidas\n• historico-partidas",   inline=True)
+        embed.add_field(name="ℹ️ INFORMAÇÕES",  value="• 📜regras\n• 📢avisos",                       inline=True)
+        embed.add_field(name="🧑‍⚖️ MEDIADORES", value="• painel-mediadores\n• chat-mediadores",        inline=True)
         embed.add_field(
             name="🎫 SUPORTE",
             value="• suporte\n• chat-suporte\n• chamados-suporte\n• chat-chamados",
             inline=True
         )
-        embed.add_field(
-            name="🎭 Cargos",
-            value="• Membro\n• Controller\n• Suporte\n• ADM",
-            inline=True
-        )
+        embed.add_field(name="🎭 Cargos",       value="• Membro\n• Controller\n• Suporte\n• ADM",      inline=True)
         embed.add_field(
             name="💰 Valores",
             value="R$2 • R$5 • R$10 • R$20 • R$50 • R$100 • R$200",
@@ -404,14 +405,14 @@ async def stats_onboarding(ctx):
         taxa      = (aceitos / total * 100) if total > 0 else 0.0
 
         embed = discord.Embed(title="📊 Estatísticas de Onboarding", color=discord.Color.blurple())
-        embed.add_field(name="📥 Total",          value=f"**{total}**",     inline=False)
-        embed.add_field(name="✅ Aceitaram",      value=f"**{aceitos}**",   inline=True)
-        embed.add_field(name="❌ Recusaram",      value=f"**{recusados}**", inline=True)
-        embed.add_field(name="⏰ Timeout",        value=f"**{timeout}**",   inline=True)
-        embed.add_field(name="🚫 DM Bloqueada",   value=f"**{dm_bloq}**",   inline=True)
-        embed.add_field(name="⏳ Pendentes",      value=f"**{pendentes}**", inline=True)
+        embed.add_field(name="📥 Total",           value=f"**{total}**",           inline=False)
+        embed.add_field(name="✅ Aceitaram",       value=f"**{aceitos}**",         inline=True)
+        embed.add_field(name="❌ Recusaram",       value=f"**{recusados}**",       inline=True)
+        embed.add_field(name="⏰ Timeout",         value=f"**{timeout}**",         inline=True)
+        embed.add_field(name="🚫 DM Bloqueada",    value=f"**{dm_bloq}**",         inline=True)
+        embed.add_field(name="⏳ Pendentes",       value=f"**{pendentes}**",       inline=True)
         embed.add_field(name="🛑 Bloqueados Spam", value=f"**{bloqueados_spam}**", inline=True)
-        embed.add_field(name="📈 Taxa Aceitação", value=f"**{taxa:.1f}%**", inline=False)
+        embed.add_field(name="📈 Taxa Aceitação",  value=f"**{taxa:.1f}%**",       inline=False)
         embed.set_footer(text="collection: users | MongoDB")
         embed.timestamp = datetime.utcnow()
         await ctx.reply(embed=embed)
@@ -784,6 +785,105 @@ async def ver_fila(ctx):
         await ctx.reply(f"❌ Erro: {str(e)}")
 
 
+# ==================== THREAD POOL (NOVOS) ====================
+
+
+@bot.command(name='threadstatus')
+@commands.has_permissions(administrator=True)
+async def thread_status(ctx):
+    """!threadstatus — status do pool e limite do servidor"""
+    from services.thread_reuse_service import thread_reuse_service as trs
+    if not trs:
+        await ctx.reply("❌ ThreadReuseService não inicializado.")
+        return
+
+    health = await trs.get_health(ctx.guild)
+    embed  = discord.Embed(
+        title="🧵 Status do Sistema de Threads",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(
+        name="📦 Pool (disponíveis)",
+        value=f"**{health['pool_total']}** threads prontas para reuso",
+        inline=False
+    )
+    embed.add_field(name="⚔️ Em partida agora",  value=f"**{health['active_matches']}**",        inline=True)
+    embed.add_field(name="📊 Limite Discord",     value=f"**{health['live_discord']}/1.000**",    inline=True)
+    embed.add_field(name="🟢 Margem disponível",  value=f"**{health['margem']}**",                inline=True)
+
+    if health.get('pool_by_channel'):
+        lines = []
+        for cid, n in health['pool_by_channel'].items():
+            ch   = ctx.guild.get_channel(int(cid))
+            name = f"#{ch.name}" if ch else cid
+            lines.append(f"• `{name}`: {n}")
+        embed.add_field(name="📋 Pool por canal", value="\n".join(lines), inline=False)
+
+    if health['margem'] < 100:
+        embed.add_field(
+            name="⚠️ ATENÇÃO",
+            value="Margem abaixo de 100! Use `!preaquecerpool` para garantir threads arquivadas.",
+            inline=False
+        )
+    embed.set_footer(text="Threads arquivadas não contam no limite de 1.000")
+    await ctx.reply(embed=embed)
+
+
+@bot.command(name='preaquecerpool')
+@commands.has_permissions(administrator=True)
+async def preaquecer_pool(ctx, canal: discord.TextChannel = None, quantidade: int = 3):
+    """!preaquecerpool [#canal] [quantidade] — pré-aquece o pool com threads arquivadas"""
+    from services.thread_reuse_service import thread_reuse_service as trs
+    if not trs:
+        await ctx.reply("❌ ThreadReuseService não inicializado.")
+        return
+
+    channel = canal or ctx.channel
+
+    if not 1 <= quantidade <= 10:
+        await ctx.reply("❌ Quantidade deve ser entre 1 e 10.")
+        return
+
+    slow = await trs.check_slow_mode(channel)
+    if slow > 0:
+        await ctx.reply(
+            f"⚠️ Canal `#{channel.name}` tem slow mode de **{slow}s**. "
+            f"Pré-aquecimento pode ser mais lento."
+        )
+
+    msg     = await ctx.reply(f"⏳ Pré-aquecendo {quantidade} thread(s) em {channel.mention}...")
+    created = await trs.preaquecer(channel=channel, quantidade=quantidade)
+
+    embed = discord.Embed(
+        title="✅ Pré-aquecimento Concluído",
+        description=f"**{created}** thread(s) criadas e arquivadas em {channel.mention}",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text="Threads arquivadas não contam no limite de 1.000 do Discord")
+    await msg.edit(content=None, embed=embed)
+
+
+@bot.command(name='validarpool')
+@commands.has_permissions(administrator=True)
+async def validar_pool(ctx):
+    """!validarpool — remove entradas inválidas do banco de threads"""
+    from services.thread_reuse_service import thread_reuse_service as trs
+    if not trs:
+        await ctx.reply("❌ ThreadReuseService não inicializado.")
+        return
+
+    msg    = await ctx.reply("🔍 Validando pool de threads...")
+    result = await trs.validate_pool(ctx.guild)
+
+    embed = discord.Embed(
+        title="🧹 Pool Validado",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="✅ Threads válidas",  value=str(result.get('valid', 0)),   inline=True)
+    embed.add_field(name="🗑️ Entradas removidas", value=str(result.get('removed', 0)), inline=True)
+    await msg.edit(content=None, embed=embed)
+
+
 # ==================== PERFIL E STATUS ====================
 
 
@@ -856,10 +956,10 @@ async def help_command(ctx):
         description="Comandos disponíveis para jogadores.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",             inline=False)
-    embed.add_field(name="!partidas",           value="Ver partidas ativas",                   inline=False)
-    embed.add_field(name="!statuscanal [nome]", value="Ver estatísticas de um canal",         inline=False)
-    embed.add_field(name="!fila",               value="Ver a fila de mediadores disponíveis", inline=False)
+    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",              inline=False)
+    embed.add_field(name="!partidas",           value="Ver partidas ativas",                    inline=False)
+    embed.add_field(name="!statuscanal [nome]", value="Ver estatísticas de um canal",           inline=False)
+    embed.add_field(name="!fila",               value="Ver a fila de mediadores disponíveis",   inline=False)
     embed.add_field(
         name="ℹ️ Como jogar",
         value=(
@@ -907,17 +1007,6 @@ async def help_suporte(ctx):
         ),
         inline=False
     )
-    embed.add_field(name="━━ 💬 CANAIS ━━", value="\u200b", inline=False)
-    embed.add_field(
-        name="Canais disponíveis",
-        value=(
-            "`#suporte` — painel de tickets (leitura)\n"
-            "`#chat-suporte` — conversa com membros\n"
-            "`#chamados-suporte` — cards dos tickets\n"
-            "`#chat-chamados` — chat interno da equipe"
-        ),
-        inline=False
-    )
     embed.set_footer(text="Membros: !help | Mediadores: !help_med | Admins: !help_adm")
     await ctx.reply(embed=embed)
 
@@ -930,17 +1019,17 @@ async def help_mediador(ctx):
         description="Use dentro da thread de partida. Sua mensagem é apagada automaticamente.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="━━ 🎮 PARTIDA ━━",              value="\u200b", inline=False)
-    embed.add_field(name="!menu_partida",                value="Recebe o painel de controle via DM",                        inline=False)
-    embed.add_field(name="!confirmar_pagamento",         value="Confirma recebimento dos pagamentos dos jogadores",          inline=False)
-    embed.add_field(name="!iniciar_partida",             value="Inicia a partida após confirmar pagamento",                  inline=False)
-    embed.add_field(name="!winner_team blue|red",        value="Declara o time vencedor",                                   inline=False)
-    embed.add_field(name="!prize",                       value="Confirma que o prêmio foi entregue ao vencedor",            inline=False)
-    embed.add_field(name="!cancelar_match [motivo]",     value="Cancela a partida da thread atual",                          inline=False)
-    embed.add_field(name="━━ 📋 FILA ━━",                value="\u200b", inline=False)
-    embed.add_field(name="!addmediador",                 value="Entra na fila de mediadores disponíveis",                    inline=False)
-    embed.add_field(name="!removemediador",              value="Sai da fila de mediadores",                                  inline=False)
-    embed.add_field(name="━━ ⚠️ FLUXO OBRIGATÓRIO ━━",   value="\u200b", inline=False)
+    embed.add_field(name="━━ 🎮 PARTIDA ━━",           value="\u200b", inline=False)
+    embed.add_field(name="!menu_partida",               value="Recebe o painel de controle via DM",                       inline=False)
+    embed.add_field(name="!confirmar_pagamento",        value="Confirma recebimento dos pagamentos dos jogadores",         inline=False)
+    embed.add_field(name="!iniciar_partida",            value="Inicia a partida após confirmar pagamento",                 inline=False)
+    embed.add_field(name="!winner_team blue|red",       value="Declara o time vencedor",                                   inline=False)
+    embed.add_field(name="!prize",                      value="Confirma que o prêmio foi entregue ao vencedor",            inline=False)
+    embed.add_field(name="!cancelar_match [motivo]",    value="Cancela a partida da thread atual",                         inline=False)
+    embed.add_field(name="━━ 📋 FILA ━━",               value="\u200b", inline=False)
+    embed.add_field(name="!addmediador",                value="Entra na fila de mediadores disponíveis",                   inline=False)
+    embed.add_field(name="!removemediador",             value="Sai da fila de mediadores",                                 inline=False)
+    embed.add_field(name="━━ ⚠️ FLUXO OBRIGATÓRIO ━━",  value="\u200b", inline=False)
     embed.add_field(
         name="Ordem dos comandos",
         value=(
@@ -963,30 +1052,30 @@ async def help_admin(ctx):
         description="ADM tem acesso a todos os comandos de mediador e suporte.",
         color=discord.Color.red()
     )
-    embed.add_field(name="━━ 🛠️ SETUP ━━",                   value="\u200b", inline=False)
-    embed.add_field(name="!setupcanais",                      value="Configura toda estrutura do servidor (canais + cargos)", inline=False)
-    embed.add_field(name="!atualizarcards [#canal]",          value="Recria os cards de um canal específico",                 inline=False)
-    embed.add_field(name="!atualizartodos",                   value="Recria os cards de todos os canais de partida",         inline=False)
-    embed.add_field(name="!atualizarmediadores",              value="Atualiza o painel no #painel-mediadores",               inline=False)
-    embed.add_field(name="!sincmediadores",                   value="Sincroniza a fila pelo cargo Controller",               inline=False)
-    embed.add_field(name="!dashboard",                        value="Força atualização do dashboard Analytics",               inline=False)
-    embed.add_field(name="━━ 🎫 SUPORTE ━━",                  value="\u200b", inline=False)
-    embed.add_field(
-        name="!concluir_chamado <id>",
-        value="Conclui qualquer chamado (ADM ignora restrição de atendente)\n▸ Apenas em `#chamados-suporte`",
-        inline=False
-    )
-    embed.add_field(name="━━ 🎮 PARTIDAS ━━",                 value="\u200b", inline=False)
-    embed.add_field(name="!cancelarpartida <id> [motivo]",    value="Cancela qualquer partida por ID",                        inline=False)
-    embed.add_field(name="!forcarconcluir <id>",              value="Força finalização de qualquer partida",                  inline=False)
-    embed.add_field(name="!inspecionar <id>",                 value="Exibe todos os campos da partida no banco",              inline=False)
-    embed.add_field(name="!simularfila [canal] [v] [gel]",    value="Simula fila completa para testes",                       inline=False)
-    embed.add_field(name="━━ 📊 INFO ━━",                     value="\u200b", inline=False)
-    embed.add_field(name="!stats",                            value="Estatísticas de onboarding do servidor",                 inline=False)
-    embed.add_field(name="!aviso <texto>",                    value="Posta aviso no #avisos com @everyone",                   inline=False)
-    embed.add_field(name="!testarregras",                     value="Testa o fluxo de onboarding via DM (sem kick)",          inline=False)
-    embed.add_field(name="!bloquear @user [motivo]",      value="Bloqueia manualmente um membro",                inline=False)
-    embed.add_field(name="!desbloquear @user",            value="Desbloqueia um membro bloqueado",               inline=False)
+    embed.add_field(name="━━ 🛠️ SETUP ━━",                    value="\u200b", inline=False)
+    embed.add_field(name="!setupcanais",                       value="Configura toda estrutura do servidor (canais + cargos)",  inline=False)
+    embed.add_field(name="!atualizarcards [#canal]",           value="Recria os cards de um canal específico",                  inline=False)
+    embed.add_field(name="!atualizartodos",                    value="Recria os cards de todos os canais de partida",           inline=False)
+    embed.add_field(name="!atualizarmediadores",               value="Atualiza o painel no #painel-mediadores",                 inline=False)
+    embed.add_field(name="!sincmediadores",                    value="Sincroniza a fila pelo cargo Controller",                 inline=False)
+    embed.add_field(name="!dashboard",                         value="Força atualização do dashboard Analytics",                inline=False)
+    embed.add_field(name="━━ 🧵 THREADS ━━",                   value="\u200b", inline=False)
+    embed.add_field(name="!threadstatus",                      value="Exibe pool, partidas ativas e limite do servidor",        inline=False)
+    embed.add_field(name="!preaquecerpool [#canal] [qtd]",     value="Pré-cria threads arquivadas para evitar limite Discord",  inline=False)
+    embed.add_field(name="!validarpool",                       value="Remove entradas inválidas do pool no banco",              inline=False)
+    embed.add_field(name="━━ 🎫 SUPORTE ━━",                   value="\u200b", inline=False)
+    embed.add_field(name="!concluir_chamado <id>",             value="Conclui qualquer chamado (ADM ignora restrição)",         inline=False)
+    embed.add_field(name="━━ 🎮 PARTIDAS ━━",                  value="\u200b", inline=False)
+    embed.add_field(name="!cancelarpartida <id> [motivo]",     value="Cancela qualquer partida por ID",                        inline=False)
+    embed.add_field(name="!forcarconcluir <id>",               value="Força finalização de qualquer partida",                  inline=False)
+    embed.add_field(name="!inspecionar <id>",                  value="Exibe todos os campos da partida no banco",              inline=False)
+    embed.add_field(name="!simularfila [canal] [v] [gel]",     value="Simula fila completa para testes",                       inline=False)
+    embed.add_field(name="━━ 📊 INFO ━━",                      value="\u200b", inline=False)
+    embed.add_field(name="!stats",                             value="Estatísticas de onboarding do servidor",                 inline=False)
+    embed.add_field(name="!aviso <texto>",                     value="Posta aviso no #avisos com @everyone",                   inline=False)
+    embed.add_field(name="!testarregras",                      value="Testa o fluxo de onboarding via DM (sem kick)",          inline=False)
+    embed.add_field(name="!bloquear @user [motivo]",           value="Bloqueia manualmente um membro",                        inline=False)
+    embed.add_field(name="!desbloquear @user",                 value="Desbloqueia um membro bloqueado",                       inline=False)
     embed.set_footer(text="Membros: !help | Suporte: !help_sup | Mediadores: !help_med")
     await ctx.reply(embed=embed)
 
