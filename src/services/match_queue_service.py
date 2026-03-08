@@ -15,9 +15,9 @@ from utils.logger import logger
 class MatchQueueService:
 
     def __init__(self):
-        self.active_queues: Dict[str, MatchQueue] = {}
-        self._queue_locks: Dict[str, asyncio.Lock] = {}
-        self._match_creation_locks: Dict[str, bool] = {}
+        self.active_queues:          Dict[str, MatchQueue] = {}
+        self._queue_locks:           Dict[str, asyncio.Lock] = {}
+        self._match_creation_locks:  Dict[str, bool] = {}
 
     # ─────────────────────────────────────────────
     # Helpers de chave e fila
@@ -34,11 +34,11 @@ class MatchQueueService:
     async def get_or_create_queue(
         self,
         channel_name: str,
-        bet_value: float,
-        gel_type: str,
-        max_players: int
+        bet_value:    float,
+        gel_type:     str,
+        max_players:  int
     ) -> MatchQueue:
-        queue_key = self.get_queue_key(channel_name, bet_value, gel_type)
+        queue_key  = self.get_queue_key(channel_name, bet_value, gel_type)
 
         async with self._get_lock(queue_key):
             collection = db.get_collection('match_queues')
@@ -70,10 +70,10 @@ class MatchQueueService:
     async def add_player_to_queue(
         self,
         channel_name: str,
-        bet_value: float,
-        gel_type: str,
-        max_players: int,
-        player_id: int
+        bet_value:    float,
+        gel_type:     str,
+        max_players:  int,
+        player_id:    int
     ) -> tuple[bool, MatchQueue, str]:
         queue_key = self.get_queue_key(channel_name, bet_value, gel_type)
 
@@ -95,9 +95,9 @@ class MatchQueueService:
     async def remove_player_from_queue(
         self,
         channel_name: str,
-        bet_value: float,
-        gel_type: str,
-        player_id: int
+        bet_value:    float,
+        gel_type:     str,
+        player_id:    int
     ) -> tuple[bool, Optional[MatchQueue]]:
         queue_key = self.get_queue_key(channel_name, bet_value, gel_type)
 
@@ -121,21 +121,73 @@ class MatchQueueService:
             return False, None
 
     # ─────────────────────────────────────────────
+    # Opção A — lock/unlock visual do card
+    # ─────────────────────────────────────────────
+
+    async def _set_card_locked(
+        self,
+        channel:   discord.TextChannel,
+        bet_value: float,
+        gel_type:  str,
+        locked:    bool
+    ):
+        """
+        Edita o card no canal para estado bloqueado/desbloqueado.
+        locked=True  → botão desabilitado, embed laranja com ⏳
+        locked=False → botão normal, embed dourado
+        """
+        try:
+            from views.match_queue_view import create_match_queue_embed, MatchQueueView
+
+            q_normal   = await self.get_queue_status(channel.name, bet_value, "normal")
+            q_infinito = await self.get_queue_status(channel.name, bet_value, "infinito")
+
+            normal_count   = len(q_normal.players)   if q_normal   else 0
+            infinito_count = len(q_infinito.players) if q_infinito else 0
+
+            locked_gel = gel_type if locked else None
+
+            embed = create_match_queue_embed(
+                channel_name         = channel.name,
+                bet_value            = bet_value,
+                queue_normal_count   = normal_count,
+                queue_infinito_count = infinito_count,
+                locked_gel           = locked_gel,
+            )
+            view = MatchQueueView(
+                channel_name = channel.name,
+                bet_value    = bet_value,
+                locked_gel   = locked_gel,
+            )
+
+            async for msg in channel.history(limit=50):
+                if msg.author == channel.guild.me and msg.embeds:
+                    if f"R$ {bet_value:.2f}" in (msg.embeds[0].title or ""):
+                        await msg.edit(embed=embed, view=view)
+                        break
+
+        except Exception as e:
+            logger.warning(f"[Queue] Erro ao atualizar lock do card: {e}")
+
+    # ─────────────────────────────────────────────
     # Fila cheia → cria tópico e inicia confirmação
     # ─────────────────────────────────────────────
 
     async def start_confirmation_timer(
         self,
-        queue: MatchQueue,
-        bot: discord.Client,
+        queue:   MatchQueue,
+        bot:     discord.Client,
         channel: discord.TextChannel
     ):
         try:
-            from services.thread_reuse_service import thread_reuse_service  # ← import lazy
+            from services.thread_reuse_service import thread_reuse_service
 
             queue.status     = MatchQueue.STATUS_CONFIRMING
             queue.expires_at = datetime.utcnow() + timedelta(seconds=300)
             await self._save_queue(queue)
+
+            # ── Opção A: trava o card imediatamente ───────────
+            await self._set_card_locked(channel, queue.bet_value, queue.gel_type, locked=True)
 
             guild     = channel.guild
             players   = list(queue.players)
@@ -148,18 +200,19 @@ class MatchQueueService:
                 f"{queue.channel_name.upper()}"
             )
 
-            # ← NOVO: usa pool em vez de criar sempre
             confirm_thread = await thread_reuse_service.get_or_create_thread(
-                channel=channel,
-                thread_name=thread_name,
-                player_ids=players,
-                guild=guild,
+                channel     = channel,
+                thread_name = thread_name,
+                player_ids  = players,
+                guild       = guild,
             )
 
             if not confirm_thread:
-                logger.error(f"[Queue] Não foi possível obter thread para #{channel.name} — abortando confirmação")
+                logger.error(f"[Queue] Não foi possível obter thread para #{channel.name} — abortando")
                 queue.status = MatchQueue.STATUS_WAITING
                 await self._save_queue(queue)
+                # desbloqueia se falhou
+                await self._set_card_locked(channel, queue.bet_value, queue.gel_type, locked=False)
                 return
 
             queue.thread_id = confirm_thread.id
@@ -171,7 +224,7 @@ class MatchQueueService:
             mentions = " ".join(f"<@{uid}>" for uid in players)
             message  = await confirm_thread.send(content=mentions, embed=embed, view=view)
 
-            view.conf_msg = message
+            view.conf_msg                 = message
             queue.confirmation_message_id = message.id
             await self._save_queue(queue)
 
@@ -190,9 +243,9 @@ class MatchQueueService:
 
     def _build_confirmation_embed(
         self,
-        queue: MatchQueue,
+        queue:     MatchQueue,
         time_blue: List[int],
-        time_red: List[int],
+        time_red:  List[int],
         remaining: int
     ) -> discord.Embed:
         blue_str = "\n".join(
@@ -210,7 +263,9 @@ class MatchQueueService:
         secs      = remaining % 60
 
         embed = discord.Embed(
-            title="⚡ PARTIDA ENCONTRADA — Confirme sua presença!",
+            title=(
+                "⚡ PARTIDA ENCONTRADA — Confirme sua presença!"
+            ),
             description=(
                 f"**Modo:** `{queue.channel_name.upper()}` | "
                 f"**Valor:** R$ {queue.bet_value:.2f} | "
@@ -239,14 +294,14 @@ class MatchQueueService:
 
     async def _confirmation_countdown(
         self,
-        queue: MatchQueue,
-        bot: discord.Client,
-        channel: discord.TextChannel,
+        queue:          MatchQueue,
+        bot:            discord.Client,
+        channel:        discord.TextChannel,
         confirm_thread: discord.Thread,
-        message: discord.Message,
-        view: discord.ui.View,
-        time_blue: List[int],
-        time_red: List[int]
+        message:        discord.Message,
+        view:           discord.ui.View,
+        time_blue:      List[int],
+        time_red:       List[int]
     ):
         total    = 300
         queue_id = str(queue._id)
@@ -293,14 +348,14 @@ class MatchQueueService:
 
     async def add_confirmation(
         self,
-        queue: MatchQueue,
-        player_id: int,
-        bot: discord.Client,
-        channel: discord.TextChannel,
+        queue:          MatchQueue,
+        player_id:      int,
+        bot:            discord.Client,
+        channel:        discord.TextChannel,
         confirm_thread: discord.Thread,
-        message: discord.Message,
-        time_blue: List[int],
-        time_red: List[int],
+        message:        discord.Message,
+        time_blue:      List[int],
+        time_red:       List[int],
     ) -> bool:
         queue_id = str(queue._id)
 
@@ -322,13 +377,13 @@ class MatchQueueService:
 
     async def _create_match_from_queue(
         self,
-        queue: MatchQueue,
-        bot: discord.Client,
-        channel: discord.TextChannel,
+        queue:          MatchQueue,
+        bot:            discord.Client,
+        channel:        discord.TextChannel,
         confirm_thread: discord.Thread,
-        conf_msg: discord.Message,
-        time_blue: List[int],
-        time_red: List[int]
+        conf_msg:       discord.Message,
+        time_blue:      List[int],
+        time_red:       List[int]
     ):
         try:
             from views.match_thread_view import embed_match_created
@@ -351,15 +406,15 @@ class MatchQueueService:
 
             # ── Cria match no banco ────────────────────────────
             match_data = await match_service.create_match(
-                guild_id=guild.id,
-                channel_id=channel.id,
-                channel_name=queue.channel_name,
-                player_ids=players,
-                mediator_id=mediator_id,
-                bet_value=queue.bet_value,
-                gel_type=queue.gel_type,
-                match_type=match_type,
-                platform=platform,
+                guild_id     = guild.id,
+                channel_id   = channel.id,
+                channel_name = queue.channel_name,
+                player_ids   = players,
+                mediator_id  = mediator_id,
+                bet_value    = queue.bet_value,
+                gel_type     = queue.gel_type,
+                match_type   = match_type,
+                platform     = platform,
             )
             match_id = str(match_data['_id'])
 
@@ -369,21 +424,22 @@ class MatchQueueService:
                 'thread_id': confirm_thread.id,
             })
 
-            # ← NOVO: vincula match_id ao tópico ativo no sistema de reuso
             try:
                 from services.thread_reuse_service import thread_reuse_service
                 if thread_reuse_service:
                     await thread_reuse_service.update_active_thread_match(
-                        thread_id=confirm_thread.id,
-                        match_id=match_id,
+                        thread_id = confirm_thread.id,
+                        match_id  = match_id,
                     )
             except Exception as e:
                 logger.warning(f"[Queue] Erro ao vincular match ao active_thread: {e}")
 
-            # ── Marca fila como matched ────────────────────────
             queue.mark_as_matched(match_id)
             await self._save_queue(queue)
             await self._delete_queue(queue)
+
+            # ── Opção A: desbloqueia card — nova fila pode se formar ──
+            await self._set_card_locked(channel, queue.bet_value, queue.gel_type, locked=False)
 
             # ── Renomeia tópico ───────────────────────────────
             match_thread_name = (
@@ -396,14 +452,14 @@ class MatchQueueService:
             except Exception:
                 pass
 
-            # ── Embed de confirmação final ────────────────────
+            # ── Embed final de confirmação ────────────────────
             mediator_member = guild.get_member(mediator_id)
             blue_str        = "\n".join(f"✅ <@{uid}>" for uid in time_blue) or "—"
             red_str         = "\n".join(f"✅ <@{uid}>" for uid in time_red)  or "—"
 
             confirmed_embed = discord.Embed(
-                title="✅ Todos confirmaram!",
-                description=(
+                title       = "✅ Todos confirmaram!",
+                description = (
                     f"**Modo:** `{queue.channel_name.upper()}` | "
                     f"**Valor:** R$ {queue.bet_value:.2f} | "
                     f"**GEL:** {queue.gel_type.capitalize()}\n\n"
@@ -411,10 +467,10 @@ class MatchQueueService:
                     f"👨‍⚖️ **Mediador:** "
                     f"{mediator_member.mention if mediator_member else f'<@{mediator_id}>'}"
                 ),
-                color=discord.Color.green()
+                color = discord.Color.green()
             )
-            confirmed_embed.add_field(name="🔵 Time Blue", value=blue_str, inline=True)
-            confirmed_embed.add_field(name="🔴 Time Red",  value=red_str,  inline=True)
+            confirmed_embed.add_field(name="🔵 Time Blue",    value=blue_str,         inline=True)
+            confirmed_embed.add_field(name="🔴 Time Red",     value=red_str,          inline=True)
             confirmed_embed.add_field(name="🎯 ID da Partida", value=f"`{match_id}`", inline=False)
             confirmed_embed.set_footer(text="O mediador irá confirmar o pagamento para iniciar")
 
@@ -423,36 +479,33 @@ class MatchQueueService:
             except Exception:
                 pass
 
-            # ── Adiciona mediador ao tópico ───────────────────
             if mediator_member:
                 try:
                     await confirm_thread.add_user(mediator_member)
                 except Exception:
                     pass
 
-            # ── Embed principal da partida ────────────────────
             match_full = await match_service.get_match(match_id)
             mentions   = " ".join(f"<@{uid}>" for uid in players)
             if mediator_member:
                 mentions += f" {mediator_member.mention}"
 
             await confirm_thread.send(
-                content=mentions,
-                embed=embed_match_created(match_full)
+                content = mentions,
+                embed   = embed_match_created(match_full)
             )
 
             lembrete = discord.Embed(
-                title="🎮 Mediador — Painel de Controle",
-                description=(
+                title       = "🎮 Mediador — Painel de Controle",
+                description = (
                     f"<@{mediator_id}>, use o comando abaixo para controlar a partida:\n\n"
                     "**`!menu_partida`**\n\n"
                     "O painel abre **somente para você** (ephemeral)."
                 ),
-                color=discord.Color.blurple()
+                color = discord.Color.blurple()
             )
             await confirm_thread.send(embed=lembrete)
 
-            # ── DM para cada jogador ──────────────────────────
             for uid in time_blue:
                 m = guild.get_member(uid)
                 if m:
@@ -492,10 +545,10 @@ class MatchQueueService:
 
     async def _expire_queue(
         self,
-        queue: MatchQueue,
-        bot: discord.Client,
-        channel: discord.TextChannel,
-        message: Optional[discord.Message],
+        queue:          MatchQueue,
+        bot:            discord.Client,
+        channel:        discord.TextChannel,
+        message:        Optional[discord.Message],
         confirm_thread: discord.Thread = None
     ):
         queue.status = MatchQueue.STATUS_EXPIRED
@@ -504,14 +557,14 @@ class MatchQueueService:
         not_confirmed = queue.pending_confirmations()
 
         embed = discord.Embed(
-            title="❌ Tempo Esgotado",
-            description="A partida foi cancelada porque nem todos confirmaram a tempo.",
-            color=discord.Color.red()
+            title       = "❌ Tempo Esgotado",
+            description = "A partida foi cancelada porque nem todos confirmaram a tempo.",
+            color       = discord.Color.red()
         )
         if not_confirmed:
             embed.add_field(
-                name="Não confirmaram",
-                value="\n".join(f"• <@{uid}>" for uid in not_confirmed),
+                name  = "Não confirmaram",
+                value = "\n".join(f"• <@{uid}>" for uid in not_confirmed),
                 inline=False
             )
         embed.set_footer(text="Este tópico será limpo em 10 segundos")
@@ -528,7 +581,9 @@ class MatchQueueService:
 
         await self._delete_queue(queue)
 
-        # ← NOVO: devolve ao pool em vez de só arquivar
+        # ── Opção A: desbloqueia card ──────────────────────────
+        await self._set_card_locked(channel, queue.bet_value, queue.gel_type, locked=False)
+
         if confirm_thread:
             await asyncio.sleep(10)
             try:
@@ -547,8 +602,8 @@ class MatchQueueService:
     async def get_queue_status(
         self,
         channel_name: str,
-        bet_value: float,
-        gel_type: str
+        bet_value:    float,
+        gel_type:     str
     ) -> Optional[MatchQueue]:
         collection = db.get_collection('match_queues')
         queue_data = await collection.find_one({
@@ -578,8 +633,8 @@ class MatchQueueService:
 
     async def _create_match_from_queue_compat(
         self,
-        queue: MatchQueue,
-        bot: discord.Client,
+        queue:   MatchQueue,
+        bot:     discord.Client,
         channel: discord.TextChannel
     ):
         from services.thread_reuse_service import thread_reuse_service
@@ -594,12 +649,11 @@ class MatchQueueService:
             f"{queue.channel_name.upper()}"
         )
 
-        # ← NOVO: usa pool
         confirm_thread = await thread_reuse_service.get_or_create_thread(
-            channel=channel,
-            thread_name=thread_name,
-            player_ids=players,
-            guild=channel.guild,
+            channel     = channel,
+            thread_name = thread_name,
+            player_ids  = players,
+            guild       = channel.guild,
         )
 
         queue.confirmations = list(queue.players)
@@ -622,12 +676,12 @@ class ConfirmationView(discord.ui.View):
 
     def __init__(
         self,
-        queue: MatchQueue,
-        service: MatchQueueService,
-        bot: discord.Client,
+        queue:     MatchQueue,
+        service:   MatchQueueService,
+        bot:       discord.Client,
         time_blue: List[int] = None,
-        time_red: List[int] = None,
-        conf_msg: discord.Message = None,
+        time_red:  List[int] = None,
+        conf_msg:  discord.Message = None,
     ):
         super().__init__(timeout=None)
         self.queue     = queue
@@ -638,40 +692,48 @@ class ConfirmationView(discord.ui.View):
         self.conf_msg  = conf_msg
 
         btn_confirmar          = discord.ui.Button(
-            label="✅ CONFIRMAR",
-            style=discord.ButtonStyle.green,
-            custom_id=f"confirm_{queue._id}"
+            label     = "✅ CONFIRMAR",
+            style     = discord.ButtonStyle.green,
+            custom_id = f"confirm_{queue._id}"
         )
         btn_confirmar.callback = self._confirm_callback
         self.add_item(btn_confirmar)
 
         btn_recusar          = discord.ui.Button(
-            label="❌ RECUSAR",
-            style=discord.ButtonStyle.red,
-            custom_id=f"decline_{queue._id}"
+            label     = "❌ RECUSAR",
+            style     = discord.ButtonStyle.red,
+            custom_id = f"decline_{queue._id}"
         )
         btn_recusar.callback = self._decline_callback
         self.add_item(btn_recusar)
 
     async def _confirm_callback(self, interaction: discord.Interaction):
         if interaction.user.id not in self.queue.players:
-            await interaction.response.send_message("❌ Você não está nesta partida!", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Você não está nesta partida!", ephemeral=True
+            )
             return
 
         if interaction.user.id in self.queue.confirmations:
-            await interaction.response.send_message("✅ Você já confirmou!", ephemeral=True)
+            await interaction.response.send_message(
+                "✅ Você já confirmou!", ephemeral=True
+            )
             return
 
         collection = db.get_collection('match_queues')
         queue_data = await collection.find_one({"_id": self.queue._id})
         if not queue_data:
-            await interaction.response.send_message("❌ Esta fila não existe mais.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Esta fila não existe mais.", ephemeral=True
+            )
             return
 
         self.queue = MatchQueue.from_dict(queue_data)
 
         if self.queue.status == MatchQueue.STATUS_MATCHED:
-            await interaction.response.send_message("✅ Partida já foi criada!", ephemeral=True)
+            await interaction.response.send_message(
+                "✅ Partida já foi criada!", ephemeral=True
+            )
             return
 
         parent_channel = (
@@ -681,28 +743,34 @@ class ConfirmationView(discord.ui.View):
         )
 
         await self.service.add_confirmation(
-            queue=self.queue,
-            player_id=interaction.user.id,
-            bot=self.bot,
-            channel=parent_channel,
-            confirm_thread=interaction.channel,
-            message=self.conf_msg or interaction.message,
-            time_blue=self.time_blue,
-            time_red=self.time_red,
+            queue          = self.queue,
+            player_id      = interaction.user.id,
+            bot            = self.bot,
+            channel        = parent_channel,
+            confirm_thread = interaction.channel,
+            message        = self.conf_msg or interaction.message,
+            time_blue      = self.time_blue,
+            time_red       = self.time_red,
         )
-        await interaction.response.send_message("✅ Confirmado! Aguardando os demais...", ephemeral=True)
+        await interaction.response.send_message(
+            "✅ Confirmado! Aguardando os demais...", ephemeral=True
+        )
 
     async def _decline_callback(self, interaction: discord.Interaction):
         collection = db.get_collection('match_queues')
         queue_data = await collection.find_one({"_id": self.queue._id})
         if not queue_data:
-            await interaction.response.send_message("❌ Esta fila não existe mais.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Esta fila não existe mais.", ephemeral=True
+            )
             return
 
         self.queue = MatchQueue.from_dict(queue_data)
 
         if interaction.user.id not in self.queue.players:
-            await interaction.response.send_message("❌ Você não está nesta partida!", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Você não está nesta partida!", ephemeral=True
+            )
             return
 
         parent_channel = (
@@ -717,7 +785,9 @@ class ConfirmationView(discord.ui.View):
             self.queue.gel_type,
             interaction.user.id
         )
-        await interaction.response.send_message("❌ Você recusou a partida.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Você recusou a partida.", ephemeral=True
+        )
 
         await self.service._expire_queue(
             self.queue,
