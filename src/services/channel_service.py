@@ -10,13 +10,14 @@ from utils.logger import logger, log_success
 
 
 # ─────────────────────────────────────────────
-# Constantes de estrutura do servidor
+# Constantes
 # ─────────────────────────────────────────────
 
 MEMBER_ROLE_NAME   = "Membro"
 MEDIATOR_ROLE_NAME = "Controller"
 SUPPORT_ROLE_NAME  = "Suporte"
 ADM_ROLE_NAME      = "ADM"
+SPAM_BLOCK_ROLE_NAME = "Bloqueado"
 
 MEDIATOR_PANEL_CHANNEL_NAME = "painel-mediadores"
 MEDIATOR_CHAT_CHANNEL_NAME  = "chat-mediadores"
@@ -24,15 +25,18 @@ DASHBOARD_CHANNEL_NAME      = "dashboard-partidas"
 RULES_CHANNEL_NAME          = "📜regras"
 AVISOS_CHANNEL_NAME         = "📢avisos"
 
-SUPPORT_CHANNEL_NAME        = "suporte"
-SUPPORT_CHAT_CHANNEL_NAME   = "chat-suporte"
-CHAMADOS_CHANNEL_NAME       = "chamados-suporte"
-CHAMADOS_CHAT_CHANNEL_NAME  = "chat-chamados"
+SUPPORT_CHANNEL_NAME       = "suporte"
+SUPPORT_CHAT_CHANNEL_NAME  = "chat-suporte"
+CHAMADOS_CHANNEL_NAME      = "chamados-suporte"
+CHAMADOS_CHAT_CHANNEL_NAME = "chat-chamados"
+
+SPAM_BLOCKED_CHANNEL_NAME = "membros-bloqueados"
 
 CATEGORY_ANALYTICS_NAME = "📈 ANALYTICS"
 INFO_CATEGORY_NAME      = "ℹ️ INFORMAÇÕES"
 CATEGORY_MEDIATOR_NAME  = "🧑‍⚖️ MEDIADORES"
 CATEGORY_SUPPORT_NAME   = "🎫 SUPORTE"
+BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
 
 
 class ChannelService:
@@ -41,20 +45,19 @@ class ChannelService:
         self.bot          = bot
         self.active_cards: Dict[str, discord.Message] = {}
 
-
     # ─────────────────────────────────────────────
     # Setup completo do servidor
     # ─────────────────────────────────────────────
 
     async def setup_all_channels(self, guild: discord.Guild):
         """
-        Configura toda a estrutura do servidor na ordem:
-        1. Cargos (Membro, Controller, Suporte, ADM)
-        2. Categoria 📈 ANALYTICS      (posição 0)
-        3. Categoria ℹ️ INFORMAÇÕES    (posição 1)
-        4. Categoria 🧑‍⚖️ MEDIADORES   (posição 2)
-        5. Categoria 🎫 SUPORTE        (posição 3)
-        6. Categorias de partidas      (posição 4+)
+        Ordem:
+        0 — 📈 ANALYTICS
+        1 — 🚫 Ban-Control  (só ADM)
+        2 — ℹ️ INFORMAÇÕES
+        3 — 🧑‍⚖️ MEDIADORES
+        4 — 🎫 SUPORTE
+        5+ — Categorias de partidas
         """
         try:
             logger.info("Iniciando configuração completa do servidor...")
@@ -73,7 +76,7 @@ class ChannelService:
             support_role = await self._ensure_role(
                 guild, SUPPORT_ROLE_NAME,
                 color=discord.Color.purple(),
-                reason="Cargo de suporte — acesso aos chamados"
+                reason="Cargo de suporte"
             )
             adm_role = await self._ensure_role(
                 guild, ADM_ROLE_NAME,
@@ -90,10 +93,13 @@ class ChannelService:
                 from services.mediador_dashboard_service import mediator_dashboard_service
                 await mediator_dashboard_service.update_dashboard_for_channel(dashboard_channel)
 
-            # ── 3. INFORMAÇÕES (posição 1) ─────────────────────────
+            # ── 3. BAN CONTROL (posição 1) — só ADM ───────────────
+            await self._setup_ban_control_category(guild, adm_role, position=1)
+
+            # ── 4. INFORMAÇÕES (posição 2) ─────────────────────────
             info_category = await self._ensure_category(guild, INFO_CATEGORY_NAME)
             await info_category.edit(
-                position=1,
+                position=2,
                 overwrites={
                     guild.default_role: discord.PermissionOverwrite(
                         read_messages=True,
@@ -150,9 +156,9 @@ class ChannelService:
                 }
             )
 
-            # ── 4. MEDIADORES (posição 2) ──────────────────────────
+            # ── 5. MEDIADORES (posição 3) ──────────────────────────
             controller_category = await self._ensure_category(guild, CATEGORY_MEDIATOR_NAME)
-            await controller_category.edit(position=2)
+            await controller_category.edit(position=3)
 
             mediator_channel = await self._ensure_text_channel(
                 guild,
@@ -178,7 +184,6 @@ class ChannelService:
             )
             await self._post_mediator_panel(guild, mediator_channel, mediator_role)
 
-            # #chat-mediadores — conversa interna da equipe
             await self._ensure_text_channel(
                 guild,
                 name=MEDIATOR_CHAT_CHANNEL_NAME,
@@ -202,16 +207,16 @@ class ChannelService:
                 }
             )
 
-            # ── 5. SUPORTE (posição 3) ─────────────────────────────
+            # ── 6. SUPORTE (posição 4) ─────────────────────────────
             await self._setup_support_category(
                 guild,
                 member_role=member_role,
                 support_role=support_role,
                 adm_role=adm_role,
-                position=3
+                position=4
             )
 
-            # ── 6. Categorias de partidas (posição 4+) ─────────────
+            # ── 7. Categorias de partidas (posição 5+) ─────────────
             game_overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
                     read_messages=False,
@@ -230,7 +235,7 @@ class ChannelService:
 
             for idx, (category_name, category_data) in enumerate(ChannelsConfig.CATEGORIES.items()):
                 game_category = await self._ensure_category(guild, category_name)
-                await game_category.edit(position=4 + idx, overwrites=game_overwrites)
+                await game_category.edit(position=5 + idx, overwrites=game_overwrites)
 
                 for ch_info in category_data["channels"]:
                     channel = await self._ensure_text_channel(
@@ -248,6 +253,54 @@ class ChannelService:
             logger.error(f"Erro ao configurar servidor: {e}")
             raise
 
+    # ─────────────────────────────────────────────
+    # Ban Control — só ADM visualiza
+    # ─────────────────────────────────────────────
+
+    async def _setup_ban_control_category(
+        self,
+        guild: discord.Guild,
+        adm_role: discord.Role,
+        position: int = 1
+    ):
+        ban_category = await self._ensure_category(guild, BAN_CONTROL_CATEGORY_NAME)
+        await ban_category.edit(
+            position=position,
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                adm_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=False,
+                    read_message_history=True
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True
+                )
+            }
+        )
+
+        await self._ensure_text_channel(
+            guild,
+            name=SPAM_BLOCKED_CHANNEL_NAME,
+            category=ban_category,
+            topic="Membros bloqueados por spam — use o botão Desbloquear para liberar o acesso.",
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                adm_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=False,
+                    read_message_history=True
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True
+                )
+            }
+        )
+        logger.info("Categoria Ban-Control configurada com sucesso")
 
     # ─────────────────────────────────────────────
     # Setup categoria Suporte
@@ -259,13 +312,11 @@ class ChannelService:
         member_role: discord.Role,
         support_role: discord.Role,
         adm_role: discord.Role,
-        position: int = 3
+        position: int = 4
     ):
-        """Cria/atualiza a categoria SUPORTE e seus 4 canais."""
         support_category = await self._ensure_category(guild, CATEGORY_SUPPORT_NAME)
         await support_category.edit(position=position)
 
-        # #suporte — card fixo com botões | só ADM e bot enviam
         suporte_channel = await self._ensure_text_channel(
             guild,
             name=SUPPORT_CHANNEL_NAME,
@@ -295,7 +346,6 @@ class ChannelService:
         )
         await self._post_support_panel(guild, suporte_channel)
 
-        # #chat-suporte — conversa livre entre Membro e Suporte
         await self._ensure_text_channel(
             guild,
             name=SUPPORT_CHAT_CHANNEL_NAME,
@@ -322,7 +372,6 @@ class ChannelService:
             }
         )
 
-        # #chamados-suporte — cards dos tickets | só ADM e bot enviam
         await self._ensure_text_channel(
             guild,
             name=CHAMADOS_CHANNEL_NAME,
@@ -347,7 +396,6 @@ class ChannelService:
             }
         )
 
-        # #chat-chamados — chat interno da equipe de suporte
         await self._ensure_text_channel(
             guild,
             name=CHAMADOS_CHAT_CHANNEL_NAME,
@@ -373,20 +421,13 @@ class ChannelService:
 
         logger.info("Categoria SUPORTE configurada com sucesso")
 
-
     # ─────────────────────────────────────────────
     # Painel fixo do suporte
     # ─────────────────────────────────────────────
 
-    async def _post_support_panel(
-        self,
-        guild: discord.Guild,
-        channel: discord.TextChannel
-    ):
-        """Posta (ou atualiza) o card fixo com botões no #suporte."""
+    async def _post_support_panel(self, guild: discord.Guild, channel: discord.TextChannel):
         from views.ticket_view import TicketPanelView
 
-        # Remove card antigo do bot
         async for msg in channel.history(limit=20):
             if msg.author == guild.me and msg.embeds:
                 await msg.delete()
@@ -410,11 +451,9 @@ class ChannelService:
             color=discord.Color.purple()
         )
         embed.set_footer(text="Use !fechar_chamado <id> apenas se quiser fechar seu chamado ativo!")
-
         view = TicketPanelView(self.bot)
         await channel.send(embed=embed, view=view)
         logger.info("Painel de suporte postado em #suporte")
-
 
     # ─────────────────────────────────────────────
     # Dashboard
@@ -435,31 +474,28 @@ class ChannelService:
                         color=discord.Color.red(),
                         mentionable=True
                     )
-
             if not analytics_category:
                 analytics_category = await self._ensure_category(guild, CATEGORY_ANALYTICS_NAME)
-
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                adm_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=False,
-                    read_message_history=True
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    manage_messages=True,
-                    manage_channels=True
-                ),
-            }
 
             channel = await self._ensure_text_channel(
                 guild,
                 name=DASHBOARD_CHANNEL_NAME,
                 category=analytics_category,
                 topic="📊 Dashboard automático de partidas — atualizado diariamente",
-                overwrites=overwrites
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=False,
+                        read_message_history=True
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        manage_messages=True,
+                        manage_channels=True
+                    ),
+                }
             )
             return channel
 
@@ -470,16 +506,11 @@ class ChannelService:
             logger.error(f"Erro no ensure_dashboard_channel: {e}")
             return None
 
-
     # ─────────────────────────────────────────────
     # Cards de fila
     # ─────────────────────────────────────────────
 
-    async def setup_queue_cards(
-        self,
-        guild: discord.Guild,
-        channel: discord.TextChannel
-    ) -> bool:
+    async def setup_queue_cards(self, guild: discord.Guild, channel: discord.TextChannel) -> bool:
         try:
             async for message in channel.history(limit=100):
                 if message.author == guild.me:
@@ -489,7 +520,6 @@ class ChannelService:
                         pass
 
             channel_name = channel.name
-
             for bet_value in ChannelsConfig.BET_VALUES:
                 embed = create_match_queue_embed(
                     channel_name=channel_name,
@@ -509,17 +539,11 @@ class ChannelService:
             logger.error(f"Erro ao configurar cards em #{channel.name}: {e}")
             return False
 
-    async def refresh_queue_card(
-        self,
-        channel: discord.TextChannel,
-        bet_value: float
-    ) -> bool:
+    async def refresh_queue_card(self, channel: discord.TextChannel, bet_value: float) -> bool:
         try:
             channel_name = channel.name
-
-            q_normal   = await match_queue_service.get_queue_status(channel_name, bet_value, "normal")
-            q_infinito = await match_queue_service.get_queue_status(channel_name, bet_value, "infinito")
-
+            q_normal     = await match_queue_service.get_queue_status(channel_name, bet_value, "normal")
+            q_infinito   = await match_queue_service.get_queue_status(channel_name, bet_value, "infinito")
             normal_count   = len(q_normal.players)   if q_normal   else 0
             infinito_count = len(q_infinito.players) if q_infinito else 0
 
@@ -551,7 +575,6 @@ class ChannelService:
             logger.error(f"Erro ao atualizar card: {e}")
             return False
 
-
     # ─────────────────────────────────────────────
     # Estatísticas
     # ─────────────────────────────────────────────
@@ -573,18 +596,11 @@ class ChannelService:
             logger.error(f"Erro ao obter estatísticas: {e}")
             return {'total': 0, 'active': 0, 'completed': 0}
 
-
     # ─────────────────────────────────────────────
     # Helpers internos
     # ─────────────────────────────────────────────
 
-    async def _ensure_role(
-        self,
-        guild: discord.Guild,
-        name: str,
-        color: discord.Color = discord.Color.default(),
-        reason: str = ""
-    ) -> discord.Role:
+    async def _ensure_role(self, guild, name, color=discord.Color.default(), reason="") -> discord.Role:
         role = discord.utils.get(guild.roles, name=name)
         if not role:
             role = await guild.create_role(name=name, color=color, reason=reason)
@@ -593,11 +609,7 @@ class ChannelService:
             logger.info(f"Cargo '{name}' já existe")
         return role
 
-    async def _ensure_category(
-        self,
-        guild: discord.Guild,
-        name: str
-    ) -> discord.CategoryChannel:
+    async def _ensure_category(self, guild, name) -> discord.CategoryChannel:
         category = discord.utils.get(guild.categories, name=name)
         if not category:
             category = await guild.create_category(name=name)
@@ -605,35 +617,19 @@ class ChannelService:
         return category
 
     async def _ensure_text_channel(
-        self,
-        guild: discord.Guild,
-        name: str,
-        category: discord.CategoryChannel,
-        topic: str = "",
-        overwrites: dict = None
+        self, guild, name, category, topic="", overwrites=None
     ) -> discord.TextChannel:
         channel = discord.utils.get(guild.text_channels, name=name)
         if not channel:
             channel = await guild.create_text_channel(
-                name=name,
-                category=category,
-                topic=topic,
-                overwrites=overwrites or {}
+                name=name, category=category, topic=topic, overwrites=overwrites or {}
             )
             logger.info(f"Canal '#{name}' criado")
         else:
-            await channel.edit(
-                category=category,
-                topic=topic,
-                overwrites=overwrites or {}
-            )
+            await channel.edit(category=category, topic=topic, overwrites=overwrites or {})
         return channel
 
-    async def _post_rules_embed(
-        self,
-        guild: discord.Guild,
-        rules_channel: discord.TextChannel
-    ):
+    async def _post_rules_embed(self, guild: discord.Guild, rules_channel: discord.TextChannel):
         from config.rules import ServerRules
 
         async for msg in rules_channel.history(limit=10):
@@ -646,8 +642,8 @@ class ChannelService:
             title="📩 Como funciona o acesso",
             description=(
                 "**1.** Ao entrar no servidor você receberá uma **DM** com os botões.\n"
-                "**2.** Você tem **5 minutos** para aceitar.\n"
-                "**3.** ✅ Aceitar → cargo **Membro** → acesso a todos os canais.\n"
+                "**2.** Você tem **30 minutos** para aceitar.\n"
+                "**3.** ✅ Aceitar → CAPTCHA → cargo **Membro** → acesso a todos os canais.\n"
                 "**4.** ❌ Recusar ou não responder → removido automaticamente.\n\n"
                 "⚠️ **Certifique-se de ter as DMs abertas para este servidor!**"
             ),
@@ -655,12 +651,7 @@ class ChannelService:
         )
         await rules_channel.send(embeds=[rules_embed, info_embed])
 
-    async def _post_mediator_panel(
-        self,
-        guild: discord.Guild,
-        panel_channel: discord.TextChannel,
-        mediator_role: discord.Role
-    ):
+    async def _post_mediator_panel(self, guild, panel_channel, mediator_role):
         from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
 
         async for msg in panel_channel.history(limit=10):
@@ -675,5 +666,4 @@ class ChannelService:
         logger.info("Painel de mediadores atualizado")
 
 
-# Instância global (inicializada no main.py)
 channel_service = None
