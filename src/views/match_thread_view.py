@@ -1,3 +1,5 @@
+# views/match_thread_view.py
+
 from __future__ import annotations
 import discord
 from datetime import datetime
@@ -13,13 +15,11 @@ from utils.logger import logger
 # ─────────────────────────────────────────────
 
 async def _get_match_by_thread(thread_id: int) -> Optional[dict]:
-    # Busca por int e str para garantir compatibilidade
     col = db.get_collection("matches")
     doc = await col.find_one({"thread_id": thread_id})
     if not doc:
         doc = await col.find_one({"thread_id": str(thread_id)})
     return doc
-
 
 def _is_mediator(ctx_or_interaction, match: dict) -> bool:
     user_id = (
@@ -29,7 +29,6 @@ def _is_mediator(ctx_or_interaction, match: dict) -> bool:
     )
     return str(user_id) == str(match.get("mediator_id", ""))
 
-
 def _is_admin(ctx_or_interaction) -> bool:
     member = (
         ctx_or_interaction.user
@@ -38,22 +37,19 @@ def _is_admin(ctx_or_interaction) -> bool:
     )
     return getattr(getattr(member, "guild_permissions", None), "administrator", False)
 
-
 async def _update_thread_name(thread: discord.Thread, base_name: str, status: str):
     try:
         await thread.edit(name=f"{base_name}: {status}")
     except Exception as e:
         logger.error(f"Erro ao renomear thread: {e}")
 
-
 def _base_name(thread_name: str) -> str:
     return thread_name.rsplit(": ", 1)[0] if ": " in thread_name else thread_name
 
-
 def _calc_values(bet_value: float) -> dict:
-    taxa              = bet_value * 0.25
+    taxa             = bet_value * 0.25
     total_por_jogador = bet_value + taxa
-    premio            = bet_value * 2
+    premio           = bet_value * 2
     return {
         "bet":              bet_value,
         "taxa":             taxa,
@@ -61,9 +57,12 @@ def _calc_values(bet_value: float) -> dict:
         "premio":           premio,
     }
 
-
-async def _post_log(channel: discord.TextChannel, title: str, description: str, color: discord.Color = discord.Color.blurple()):
-    """Posta log público visível a todos na thread."""
+async def _post_log(
+    channel: discord.TextChannel,
+    title: str,
+    description: str,
+    color: discord.Color = discord.Color.blurple()
+):
     embed = discord.Embed(title=title, description=description, color=color)
     embed.set_footer(text=f"Log de partida • {datetime.utcnow().strftime('%H:%M')}")
     await channel.send(embed=embed)
@@ -76,7 +75,7 @@ async def _post_log(channel: discord.TextChannel, title: str, description: str, 
 def embed_match_created(match: dict) -> discord.Embed:
     vals      = _calc_values(match["bet_value"])
     time_blue = match.get("time_blue", [])
-    time_red  = match.get("time_red",  [])
+    time_red  = match.get("time_red", [])
     gel       = match.get("gel_type", "normal").capitalize()
     modo      = match.get("match_type", "?").upper()
 
@@ -147,7 +146,7 @@ def embed_prize_instructions(match: dict) -> discord.Embed:
 
 
 # ─────────────────────────────────────────────
-# PrizeConfirmView — confirmação dos vencedores
+# PrizeConfirmView
 # ─────────────────────────────────────────────
 
 class PrizeConfirmView(discord.ui.View):
@@ -158,7 +157,6 @@ class PrizeConfirmView(discord.ui.View):
 
     def __init__(self, match_id: str, winner_players: List, winner_team: str):
         super().__init__(timeout=None)
-        # Normaliza para str para comparação consistente
         self.match_id       = match_id
         self.winner_players = [str(p) for p in winner_players]
         self.winner_team    = winner_team
@@ -178,7 +176,6 @@ class PrizeConfirmView(discord.ui.View):
             )
             return
 
-        # Relê do banco para pegar confirmações atuais
         match_doc = await match_service.get_match(self.match_id)
         if not match_doc:
             await interaction.response.send_message("❌ Partida não encontrada.", ephemeral=True)
@@ -188,8 +185,6 @@ class PrizeConfirmView(discord.ui.View):
             await interaction.response.send_message("✅ Partida já finalizada!", ephemeral=True)
             return
 
-        # Usa a flag do banco como fonte de verdade de confirmações parciais
-        # Em 1x1 um jogador já basta; em 2x2+ precisamos de todos
         result = await match_service.confirm_prize_received(self.match_id)
         if not result:
             await interaction.response.send_message("❌ Erro ao finalizar partida.", ephemeral=True)
@@ -213,8 +208,16 @@ class PrizeConfirmView(discord.ui.View):
         )
         await interaction.channel.send(embed=embed)
 
-        # Deixa aberto para futura lógica de reutilização de threads
-        # (não arquiva automaticamente)
+        # ← NOVO: devolve thread ao pool após finalização
+        try:
+            from services.thread_reuse_service import thread_reuse_service
+            if thread_reuse_service and isinstance(interaction.channel, discord.Thread):
+                import asyncio
+                asyncio.create_task(
+                    thread_reuse_service.return_to_pool_after_match(interaction.channel)
+                )
+        except Exception as e:
+            logger.warning(f"[PrizeConfirmView] Erro ao devolver thread ao pool: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -222,11 +225,7 @@ class PrizeConfirmView(discord.ui.View):
 # ─────────────────────────────────────────────
 
 async def cmd_menu_partida(ctx):
-    """
-    !menu_partida — envia painel informativo via DM ao mediador.
-    Apenas mediador e ADM podem usar.
-    Não aparece na thread.
-    """
+    """!menu_partida — envia painel informativo via DM ao mediador."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -279,14 +278,13 @@ async def cmd_menu_partida(ctx):
     try:
         await ctx.author.send(embed=embed)
     except discord.Forbidden:
-        # Se DMs fechadas, manda na thread e apaga em 15s
-        msg = await ctx.channel.send(embed=embed, delete_after=15)
+        await ctx.channel.send(embed=embed, delete_after=15)
 
     await ctx.message.delete()
 
 
 async def cmd_confirmar_pagamento(ctx):
-    """!confirmar_pagamento — mediador confirma recebimento dos pagamentos"""
+    """!confirmar_pagamento — mediador confirma recebimento dos pagamentos."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -320,7 +318,6 @@ async def cmd_confirmar_pagamento(ctx):
     await _update_thread_name(ctx.channel, _base_name(ctx.channel.name), "Pagamento Confirmado")
     await ctx.message.delete()
 
-    # Log público na thread
     await _post_log(
         ctx.channel,
         "✅ Pagamento Confirmado",
@@ -330,7 +327,7 @@ async def cmd_confirmar_pagamento(ctx):
 
 
 async def cmd_iniciar_partida(ctx):
-    """!iniciar_partida — mediador inicia a partida"""
+    """!iniciar_partida — mediador inicia a partida."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -364,7 +361,6 @@ async def cmd_iniciar_partida(ctx):
     await _update_thread_name(ctx.channel, _base_name(ctx.channel.name), "Em Andamento ▶️")
     await ctx.message.delete()
 
-    # Log público
     await _post_log(
         ctx.channel,
         "▶️ Partida Iniciada!",
@@ -374,7 +370,7 @@ async def cmd_iniciar_partida(ctx):
 
 
 async def cmd_winner_team(ctx, team: str):
-    """!winner_team blue|red — mediador declara o vencedor"""
+    """!winner_team blue|red — mediador declara o vencedor."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -398,7 +394,7 @@ async def cmd_winner_team(ctx, team: str):
         return
 
     time_blue = match.get("time_blue", [])
-    time_red  = match.get("time_red",  [])
+    time_red  = match.get("time_red", [])
 
     result = await match_service.set_winner(
         match_id=str(match["_id"]),
@@ -421,7 +417,6 @@ async def cmd_winner_team(ctx, team: str):
     await _update_thread_name(ctx.channel, _base_name(ctx.channel.name), f"Vencedor: {label}")
     await ctx.message.delete()
 
-    # Log público — vencedor
     embed_log = discord.Embed(
         title="🏆 Time Vencedor Declarado!",
         description=f"**{label}** venceu a partida!\n\n{mentions}",
@@ -437,7 +432,7 @@ async def cmd_winner_team(ctx, team: str):
 
 
 async def cmd_prize(ctx):
-    """!prize — mediador confirma que entregou o prêmio"""
+    """!prize — mediador confirma que entregou o prêmio."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -480,7 +475,6 @@ async def cmd_prize(ctx):
 
     await ctx.message.delete()
 
-    # Log público — prêmio enviado
     embed_pub = discord.Embed(
         title="🎁 Prêmio Enviado!",
         description=(
@@ -506,7 +500,7 @@ async def cmd_prize(ctx):
 
 
 async def cmd_cancelar_match(ctx, reason: str = None):
-    """!cancelar_match [motivo] — mediador ou ADM cancela a partida"""
+    """!cancelar_match [motivo] — mediador ou ADM cancela a partida."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -541,7 +535,6 @@ async def cmd_cancelar_match(ctx, reason: str = None):
     await _update_thread_name(ctx.channel, _base_name(ctx.channel.name), "Cancelado ❌")
     await ctx.message.delete()
 
-    # Log público
     await _post_log(
         ctx.channel,
         "❌ Partida Cancelada",
@@ -550,4 +543,13 @@ async def cmd_cancelar_match(ctx, reason: str = None):
         discord.Color.red()
     )
 
-    # Deixa thread aberta para futura lógica de reutilização
+    # ← NOVO: devolve thread ao pool após cancelamento
+    try:
+        from services.thread_reuse_service import thread_reuse_service
+        if thread_reuse_service and isinstance(ctx.channel, discord.Thread):
+            import asyncio
+            asyncio.create_task(
+                thread_reuse_service.return_to_pool_after_match(ctx.channel)
+            )
+    except Exception as e:
+        logger.warning(f"[cmd_cancelar_match] Erro ao devolver thread ao pool: {e}")
