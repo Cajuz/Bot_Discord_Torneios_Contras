@@ -36,15 +36,20 @@ from services.channel_service import (
 )
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
+from services.anti_spam_service import AntiSpamService, SPAM_BLOCK_ROLE_NAME
+from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service 
 
 
 load_dotenv()
 
+
 bot = create_discord_bot()
+
 
 onboarding_service = None
 channel_service    = None
-
+anti_spam_service  = AntiSpamService(bot)
+set_anti_spam_service(anti_spam_service)
 
 # ==================== EVENTOS ====================
 
@@ -57,10 +62,18 @@ async def on_ready():
         await mediator_queue.sync_mediators_by_role(guild, MEDIATOR_ROLE_NAME)
         print(f"✅ Mediadores sincronizados em {guild.name}")
 
+        # Anti-spam: garante cargo + permissões e restaura bloqueados do banco
+        try:
+            await anti_spam_service.ensure_role_and_overwrites(guild)
+            await anti_spam_service.restore_blocked_members(guild)
+        except Exception as e:
+            logger.error(f"Erro ao inicializar AntiSpam em {guild.name}: {e}")
+
     # Views persistentes — sobrevivem ao reinício do bot
     bot.add_view(PrizeConfirmView(match_id="placeholder", winner_players=[], winner_team="blue"))
     bot.add_view(TicketPanelView(bot))       # botões de #suporte
-    bot.add_view(SupportCardView())  # botão Assumir nos cards
+    bot.add_view(SupportCardView())          # botão Assumir nos cards
+    bot.add_view(SpamBlockCardView())       # botão Desbloquear por Spam nos cards
 
     if not mediator_dashboard_service.daily_update.is_running():
         mediator_dashboard_service.bot = bot
@@ -70,8 +83,27 @@ async def on_ready():
 
 
 @bot.event
+async def on_message(message: discord.Message):
+    """
+    IMPORTANTE: como temos on_message, precisamos chamar bot.process_commands
+    para não quebrar os comandos prefixados (!comando).
+    """
+    try:
+        if anti_spam_service:
+            await anti_spam_service.process_message(message)
+    except Exception as e:
+        logger.error(f"Erro no anti-spam on_message: {e}")
+    finally:
+        await bot.process_commands(message)
+
+
+@bot.event
 async def on_member_join(member: discord.Member):
     try:
+        # reaplica bloqueio se já estiver bloqueado no banco
+        if anti_spam_service:
+            await anti_spam_service.handle_member_join(member)
+
         if onboarding_service:
             await onboarding_service.handle_new_member(member)
         else:
@@ -173,6 +205,12 @@ async def setup_canais(ctx):
     try:
         msg = await ctx.send("⏳ Configurando servidor completo... (pode demorar alguns segundos)")
         await channel_service.setup_all_channels(ctx.guild)
+
+        # Anti-spam: reforça overwrites após o setup
+        try:
+            await anti_spam_service.ensure_role_and_overwrites(ctx.guild)
+        except Exception as e:
+            logger.error(f"Erro AntiSpam pós-setupcanais: {e}")
 
         embed = discord.Embed(
             title="✅ Servidor Configurado!",
@@ -316,6 +354,41 @@ async def sync_mediators(ctx):
     await ctx.send(embed=embed)
 
 
+# ─────────── AntiSpam: comandos ADM ───────────
+
+@bot.command(name='bloquear')
+@commands.has_permissions(administrator=True)
+async def bloquear_spam(ctx, member: discord.Member = None, *, motivo: str = None):
+    if not member:
+        await ctx.reply("❌ Use: `!bloquear @usuario [motivo]`")
+        return
+    try:
+        await anti_spam_service.block_member_manual(
+            guild=ctx.guild,
+            member=member,
+            by=ctx.author,
+            reason=motivo or "Bloqueio manual por administrador"
+        )
+        await ctx.reply(f"🚫 {member.mention} foi bloqueado (cargo **{SPAM_BLOCK_ROLE_NAME}**).")
+    except Exception as e:
+        logger.error(f"Erro no bloquear: {e}")
+        await ctx.reply(f"❌ Erro: {e}")
+
+
+@bot.command(name='desbloquear')
+@commands.has_permissions(administrator=True)
+async def desbloquear_spam(ctx, member: discord.Member = None):
+    if not member:
+        await ctx.reply("❌ Use: `!desbloquear @usuario`")
+        return
+    try:
+        await anti_spam_service.unblock_member(ctx.guild, member, by=ctx.author)
+        await ctx.reply(f"✅ {member.mention} foi desbloqueado.")
+    except Exception as e:
+        logger.error(f"Erro no desbloquear: {e}")
+        await ctx.reply(f"❌ Erro: {e}")
+
+
 @bot.command(name='stats')
 @commands.has_permissions(administrator=True)
 async def stats_onboarding(ctx):
@@ -327,6 +400,7 @@ async def stats_onboarding(ctx):
         timeout   = await col.count_documents({'onboarding_result': 'timeout'})
         dm_bloq   = await col.count_documents({'onboarding_result': 'dm_bloqueada'})
         pendentes = await col.count_documents({'onboarding_result': 'pendente'})
+        bloqueados_spam = await col.count_documents({'spam_blocked': True})
         taxa      = (aceitos / total * 100) if total > 0 else 0.0
 
         embed = discord.Embed(title="📊 Estatísticas de Onboarding", color=discord.Color.blurple())
@@ -336,6 +410,7 @@ async def stats_onboarding(ctx):
         embed.add_field(name="⏰ Timeout",        value=f"**{timeout}**",   inline=True)
         embed.add_field(name="🚫 DM Bloqueada",   value=f"**{dm_bloq}**",   inline=True)
         embed.add_field(name="⏳ Pendentes",      value=f"**{pendentes}**", inline=True)
+        embed.add_field(name="🛑 Bloqueados Spam", value=f"**{bloqueados_spam}**", inline=True)
         embed.add_field(name="📈 Taxa Aceitação", value=f"**{taxa:.1f}%**", inline=False)
         embed.set_footer(text="collection: users | MongoDB")
         embed.timestamp = datetime.utcnow()
@@ -353,7 +428,6 @@ async def testar_regras(ctx):
         await ctx.reply("❌ Sistema ainda não inicializado.")
         return
     try:
-        # is_test=True → não kicca no timeout, não kicca se DM bloqueada
         await onboarding_service.handle_new_member(ctx.author, is_test=True)
         await ctx.reply("✅ Teste iniciado! Verifique sua DM.")
     except Exception as e:
@@ -749,7 +823,8 @@ async def ver_perfil(ctx, member: discord.Member = None):
             value=(
                 f"**Entrou em:** {user.joined_at.strftime('%d/%m/%Y %H:%M')}\n"
                 f"**Regras aceitas:** {'✅ Sim' if user.has_accepted_rules else '❌ Não'}\n"
-                f"**Onboarding:** `{user.onboarding_result}`"
+                f"**Onboarding:** `{user.onboarding_result}`\n"
+                f"**Spam bloqueado:** {'🛑 Sim' if getattr(user, 'spam_blocked', False) else '✅ Não'}"
             ),
             inline=False
         )
@@ -781,10 +856,10 @@ async def help_command(ctx):
         description="Comandos disponíveis para jogadores.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",            inline=False)
-    embed.add_field(name="!partidas",            value="Ver partidas ativas",                  inline=False)
-    embed.add_field(name="!statuscanal [nome]",  value="Ver estatísticas de um canal",         inline=False)
-    embed.add_field(name="!fila",                value="Ver a fila de mediadores disponíveis", inline=False)
+    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",             inline=False)
+    embed.add_field(name="!partidas",           value="Ver partidas ativas",                   inline=False)
+    embed.add_field(name="!statuscanal [nome]", value="Ver estatísticas de um canal",         inline=False)
+    embed.add_field(name="!fila",               value="Ver a fila de mediadores disponíveis", inline=False)
     embed.add_field(
         name="ℹ️ Como jogar",
         value=(
@@ -855,17 +930,17 @@ async def help_mediador(ctx):
         description="Use dentro da thread de partida. Sua mensagem é apagada automaticamente.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="━━ 🎮 PARTIDA ━━",            value="\u200b",                                                 inline=False)
-    embed.add_field(name="!menu_partida",                value="Recebe o painel de controle via DM",                    inline=False)
-    embed.add_field(name="!confirmar_pagamento",         value="Confirma recebimento dos pagamentos dos jogadores",     inline=False)
-    embed.add_field(name="!iniciar_partida",             value="Inicia a partida após confirmar pagamento",             inline=False)
-    embed.add_field(name="!winner_team blue|red",        value="Declara o time vencedor",                              inline=False)
-    embed.add_field(name="!prize",                       value="Confirma que o prêmio foi entregue ao vencedor",        inline=False)
-    embed.add_field(name="!cancelar_match [motivo]",     value="Cancela a partida da thread atual",                    inline=False)
-    embed.add_field(name="━━ 📋 FILA ━━",               value="\u200b",                                                inline=False)
-    embed.add_field(name="!addmediador",                 value="Entra na fila de mediadores disponíveis",              inline=False)
-    embed.add_field(name="!removemediador",              value="Sai da fila de mediadores",                            inline=False)
-    embed.add_field(name="━━ ⚠️ FLUXO OBRIGATÓRIO ━━",  value="\u200b",                                                inline=False)
+    embed.add_field(name="━━ 🎮 PARTIDA ━━",              value="\u200b", inline=False)
+    embed.add_field(name="!menu_partida",                value="Recebe o painel de controle via DM",                        inline=False)
+    embed.add_field(name="!confirmar_pagamento",         value="Confirma recebimento dos pagamentos dos jogadores",          inline=False)
+    embed.add_field(name="!iniciar_partida",             value="Inicia a partida após confirmar pagamento",                  inline=False)
+    embed.add_field(name="!winner_team blue|red",        value="Declara o time vencedor",                                   inline=False)
+    embed.add_field(name="!prize",                       value="Confirma que o prêmio foi entregue ao vencedor",            inline=False)
+    embed.add_field(name="!cancelar_match [motivo]",     value="Cancela a partida da thread atual",                          inline=False)
+    embed.add_field(name="━━ 📋 FILA ━━",                value="\u200b", inline=False)
+    embed.add_field(name="!addmediador",                 value="Entra na fila de mediadores disponíveis",                    inline=False)
+    embed.add_field(name="!removemediador",              value="Sai da fila de mediadores",                                  inline=False)
+    embed.add_field(name="━━ ⚠️ FLUXO OBRIGATÓRIO ━━",   value="\u200b", inline=False)
     embed.add_field(
         name="Ordem dos comandos",
         value=(
@@ -888,28 +963,30 @@ async def help_admin(ctx):
         description="ADM tem acesso a todos os comandos de mediador e suporte.",
         color=discord.Color.red()
     )
-    embed.add_field(name="━━ 🛠️ SETUP ━━",                 value="\u200b",                                                 inline=False)
-    embed.add_field(name="!setupcanais",                     value="Configura toda estrutura do servidor (canais + cargos)", inline=False)
-    embed.add_field(name="!atualizarcards [#canal]",         value="Recria os cards de um canal específico",                 inline=False)
-    embed.add_field(name="!atualizartodos",                  value="Recria os cards de todos os canais de partida",          inline=False)
-    embed.add_field(name="!atualizarmediadores",             value="Atualiza o painel no #painel-mediadores",                inline=False)
-    embed.add_field(name="!sincmediadores",                  value="Sincroniza a fila pelo cargo Controller",                inline=False)
-    embed.add_field(name="!dashboard",                       value="Força atualização do dashboard Analytics",               inline=False)
-    embed.add_field(name="━━ 🎫 SUPORTE ━━",                value="\u200b",                                                 inline=False)
+    embed.add_field(name="━━ 🛠️ SETUP ━━",                   value="\u200b", inline=False)
+    embed.add_field(name="!setupcanais",                      value="Configura toda estrutura do servidor (canais + cargos)", inline=False)
+    embed.add_field(name="!atualizarcards [#canal]",          value="Recria os cards de um canal específico",                 inline=False)
+    embed.add_field(name="!atualizartodos",                   value="Recria os cards de todos os canais de partida",         inline=False)
+    embed.add_field(name="!atualizarmediadores",              value="Atualiza o painel no #painel-mediadores",               inline=False)
+    embed.add_field(name="!sincmediadores",                   value="Sincroniza a fila pelo cargo Controller",               inline=False)
+    embed.add_field(name="!dashboard",                        value="Força atualização do dashboard Analytics",               inline=False)
+    embed.add_field(name="━━ 🎫 SUPORTE ━━",                  value="\u200b", inline=False)
     embed.add_field(
         name="!concluir_chamado <id>",
         value="Conclui qualquer chamado (ADM ignora restrição de atendente)\n▸ Apenas em `#chamados-suporte`",
         inline=False
     )
-    embed.add_field(name="━━ 🎮 PARTIDAS ━━",              value="\u200b",                                                  inline=False)
-    embed.add_field(name="!cancelarpartida <id> [motivo]",  value="Cancela qualquer partida por ID",                        inline=False)
-    embed.add_field(name="!forcarconcluir <id>",            value="Força finalização de qualquer partida",                  inline=False)
-    embed.add_field(name="!inspecionar <id>",               value="Exibe todos os campos da partida no banco",              inline=False)
-    embed.add_field(name="!simularfila [canal] [v] [gel]",  value="Simula fila completa para testes",                       inline=False)
-    embed.add_field(name="━━ 📊 INFO ━━",                  value="\u200b",                                                  inline=False)
-    embed.add_field(name="!stats",                          value="Estatísticas de onboarding do servidor",                 inline=False)
-    embed.add_field(name="!aviso <texto>",                  value="Posta aviso no #avisos com @everyone",                  inline=False)
-    embed.add_field(name="!testarregras",                   value="Testa o fluxo de onboarding via DM (sem kick)",         inline=False)
+    embed.add_field(name="━━ 🎮 PARTIDAS ━━",                 value="\u200b", inline=False)
+    embed.add_field(name="!cancelarpartida <id> [motivo]",    value="Cancela qualquer partida por ID",                        inline=False)
+    embed.add_field(name="!forcarconcluir <id>",              value="Força finalização de qualquer partida",                  inline=False)
+    embed.add_field(name="!inspecionar <id>",                 value="Exibe todos os campos da partida no banco",              inline=False)
+    embed.add_field(name="!simularfila [canal] [v] [gel]",    value="Simula fila completa para testes",                       inline=False)
+    embed.add_field(name="━━ 📊 INFO ━━",                     value="\u200b", inline=False)
+    embed.add_field(name="!stats",                            value="Estatísticas de onboarding do servidor",                 inline=False)
+    embed.add_field(name="!aviso <texto>",                    value="Posta aviso no #avisos com @everyone",                   inline=False)
+    embed.add_field(name="!testarregras",                     value="Testa o fluxo de onboarding via DM (sem kick)",          inline=False)
+    embed.add_field(name="!bloquear @user [motivo]",      value="Bloqueia manualmente um membro",                inline=False)
+    embed.add_field(name="!desbloquear @user",            value="Desbloqueia um membro bloqueado",               inline=False)
     embed.set_footer(text="Membros: !help | Suporte: !help_sup | Mediadores: !help_med")
     await ctx.reply(embed=embed)
 

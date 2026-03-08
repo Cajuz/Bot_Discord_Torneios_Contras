@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ui import View, Button
 from typing import Optional
@@ -23,18 +24,14 @@ class RulesView(View):
         self.member             = member
         self.message: Optional[discord.Message] = None
         self.is_test            = is_test
-        self._processed         = False  # evita double-processing
-
-    def _member_custom_id(self, action: str) -> str:
-        """custom_id único por membro para evitar colisão em onboarding simultâneo"""
-        return f"{action}_{self.member.id}"
+        self._processed         = False
 
     # ── Aceitar ──────────────────────────────────────────────────
 
     @discord.ui.button(
         label="✅ Aceito as Regras",
         style=discord.ButtonStyle.success,
-        custom_id="accept_rules"  # sobrescrito em __init__ abaixo
+        custom_id="accept_rules"
     )
     async def accept_button(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.member.id:
@@ -49,34 +46,34 @@ class RulesView(View):
 
         await interaction.response.defer()
 
-        try:
-            success = await self.onboarding_service.accept_rules(self.member)
+        # Marca como processado e para o timer das regras
+        self._processed = True
+        self.stop()
 
-            if success:
-                self._processed = True
-                self.stop()  # ← cancela o timer → on_timeout nunca dispara
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
 
-                for item in self.children:
-                    item.disabled = True
-                if self.message:
-                    try:
-                        await self.message.edit(view=self)
-                    except Exception:
-                        pass
+        # Avisa que o CAPTCHA vem a seguir
+        captcha_notice = discord.Embed(
+            title="📋 Regras Aceitas!",
+            description=(
+                "Ótimo! Para finalizar seu acesso, você precisará passar por uma **verificação CAPTCHA**.\n\n"
+                "⬇️ O CAPTCHA será enviado logo abaixo..."
+            ),
+            color=discord.Color.blue()
+        )
+        await interaction.followup.send(embed=captcha_notice)
 
-                welcome_embed = ServerRules.get_welcome_embed(self.member)
-                await interaction.followup.send(embed=welcome_embed)
-                logger.info(f"Usuário {self.member.name} aceitou as regras via DM")
-            else:
-                await interaction.followup.send(
-                    "❌ Erro ao processar aceitação. Contate um administrador.",
-                    ephemeral=True
-                )
-        except Exception as e:
-            logger.error(f"Erro ao aceitar regras: {e}")
-            await interaction.followup.send(
-                "❌ Ocorreu um erro. Tente novamente mais tarde.", ephemeral=True
-            )
+        # Inicia o fluxo CAPTCHA de forma assíncrona (não bloqueia o handler)
+        asyncio.create_task(
+            self.onboarding_service.run_captcha_flow(self.member, is_test=self.is_test)
+        )
+        logger.info(f"Usuário {self.member.name} aceitou as regras — CAPTCHA iniciado")
 
     # ── Recusar ──────────────────────────────────────────────────
 
@@ -115,12 +112,8 @@ class RulesView(View):
     # ── Timeout ──────────────────────────────────────────────────
 
     async def on_timeout(self):
-        """
-        Timer de 5min esgotado.
-        Só kicca se o membro não foi processado ainda e não é teste.
-        """
         if self._processed:
-            return  # aceitou ou recusou antes do timeout — não faz nada
+            return
 
         try:
             for item in self.children:
@@ -187,7 +180,6 @@ class ConfirmationView(View):
             )
             return
 
-        # Só reativa a parent_view se ela ainda não foi processada
         if self.parent_view._processed:
             await interaction.response.send_message(
                 "✅ Sua resposta já foi processada.", ephemeral=True
@@ -195,7 +187,7 @@ class ConfirmationView(View):
             return
 
         await interaction.response.defer()
-        self.stop()  # para o timer da ConfirmationView
+        self.stop()
 
         for item in self.children:
             item.disabled = True
@@ -205,7 +197,6 @@ class ConfirmationView(View):
             except Exception:
                 pass
 
-        # Reativa botões da view pai
         for item in self.parent_view.children:
             item.disabled = False
         if self.parent_view.message:
@@ -234,9 +225,8 @@ class ConfirmationView(View):
 
         await interaction.response.defer()
 
-        # Marca a parent_view como processada antes de kickar
         self.parent_view._processed = True
-        self.parent_view.stop()  # cancela o timer da RulesView pai também
+        self.parent_view.stop()
         self.stop()
 
         try:
@@ -262,10 +252,6 @@ class ConfirmationView(View):
     # ── Timeout da ConfirmationView ──────────────────────────────
 
     async def on_timeout(self):
-        """
-        60s sem resposta na confirmação → reativa a RulesView pai
-        para o membro poder aceitar ainda (timer pai ainda está rodando).
-        """
         try:
             for item in self.children:
                 item.disabled = True
@@ -275,7 +261,6 @@ class ConfirmationView(View):
                 except Exception:
                     pass
 
-            # Se o membro não processou ainda, reativa a parent_view
             if not self.parent_view._processed:
                 for item in self.parent_view.children:
                     item.disabled = False
