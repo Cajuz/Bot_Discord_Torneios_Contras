@@ -2,8 +2,6 @@ import discord
 from datetime import datetime, timedelta, timezone, time 
 from urllib.parse import quote 
 import numpy as np
-from discord import client
-from discord import user
 from config.database import db
 from utils.logger import logger
 import matplotlib.pyplot as plt
@@ -20,7 +18,6 @@ from config.channels_config import ChannelsConfig
 # from models.match import Match 
 # Se não puder importar, usaremos as strings literais baseadas no seu modelo
 
-# Configuração para rodar em ambiente Docker/Linux
 matplotlib.use('Agg')
 horario_brasilia = time(3, 0, 0) # 03:00 UTC é 00:00 em Brasília
 
@@ -34,14 +31,12 @@ class MediatorDashboardService:
 
     @tasks.loop(time=horario_brasilia)
     async def daily_update(self):
-        """Task que roda automaticamente à meia-noite"""
         logger.info("Executando atualização automática de meia-noite...")
         if self.bot:
             await self.update_dashboard(self.bot)
 
     @daily_update.before_loop
     async def before_daily_update(self):
-        """Garante que o bot esteja logado antes de começar a contar o tempo"""
         await self.bot.wait_until_ready()
 
     async def get_period_stats(self, days, target_member=None):
@@ -86,7 +81,6 @@ class MediatorDashboardService:
             
             # Pipeline de Agregação para o Gráfico
             group_format = "%Y-%m-%d %H:00" if days <= 1 else "%Y-%m-%d"
-            
             pipeline = [
                 {"$match": query}, 
                 {"$group": {
@@ -113,17 +107,18 @@ class MediatorDashboardService:
             
             # Cálculos de Taxas
             taxa_conf = (finalizadas / total * 100) if total > 0 else 0
-            taxa_canc = (canceladas / total * 100) if total > 0 else 0
+            taxa_canc = (canceladas  / total * 100) if total > 0 else 0
 
             return {
-                "total": total,
+                "total":       total,
                 "finalizadas": finalizadas,
-                "canceladas": canceladas,
-                "aguardando": aguardando,
-                "taxa_conf": round(taxa_conf, 1),
-                "taxa_canc": round(taxa_canc, 1),
-                "history": history_points
+                "canceladas":  canceladas,
+                "aguardando":  aguardando,
+                "taxa_conf":   round(taxa_conf, 1),
+                "taxa_canc":   round(taxa_canc, 1),
+                "history":     history_points,
             }
+
         except Exception as e:
             logger.error(f"Erro ao buscar stats de {days} dias: {e}")
             return None
@@ -132,9 +127,9 @@ class MediatorDashboardService:
         """Gera o gráfico de linhas estilizado"""
         plt.close('all')
         plt.style.use('dark_background')
-    
-        cor_fundo = "#2B2D31" 
-        cor_linha_azul = "#0A37FF"
+
+        cor_fundo         = "#2B2D31"
+        cor_linha_azul    = "#0A37FF"
         cor_preenchimento = "#ECECF0"
 
         fig, ax = plt.subplots(figsize=(10, 4), facecolor=cor_fundo)
@@ -148,7 +143,6 @@ class MediatorDashboardService:
         else:
             horas = [f"{i}" for i in range(len(y))]
 
-        # Plotagem
         ax.plot(x, y, color=cor_linha_azul, linewidth=3, alpha=0.9, marker='o', markersize=4)
         ax.fill_between(x, y, color=cor_preenchimento, alpha=0.15)
 
@@ -165,13 +159,7 @@ class MediatorDashboardService:
         plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.2)
 
         buf = io.BytesIO()
-        plt.savefig(
-            buf, 
-            format="png", 
-            bbox_inches='tight', 
-            facecolor=fig.get_facecolor(),
-            edgecolor='none'
-        )
+        plt.savefig(buf, format="png", bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
         buf.seek(0)
         plt.close(fig)
         return buf
@@ -198,13 +186,13 @@ class MediatorDashboardService:
                 f"✅ **Taxa de Confirmação:** {stats['taxa_conf']}%\n"
                 f"❌ **Taxa de Cancelamento:** {stats['taxa_canc']}%"
             )
-            
             embed.set_image(url=f"attachment://graph_{days}.png")
             embed.set_footer(text=f"Dados reais extraídos às {datetime.now().strftime('%H:%M')}")
-            
+
             return embed, file
+
         except Exception as e:
-            logger.error(f"Erro ao criar embed de {titulo}: {e}")
+            logger.error(f"Erro ao criar embed de '{titulo}': {e}")
             return None, None
 
     async def update_dashboard(self, bot, target_member=None):
