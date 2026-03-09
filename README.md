@@ -22,7 +22,7 @@ em tempo real.
 
 ## 📁 Estrutura do Projeto
 
-```
+```text
 x1_frifas/
 ├── src/
 │   ├── main.py                          # Entrypoint principal
