@@ -1,5 +1,3 @@
-Aqui está o `README.md` completo:
-
 ```markdown
 # 🎮 X1 Frifas — Discord Bot
 
