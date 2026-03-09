@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timezone
 
 from services.thread_log_service import init_thread_log_service
+from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
 from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
 from services.thread_reuse_service import init_thread_reuse_service
 from views.match_thread_view import (
@@ -60,6 +61,8 @@ channel_service      = None
 health_check_svc     = None          # ← NOVO
 anti_spam_service    = AntiSpamService(bot)
 set_anti_spam_service(anti_spam_service)
+
+    
 
 
 # ==================== EVENTOS ====================
@@ -224,8 +227,62 @@ async def concluir_chamado(ctx, ticket_id: str = None):
     await cmd_concluir_chamado(ctx, ticket_id)
 
 
+@bot.command(name="faturamentos_geral")
+@commands.has_permissions(administrator=True) # Recomendado: apenas admins podem ver o geral
+async def faturamentos_geral(ctx):
+    """Exibe a interface para gerar o relatório de faturamento de todos os mediadores."""
+    
+    # Criamos um embed simples para apresentar o botão
+    embed = discord.Embed(
+        title="📊 Central de Faturamento Geral",
+        description=(
+            "Clique no botão abaixo para processar os dados de todos os mediadores "
+            "e gerar o ranking atualizado em formato `.txt`."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="O processamento pode levar alguns segundos dependendo do volume de dados.")
+
+    # Instancia a view que você já criou
+    view = RelatorioGeralView()
+    
+    await ctx.send(embed=embed, view=view)
+
+# Opcional: Tratamento de erro caso alguém sem permissão use o comando
+@faturamentos_geral.error
+async def faturamentos_geral_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Você não tem permissão para visualizar o faturamento geral.")
+
+
+
 # ==================== COMANDOS ADMINISTRATIVOS ====================
 
+
+
+@bot.command(name="faturamento")
+async def faturamento(ctx, mediador_id: str = None):
+    """Comando !faturamento ID"""
+    
+    # Se não passar ID, usa o ID de quem chamou
+    target_id = mediador_id if mediador_id else str(ctx.author.id)
+    
+    # Busca membro para pegar nome e avatar
+    member = ctx.guild.get_member(int(target_id))
+    nome = member.display_name if member else "Mediador"
+    avatar = member.display_avatar.url if member else ctx.author.display_avatar.url
+
+    service = FaturamentoMediadorService()
+    partidas = await service.buscar_partidas_do_banco(target_id)
+    
+    view = FaturamentoView(service, partidas, target_id, nome, avatar)
+    embed = await view.gerar_embed(1) # Padrão Hoje
+    
+    await ctx.send(embed=embed, view=view)
+
+
+
+    
 
 @bot.command(name='setupcanais')
 @commands.has_permissions(administrator=True)

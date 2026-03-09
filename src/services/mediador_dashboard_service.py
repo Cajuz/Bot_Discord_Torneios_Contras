@@ -7,6 +7,16 @@ import matplotlib.pyplot as plt
 import io
 import matplotlib
 from discord.ext import tasks
+from urllib.parse import quote 
+from discord import client
+from discord import user
+
+from discord.errors import NotFound
+from discord.ext import tasks
+from zoneinfo import ZoneInfo 
+from discord.ext import tasks
+from config.channels_config import ChannelsConfig
+
 
 matplotlib.use('Agg')
 
@@ -149,96 +159,138 @@ class MediatorDashboardService:
     # ==================== DADOS E GRÁFICOS ====================
 
 
-    async def get_period_stats(self, days: int) -> dict | None:
+    async def get_period_stats(self, days, target_member=None):
+        """Busca dados no MongoDB agrupados por tempo e status, com filtro opcional de usuário"""
         try:
             collection = db.get_collection("matches")
             start_date = datetime.now(timezone.utc) - timedelta(days=days)
-
-            total       = await collection.count_documents({"created_at": {"$gte": start_date}})
-            finalizadas = await collection.count_documents({"created_at": {"$gte": start_date}, "status": "finalizado"})
-            canceladas  = await collection.count_documents({"created_at": {"$gte": start_date}, "status": "cancelado"})
-            aguardando  = await collection.count_documents({
-                "created_at": {"$gte": start_date},
-                "status": {"$in": ["aguardando_pagamento", "aguardando_inicio", "aguardando_resultado"]}
-            })
-
+            
+            # Base da query: apenas filtro de data
+            query = {"created_at": {"$gte": start_date}}
+            if target_member:
+                query["user_id"] = target_member.id 
+            
+            # Busca todas as partidas no período para o diagnóstico
+            cursor_debug = collection.find(query)
+            docs = await cursor_debug.to_list(length=100)
+            
+            logger.info(f"DEBUG: Encontrados {len(docs)} documentos no período.")
+            
+            total = len(docs)
+            
+            # --- CORREÇÃO BASEADA NO MODELO MATCH E LOGS ---
+            
+            # 1. Filas Finalizadas: De acordo com o modelo novo, 'finalizado' é o status final.
+            # Mas baseado nos seus logs, o status real final é 'aguardando_premio'.
+            # Vou usar 'aguardando_premio' baseado no comportamento real do log.
+            finalizadas = sum(1 for d in docs if d.get("status") == 'aguardando_premio')
+            
+            # 2. Canceladas: Ok, alinhado com 'cancelado'
+            canceladas = sum(1 for d in docs if d.get("status") == 'cancelado')
+            
+            # 3. Aguardando: Alinhado com o modelo
+            status_aguardando = [
+                'aguardando_pagamento',
+                'aguardando_inicio',
+                'em_andamento',
+                'aguardando_resultado'
+            ]
+            
+            # Se 'aguardando_premio' não for considerado finalizado, adicione na lista acima
+            aguardando = sum(1 for d in docs if d.get("status") in status_aguardando)
+            
+            # Pipeline de Agregação para o Gráfico
             group_format = "%Y-%m-%d %H:00" if days <= 1 else "%Y-%m-%d"
+            
             pipeline = [
-                {"$match": {
-                    "created_at": {"$gte": start_date},
-                    "status": "finalizado"
-                }},
+                {"$match": query}, 
                 {"$group": {
-                    "_id":   {"$dateToString": {"format": group_format, "date": "$created_at"}},
-                    "count": {"$sum": 1}
+                    "_id": {"$dateToString": {"format": group_format, "date": "$created_at"}},
+                    "count": {"$sum": 1} 
                 }},
                 {"$sort": {"_id": 1}}
             ]
+            
+            cursor = collection.aggregate(pipeline)
+            results_map = {doc["_id"]: doc["count"] async for doc in cursor}
 
-            cursor         = collection.aggregate(pipeline)
-            history_points = [doc["count"] async for doc in cursor]
-
+            # Preenchimento de lacunas no gráfico
+            history_points = []
             target_points = 24 if days <= 1 else days
-            if len(history_points) < target_points:
-                history_points = history_points + [0] * (target_points - len(history_points))
-            elif len(history_points) > target_points:
-                history_points = history_points[:target_points]
-
+            
+            for i in range(target_points):
+                if days <= 1:
+                    check_time = (datetime.now(timezone.utc) - timedelta(hours=(target_points-1-i))).strftime("%Y-%m-%d %H:00")
+                else:
+                    check_time = (datetime.now(timezone.utc) - timedelta(days=(target_points-1-i))).strftime("%Y-%m-%d")
+                
+                history_points.append(results_map.get(check_time, 0))
+            
+            # Cálculos de Taxas
             taxa_conf = (finalizadas / total * 100) if total > 0 else 0
-            taxa_canc = (canceladas  / total * 100) if total > 0 else 0
+            taxa_canc = (canceladas / total * 100) if total > 0 else 0
 
             return {
-                "total":       total,
+                "total": total,
                 "finalizadas": finalizadas,
-                "canceladas":  canceladas,
-                "aguardando":  aguardando,
-                "taxa_conf":   round(taxa_conf, 1),
-                "taxa_canc":   round(taxa_canc, 1),
-                "history":     history_points,
+                "canceladas": canceladas,
+                "aguardando": aguardando,
+                "taxa_conf": round(taxa_conf, 1),
+                "taxa_canc": round(taxa_canc, 1),
+                "history": history_points
             }
-
         except Exception as e:
             logger.error(f"Erro ao buscar stats de {days} dias: {e}")
             return None
 
 
-    def generate_styled_graph(self, history_points: list) -> io.BytesIO:
+    def generate_styled_graph(self, history_points):
+        """Gera o gráfico de linhas estilizado"""
         plt.close('all')
         plt.style.use('dark_background')
+    
+        cor_fundo = "#2B2D31" 
+        cor_linha = "#0A37FF"
+        cor_area = "#ECECF0"
 
-        cor_fundo         = "#2B2D31"
-        cor_linha_azul    = "#0A37FF"
-        cor_preenchimento = "#ECECF0"
 
         fig, ax = plt.subplots(figsize=(10, 4), facecolor=cor_fundo)
         ax.set_facecolor(cor_fundo)
 
         y = np.array(history_points)
-        x = np.arange(len(y))
+        x = np.arange(len(y)) 
 
-        horas = [f"{i:02d}" for i in range(len(y))] if len(y) <= 25 else [f"{i}" for i in range(len(y))]
+        # Plotagem: Linha suave sem marcadores (bolinhas)
+        ax.plot(x, y, color=cor_linha, linewidth=2, alpha=1.0)
+        
+        # Preenchimento com transparência suave (estilo Glow)
+        ax.fill_between(x, y, color=cor_area, alpha=0.15)
 
-        ax.plot(x, y, color=cor_linha_azul, linewidth=3, alpha=0.9, marker='o', markersize=4)
-        ax.fill_between(x, y, color=cor_preenchimento, alpha=0.15)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(horas, color='white', fontsize=8, rotation=45)
-
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_visible(False)
+        # Ajuste de Eixos para ficar "limpo" como na imagem
+        ax.set_xticks(x[::2]) # Mostra de 2 em 2 para não amontoar
+        ax.set_xticklabels([f"{i:02d}" for i in range(0, len(y), 2)], color='#4E5169', fontsize=7)
+        
+        # Esconder bordas inúteis
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        
+        ax.spines['bottom'].set_visible(True)
         ax.spines['bottom'].set_color('#4E5169')
-        ax.get_yaxis().set_visible(False)
-        ax.tick_params(axis='x', colors='gray')
+        
+        ax.yaxis.set_visible(False) # Remove números da lateral como no original
+        ax.grid(True, axis='y', color='#2B2D31', linestyle='--', alpha=0.3)
 
-        plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.2)
+        plt.subplots_adjust(left=0.02, right=0.98, top=0.9, bottom=0.15)
 
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+        plt.savefig(buf, format="png", bbox_inches='tight', facecolor=fig.get_facecolor())
         buf.seek(0)
-        plt.close(fig)
         return buf
 
+
+
+
+        
 
     async def create_embed(self, titulo: str, days: int) -> tuple:
         try:
