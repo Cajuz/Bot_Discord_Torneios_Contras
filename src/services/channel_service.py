@@ -1,4 +1,4 @@
-# services/channel_service.py
+# src/services/channel_service.py
 
 import discord
 import asyncio
@@ -25,7 +25,7 @@ MEDIATOR_PANEL_CHANNEL_NAME = "painel-mediadores"
 MEDIATOR_CHAT_CHANNEL_NAME  = "chat-mediadores"
 DASHBOARD_CHANNEL_NAME      = "dashboard-partidas"
 HISTORY_CHANNEL_NAME        = "historico-partidas"
-LOGS_CHANNEL_NAME           = "logs-partidas"          # ← NOVO
+LOGS_CHANNEL_NAME           = "logs-partidas"
 RULES_CHANNEL_NAME          = "📜regras"
 AVISOS_CHANNEL_NAME         = "📢avisos"
 
@@ -36,7 +36,12 @@ CHAMADOS_CHAT_CHANNEL_NAME = "chat-chamados"
 
 SPAM_BLOCKED_CHANNEL_NAME = "membros-bloqueados"
 
-CATEGORY_ANALYTICS_NAME  = "📈 ANALYTICS"
+# ── NOVO ──────────────────────────────────────
+HEALTH_CHECK_CHANNEL_NAME = "health-check"
+# ──────────────────────────────────────────────
+
+CATEGORY_ANALYTICS_NAME   = "📈 ANALYTICS"
+CATEGORY_DASHBOARD_NAME   = "📊 DASHBOARD"      # ← NOVO
 INFO_CATEGORY_NAME        = "ℹ️ INFORMAÇÕES"
 CATEGORY_MEDIATOR_NAME    = "🧑‍⚖️ MEDIADORES"
 CATEGORY_SUPPORT_NAME     = "🎫 SUPORTE"
@@ -56,13 +61,14 @@ class ChannelService:
 
     async def setup_all_channels(self, guild: discord.Guild):
         """
-        Ordem:
+        Ordem de categorias:
         0 — 📈 ANALYTICS
-        1 — 🚫 Ban-Control  (só ADM)
-        2 — ℹ️ INFORMAÇÕES
-        3 — 🧑‍⚖️ MEDIADORES
-        4 — 🎫 SUPORTE
-        5+ — Categorias de partidas
+        1 — 📊 DASHBOARD      ← NOVO (health-check, só ADM)
+        2 — 🚫 BANS-CONTROL
+        3 — ℹ️ INFORMAÇÕES
+        4 — 🧑‍⚖️ MEDIADORES
+        5 — 🎫 SUPORTE
+        6+ — Categorias de partidas
         """
         try:
             logger.info("Iniciando configuração completa do servidor...")
@@ -93,7 +99,6 @@ class ChannelService:
             analytics_category = await self._ensure_category(guild, CATEGORY_ANALYTICS_NAME)
             await analytics_category.edit(position=0)
 
-            # dashboard-partidas
             dashboard_channel = await self.ensure_dashboard_channel(
                 guild, adm_role, analytics_category
             )
@@ -101,7 +106,6 @@ class ChannelService:
                 from services.mediador_dashboard_service import mediator_dashboard_service
                 await mediator_dashboard_service.update_dashboard_for_channel(dashboard_channel)
 
-            # historico-partidas — só ADM + bot leem, bot escreve
             await self._ensure_text_channel(
                 guild,
                 name=HISTORY_CHANNEL_NAME,
@@ -123,7 +127,6 @@ class ChannelService:
             )
             logger.info("Canal #historico-partidas configurado")
 
-            # logs-partidas — texto, imagens e vídeos das threads arquivadas
             await self._ensure_text_channel(
                 guild,
                 name=LOGS_CHANNEL_NAME,
@@ -140,20 +143,23 @@ class ChannelService:
                         view_channel=True,
                         send_messages=True,
                         manage_messages=True,
-                        attach_files=True,        # ← necessário para re-upload de mídia
+                        attach_files=True,
                         embed_links=True,
                     ),
                 }
             )
             logger.info("Canal #logs-partidas configurado")
 
-            # ── 3. BAN CONTROL (posição 1) — só ADM ───────────────
-            await self._setup_ban_control_category(guild, adm_role, position=1)
+            # ── 3. DASHBOARD — Health Check (posição 1) ────────────  ← NOVO
+            await self._setup_health_check_category(guild, adm_role, position=1)
 
-            # ── 4. INFORMAÇÕES (posição 2) ─────────────────────────
+            # ── 4. BAN CONTROL (posição 2) ─────────────────────────
+            await self._setup_ban_control_category(guild, adm_role, position=2)
+
+            # ── 5. INFORMAÇÕES (posição 3) ─────────────────────────
             info_category = await self._ensure_category(guild, INFO_CATEGORY_NAME)
             await info_category.edit(
-                position=2,
+                position=3,
                 overwrites={
                     guild.default_role: discord.PermissionOverwrite(
                         read_messages=True,
@@ -162,7 +168,7 @@ class ChannelService:
                     guild.me: discord.PermissionOverwrite(
                         read_messages=True,
                         send_messages=True
-                    )
+                    ),
                 }
             )
 
@@ -184,7 +190,7 @@ class ChannelService:
                     guild.me: discord.PermissionOverwrite(
                         read_messages=True,
                         send_messages=True
-                    )
+                    ),
                 }
             )
             await self._post_rules_embed(guild, rules_channel)
@@ -206,13 +212,13 @@ class ChannelService:
                     guild.me: discord.PermissionOverwrite(
                         read_messages=True,
                         send_messages=True
-                    )
+                    ),
                 }
             )
 
-            # ── 5. MEDIADORES (posição 3) ──────────────────────────
+            # ── 6. MEDIADORES (posição 4) ──────────────────────────
             controller_category = await self._ensure_category(guild, CATEGORY_MEDIATOR_NAME)
-            await controller_category.edit(position=3)
+            await controller_category.edit(position=4)
 
             mediator_channel = await self._ensure_text_channel(
                 guild,
@@ -233,7 +239,7 @@ class ChannelService:
                     guild.me: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True
-                    )
+                    ),
                 }
             )
             await self._post_mediator_panel(guild, mediator_channel, mediator_role)
@@ -257,20 +263,20 @@ class ChannelService:
                     guild.me: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True
-                    )
+                    ),
                 }
             )
 
-            # ── 6. SUPORTE (posição 4) ─────────────────────────────
+            # ── 7. SUPORTE (posição 5) ─────────────────────────────
             await self._setup_support_category(
                 guild,
                 member_role=member_role,
                 support_role=support_role,
                 adm_role=adm_role,
-                position=4
+                position=5,
             )
 
-            # ── 7. Categorias de partidas (posição 5+) ─────────────
+            # ── 8. Categorias de partidas (posição 6+) ─────────────
             game_overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
                     read_messages=False,
@@ -285,12 +291,12 @@ class ChannelService:
                     send_messages=True,
                     manage_threads=True,
                     create_private_threads=True,
-                )
+                ),
             }
 
             for idx, (category_name, category_data) in enumerate(ChannelsConfig.CATEGORIES.items()):
                 game_category = await self._ensure_category(guild, category_name)
-                await game_category.edit(position=5 + idx, overwrites=game_overwrites)
+                await game_category.edit(position=6 + idx, overwrites=game_overwrites)
 
                 for ch_info in category_data["channels"]:
                     channel = await self._ensure_text_channel(
@@ -298,7 +304,7 @@ class ChannelService:
                         name=ch_info["name"],
                         category=game_category,
                         topic=f"Fila de partidas {ch_info['name'].upper()} — escolha seu valor",
-                        overwrites=game_overwrites
+                        overwrites=game_overwrites,
                     )
                     await self.setup_queue_cards(guild, channel)
 
@@ -310,15 +316,68 @@ class ChannelService:
 
 
     # ─────────────────────────────────────────────
+    # NOVO — Health Check (📊 DASHBOARD)
+    # ─────────────────────────────────────────────
+
+    async def _setup_health_check_category(
+        self,
+        guild:    discord.Guild,
+        adm_role: discord.Role,
+        position: int = 1,
+    ) -> None:
+        """Cria a categoria 📊 DASHBOARD com o canal #health-check (só ADM)."""
+
+        hc_category = await self._ensure_category(guild, CATEGORY_DASHBOARD_NAME)
+        await hc_category.edit(
+            position=position,
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                adm_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=False,
+                    read_message_history=True,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True,
+                ),
+            },
+        )
+
+        await self._ensure_text_channel(
+            guild,
+            name=HEALTH_CHECK_CHANNEL_NAME,
+            category=hc_category,
+            topic="🏥 Painel de saúde do bot — use !healthcheck para atualizar.",
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                adm_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=False,
+                    read_message_history=True,
+                    use_application_commands=True,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True,
+                ),
+            },
+        )
+        logger.info("Categoria 📊 DASHBOARD e canal #health-check configurados")
+
+
+    # ─────────────────────────────────────────────
     # Ban Control — só ADM visualiza
     # ─────────────────────────────────────────────
 
     async def _setup_ban_control_category(
         self,
-        guild: discord.Guild,
+        guild:    discord.Guild,
         adm_role: discord.Role,
-        position: int = 1
-    ):
+        position: int = 2,
+    ) -> None:
         ban_category = await self._ensure_category(guild, BAN_CONTROL_CATEGORY_NAME)
         await ban_category.edit(
             position=position,
@@ -327,14 +386,14 @@ class ChannelService:
                 adm_role: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=False,
-                    read_message_history=True
+                    read_message_history=True,
                 ),
                 guild.me: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
-                    manage_messages=True
-                )
-            }
+                    manage_messages=True,
+                ),
+            },
         )
 
         await self._ensure_text_channel(
@@ -347,14 +406,14 @@ class ChannelService:
                 adm_role: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=False,
-                    read_message_history=True
+                    read_message_history=True,
                 ),
                 guild.me: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
-                    manage_messages=True
-                )
-            }
+                    manage_messages=True,
+                ),
+            },
         )
         logger.info("Categoria Ban-Control configurada com sucesso")
 
@@ -365,12 +424,12 @@ class ChannelService:
 
     async def _setup_support_category(
         self,
-        guild: discord.Guild,
-        member_role: discord.Role,
+        guild:        discord.Guild,
+        member_role:  discord.Role,
         support_role: discord.Role,
-        adm_role: discord.Role,
-        position: int = 4
-    ):
+        adm_role:     discord.Role,
+        position:     int = 5,
+    ) -> None:
         support_category = await self._ensure_category(guild, CATEGORY_SUPPORT_NAME)
         await support_category.edit(position=position)
 
@@ -384,22 +443,22 @@ class ChannelService:
                 member_role: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=False,
-                    use_application_commands=True
+                    use_application_commands=True,
                 ),
                 support_role: discord.PermissionOverwrite(
                     view_channel=True,
-                    send_messages=False
+                    send_messages=False,
                 ),
                 adm_role: discord.PermissionOverwrite(
                     view_channel=True,
-                    send_messages=True
+                    send_messages=True,
                 ),
                 guild.me: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
-                    manage_messages=True
-                )
-            }
+                    manage_messages=True,
+                ),
+            },
         )
         await self._post_support_panel(guild, suporte_channel)
 
@@ -410,23 +469,11 @@ class ChannelService:
             topic="Chat de atendimento — converse com a equipe de suporte.",
             overwrites={
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                member_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                ),
-                support_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                ),
-                adm_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                )
-            }
+                member_role:  discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                support_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                adm_role:     discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                guild.me:     discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            },
         )
 
         await self._ensure_text_channel(
@@ -439,18 +486,18 @@ class ChannelService:
                 member_role:        discord.PermissionOverwrite(view_channel=False),
                 support_role: discord.PermissionOverwrite(
                     view_channel=True,
-                    send_messages=False
+                    send_messages=False,
                 ),
                 adm_role: discord.PermissionOverwrite(
                     view_channel=True,
-                    send_messages=True
+                    send_messages=True,
                 ),
                 guild.me: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
-                    manage_messages=True
-                )
-            }
+                    manage_messages=True,
+                ),
+            },
         )
 
         await self._ensure_text_channel(
@@ -461,19 +508,10 @@ class ChannelService:
             overwrites={
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 member_role:        discord.PermissionOverwrite(view_channel=False),
-                support_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                ),
-                adm_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True
-                )
-            }
+                support_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                adm_role:     discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                guild.me:     discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            },
         )
 
         logger.info("Categoria SUPORTE configurada com sucesso")
@@ -520,9 +558,9 @@ class ChannelService:
 
     async def ensure_dashboard_channel(
         self,
-        guild: discord.Guild,
-        adm_role: discord.Role = None,
-        analytics_category: discord.CategoryChannel = None
+        guild:              discord.Guild,
+        adm_role:           discord.Role = None,
+        analytics_category: discord.CategoryChannel = None,
     ) -> discord.TextChannel | None:
         try:
             if not adm_role:
@@ -531,7 +569,7 @@ class ChannelService:
                     adm_role = await guild.create_role(
                         name=ADM_ROLE_NAME,
                         color=discord.Color.red(),
-                        mentionable=True
+                        mentionable=True,
                     )
             if not analytics_category:
                 analytics_category = await self._ensure_category(guild, CATEGORY_ANALYTICS_NAME)
@@ -546,15 +584,15 @@ class ChannelService:
                     adm_role: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=False,
-                        read_message_history=True
+                        read_message_history=True,
                     ),
                     guild.me: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True,
                         manage_messages=True,
-                        manage_channels=True
+                        manage_channels=True,
                     ),
-                }
+                },
             )
             return channel
 
@@ -585,7 +623,7 @@ class ChannelService:
                     channel_name=channel_name,
                     bet_value=bet_value,
                     queue_normal_count=0,
-                    queue_infinito_count=0
+                    queue_infinito_count=0,
                 )
                 view    = MatchQueueView(channel_name=channel_name, bet_value=bet_value)
                 message = await channel.send(embed=embed, view=view)
@@ -611,7 +649,7 @@ class ChannelService:
                 channel_name=channel_name,
                 bet_value=bet_value,
                 queue_normal_count=normal_count,
-                queue_infinito_count=infinito_count
+                queue_infinito_count=infinito_count,
             )
             card_key = f"{channel_name}_{bet_value}"
 
@@ -646,11 +684,11 @@ class ChannelService:
             total     = await col.count_documents({'channel_name': channel_name})
             active    = await col.count_documents({
                 'channel_name': channel_name,
-                'status': {'$in': ['aguardando_pagamento', 'aguardando_inicio', 'em_andamento']}
+                'status': {'$in': ['aguardando_pagamento', 'aguardando_inicio', 'em_andamento']},
             })
             completed = await col.count_documents({
                 'channel_name': channel_name,
-                'status': 'finalizado'
+                'status': 'finalizado',
             })
             return {'total': total, 'active': active, 'completed': completed}
         except Exception as e:
@@ -687,14 +725,17 @@ class ChannelService:
         channel = discord.utils.get(guild.text_channels, name=name)
         if not channel:
             channel = await guild.create_text_channel(
-                name=name, category=category,
-                topic=topic, overwrites=overwrites or {}
+                name=name,
+                category=category,
+                topic=topic,
+                overwrites=overwrites or {},
             )
             logger.info(f"Canal '#{name}' criado")
         else:
             await channel.edit(
-                category=category, topic=topic,
-                overwrites=overwrites or {}
+                category=category,
+                topic=topic,
+                overwrites=overwrites or {},
             )
         return channel
 
@@ -716,7 +757,7 @@ class ChannelService:
                 "**4.** ❌ Recusar ou não responder → removido automaticamente.\n\n"
                 "⚠️ **Certifique-se de ter as DMs abertas para este servidor!**"
             ),
-            color=discord.Color.gold()
+            color=discord.Color.gold(),
         )
         await rules_channel.send(embeds=[rules_embed, info_embed])
 
