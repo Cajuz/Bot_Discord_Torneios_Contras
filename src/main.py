@@ -4,7 +4,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 
 from services.thread_log_service import init_thread_log_service
 from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
@@ -38,11 +38,17 @@ from services.channel_service import (
     MEDIATOR_ROLE_NAME,
     SUPPORT_ROLE_NAME,
     ADM_ROLE_NAME,
+    HEALTH_CHECK_CHANNEL_NAME,       # ← NOVO
 )
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
 from services.anti_spam_service import AntiSpamService, SPAM_BLOCK_ROLE_NAME
 from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service
+
+# ── NOVO — Health Check ───────────────────────────────────────────────────────
+from services.health_check_service import init_health_check_service, set_bot_start_time
+from views.health_check_view import build_overview_embed, HealthCheckView
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 load_dotenv()
@@ -52,6 +58,7 @@ bot = create_discord_bot()
 thread_reuse_service = None
 onboarding_service   = None
 channel_service      = None
+health_check_svc     = None          # ← NOVO
 anti_spam_service    = AntiSpamService(bot)
 set_anti_spam_service(anti_spam_service)
 
@@ -76,14 +83,13 @@ async def on_ready():
         except Exception as e:
             logger.error(f"Erro ao inicializar AntiSpam em {guild.name}: {e}")
 
-    # ── NOVO: inicializa o serviço de reuso de threads ────────
+    # ── Threads ───────────────────────────────────────────────────────────────
     global thread_reuse_service
     thread_reuse_service = init_thread_reuse_service(bot)
     logger.info("✅ ThreadReuseService inicializado")
-    init_thread_log_service(bot)   
+    init_thread_log_service(bot)
     logger.info("✅ ThreadLogService inicializado")
 
-    # Valida pool ao iniciar (remove entradas inválidas do banco)
     for guild in bot.guilds:
         try:
             result = await thread_reuse_service.validate_pool(guild)
@@ -91,7 +97,14 @@ async def on_ready():
         except Exception as e:
             logger.error(f"Erro ao validar pool em {guild.name}: {e}")
 
-    # ── Views persistentes ────────────────────────────────────
+    # ── NOVO — Health Check ───────────────────────────────────────────────────
+    global health_check_svc
+    set_bot_start_time(datetime.now(timezone.utc))
+    health_check_svc = init_health_check_service(bot)
+    logger.info("✅ HealthCheckService inicializado")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── Views persistentes ────────────────────────────────────────────────────
     bot.add_view(PrizeConfirmView(match_id="placeholder", winner_players=[], winner_team="blue"))
     bot.add_view(TicketPanelView(bot))
     bot.add_view(SupportCardView())
@@ -100,7 +113,7 @@ async def on_ready():
     if not mediator_dashboard_service.daily_update.is_running():
         mediator_dashboard_service.bot = bot
         mediator_dashboard_service.daily_update.start()
-    
+
     print('🚀 Bot pronto!')
 
 
@@ -286,32 +299,50 @@ async def setup_canais(ctx):
         except Exception as e:
             logger.error(f"Erro AntiSpam pós-setupcanais: {e}")
 
+        # ── NOVO: posta o health check no canal recém-criado ──────────────
+        try:
+            hc_channel = discord.utils.get(ctx.guild.text_channels, name=HEALTH_CHECK_CHANNEL_NAME)
+            if hc_channel and health_check_svc:
+                # Remove painel antigo se existir
+                async for old_msg in hc_channel.history(limit=10):
+                    if old_msg.author == ctx.guild.me and old_msg.embeds:
+                        await old_msg.delete()
+                        break
+                report   = await health_check_svc.run(
+                    guild          = ctx.guild,
+                    anti_spam_svc  = anti_spam_service,
+                    onboarding_svc = onboarding_service,
+                )
+                hc_embed = build_overview_embed(report)
+                hc_view  = HealthCheckView(
+                    report         = report,
+                    service        = health_check_svc,
+                    guild          = ctx.guild,
+                    anti_spam_svc  = anti_spam_service,
+                    onboarding_svc = onboarding_service,
+                )
+                await hc_channel.send(embed=hc_embed, view=hc_view)
+                logger.info("Health check postado em #health-check")
+        except Exception as e:
+            logger.error(f"Erro ao postar health check pós-setup: {e}")
+        # ─────────────────────────────────────────────────────────────────
+
         embed = discord.Embed(
             title="✅ Servidor Configurado!",
             description="Toda a estrutura foi criada/atualizada com sucesso.",
             color=discord.Color.green()
         )
-        embed.add_field(
-            name="📈 ANALYTICS",
-            value="• dashboard-partidas",
-            inline=True
-        )
-        embed.add_field(
-            name="ℹ️ INFORMAÇÕES",
-            value="• 📜regras\n• 📢avisos\n• painel-mediadores", 
-            inline=True
-        )
-        embed.add_field(
-            name="🧑‍⚖️ MEDIADORES",
-            value="• painel-mediadores\n• chat-mediadores",
-            inline=True
-        )
+        embed.add_field(name="📈 ANALYTICS",    value="• dashboard-partidas\n• historico-partidas\n• logs-partidas",  inline=True)
+        embed.add_field(name="📊 DASHBOARD",    value="• health-check",                                               inline=True)
+        embed.add_field(name="🚫 BANS-CONTROL", value="• membros-bloqueados",                                         inline=True)
+        embed.add_field(name="ℹ️ INFORMAÇÕES",  value="• 📜regras\n• 📢avisos",                                       inline=True)
+        embed.add_field(name="🧑‍⚖️ MEDIADORES", value="• painel-mediadores\n• chat-mediadores",                        inline=True)
         embed.add_field(
             name="🎫 SUPORTE",
             value="• suporte\n• chat-suporte\n• chamados-suporte\n• chat-chamados",
             inline=True
         )
-        embed.add_field(name="🎭 Cargos",       value="• Membro\n• Controller\n• Suporte\n• ADM",      inline=True)
+        embed.add_field(name="🎭 Cargos",       value="• Membro\n• Controller\n• Suporte\n• ADM",                     inline=True)
         embed.add_field(
             name="💰 Valores",
             value="R$2 • R$5 • R$10 • R$20 • R$50 • R$100 • R$200",
@@ -323,6 +354,7 @@ async def setup_canais(ctx):
     except Exception as e:
         logger.error(f"Erro no setupcanais: {e}")
         await ctx.send(f"❌ Erro: {str(e)}")
+
 
 
 @bot.command(name='dashboard')
@@ -694,6 +726,58 @@ async def atualizar_todos_cards(ctx):
         await ctx.send(f"❌ Erro: {e}")
 
 
+# ==================== HEALTH CHECK ==================== ← NOVO
+
+
+@bot.command(name='healthcheck')
+@commands.has_permissions(administrator=True)
+async def health_check(ctx):
+    """!healthcheck — exibe o painel de saúde do sistema no canal #health-check"""
+    if not health_check_svc:
+        await ctx.reply("❌ HealthCheckService não inicializado.")
+        return
+
+    # Garante que só seja usado no canal correto
+    if ctx.channel.name != HEALTH_CHECK_CHANNEL_NAME:
+        hc_channel = discord.utils.get(ctx.guild.text_channels, name=HEALTH_CHECK_CHANNEL_NAME)
+        if hc_channel:
+            await ctx.reply(
+                f"❌ Use este comando em {hc_channel.mention}.",
+                delete_after=10
+            )
+        else:
+            await ctx.reply("❌ Canal `#health-check` não encontrado. Use `!setupcanais`.")
+        try:
+            await ctx.message.delete(delay=10)
+        except Exception:
+            pass
+        return
+
+    msg = await ctx.reply("⏳ Coletando dados do sistema...")
+
+    try:
+        report = await health_check_svc.run(
+            guild          = ctx.guild,
+            anti_spam_svc  = anti_spam_service,
+            onboarding_svc = onboarding_service,
+        )
+
+        embed = build_overview_embed(report)
+        view  = HealthCheckView(
+            report         = report,
+            service        = health_check_svc,
+            guild          = ctx.guild,
+            anti_spam_svc  = anti_spam_service,
+            onboarding_svc = onboarding_service,
+        )
+
+        await msg.edit(content=None, embed=embed, view=view)
+
+    except Exception as e:
+        logger.error(f"Erro no healthcheck: {e}", exc_info=True)
+        await msg.edit(content=f"❌ Erro ao executar health check: {e}")
+
+
 # ==================== COMANDOS DE PARTIDA ====================
 
 
@@ -854,7 +938,7 @@ async def ver_fila(ctx):
         await ctx.reply(f"❌ Erro: {str(e)}")
 
 
-# ==================== THREAD POOL (NOVOS) ====================
+# ==================== THREAD POOL ====================
 
 
 @bot.command(name='threadstatus')
@@ -948,7 +1032,7 @@ async def validar_pool(ctx):
         title="🧹 Pool Validado",
         color=discord.Color.green()
     )
-    embed.add_field(name="✅ Threads válidas",  value=str(result.get('valid', 0)),   inline=True)
+    embed.add_field(name="✅ Threads válidas",    value=str(result.get('valid', 0)),   inline=True)
     embed.add_field(name="🗑️ Entradas removidas", value=str(result.get('removed', 0)), inline=True)
     await msg.edit(content=None, embed=embed)
 
@@ -1025,10 +1109,10 @@ async def help_command(ctx):
         description="Comandos disponíveis para jogadores.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",              inline=False)
-    embed.add_field(name="!partidas",           value="Ver partidas ativas",                    inline=False)
-    embed.add_field(name="!statuscanal [nome]", value="Ver estatísticas de um canal",           inline=False)
-    embed.add_field(name="!fila",               value="Ver a fila de mediadores disponíveis",   inline=False)
+    embed.add_field(name="!perfil [@usuario]",  value="Ver perfil e estatísticas",            inline=False)
+    embed.add_field(name="!partidas",           value="Ver partidas ativas",                  inline=False)
+    embed.add_field(name="!statuscanal [nome]", value="Ver estatísticas de um canal",         inline=False)
+    embed.add_field(name="!fila",               value="Ver a fila de mediadores disponíveis", inline=False)
     embed.add_field(
         name="ℹ️ Como jogar",
         value=(
@@ -1089,15 +1173,15 @@ async def help_mediador(ctx):
         color=discord.Color.blue()
     )
     embed.add_field(name="━━ 🎮 PARTIDA ━━",           value="\u200b", inline=False)
-    embed.add_field(name="!menu_partida",               value="Recebe o painel de controle via DM",                       inline=False)
-    embed.add_field(name="!confirmar_pagamento",        value="Confirma recebimento dos pagamentos dos jogadores",         inline=False)
-    embed.add_field(name="!iniciar_partida",            value="Inicia a partida após confirmar pagamento",                 inline=False)
-    embed.add_field(name="!winner_team blue|red",       value="Declara o time vencedor",                                   inline=False)
-    embed.add_field(name="!prize",                      value="Confirma que o prêmio foi entregue ao vencedor",            inline=False)
-    embed.add_field(name="!cancelar_match [motivo]",    value="Cancela a partida da thread atual",                         inline=False)
+    embed.add_field(name="!menu_partida",               value="Recebe o painel de controle via DM",                     inline=False)
+    embed.add_field(name="!confirmar_pagamento",        value="Confirma recebimento dos pagamentos dos jogadores",       inline=False)
+    embed.add_field(name="!iniciar_partida",            value="Inicia a partida após confirmar pagamento",               inline=False)
+    embed.add_field(name="!winner_team blue|red",       value="Declara o time vencedor",                                 inline=False)
+    embed.add_field(name="!prize",                      value="Confirma que o prêmio foi entregue ao vencedor",          inline=False)
+    embed.add_field(name="!cancelar_match [motivo]",    value="Cancela a partida da thread atual",                       inline=False)
     embed.add_field(name="━━ 📋 FILA ━━",               value="\u200b", inline=False)
-    embed.add_field(name="!addmediador",                value="Entra na fila de mediadores disponíveis",                   inline=False)
-    embed.add_field(name="!removemediador",             value="Sai da fila de mediadores",                                 inline=False)
+    embed.add_field(name="!addmediador",                value="Entra na fila de mediadores disponíveis",                 inline=False)
+    embed.add_field(name="!removemediador",             value="Sai da fila de mediadores",                               inline=False)
     embed.add_field(name="━━ ⚠️ FLUXO OBRIGATÓRIO ━━",  value="\u200b", inline=False)
     embed.add_field(
         name="Ordem dos comandos",
@@ -1128,6 +1212,8 @@ async def help_admin(ctx):
     embed.add_field(name="!atualizarmediadores",               value="Atualiza o painel no #painel-mediadores",                 inline=False)
     embed.add_field(name="!sincmediadores",                    value="Sincroniza a fila pelo cargo Controller",                 inline=False)
     embed.add_field(name="!dashboard",                         value="Força atualização do dashboard Analytics",                inline=False)
+    embed.add_field(name="━━ 🏥 HEALTH CHECK ━━",              value="\u200b", inline=False)  # ← NOVO
+    embed.add_field(name="!healthcheck",                       value="Exibe painel de saúde completo do sistema",              inline=False)  # ← NOVO
     embed.add_field(name="━━ 🧵 THREADS ━━",                   value="\u200b", inline=False)
     embed.add_field(name="!threadstatus",                      value="Exibe pool, partidas ativas e limite do servidor",        inline=False)
     embed.add_field(name="!preaquecerpool [#canal] [qtd]",     value="Pré-cria threads arquivadas para evitar limite Discord",  inline=False)
