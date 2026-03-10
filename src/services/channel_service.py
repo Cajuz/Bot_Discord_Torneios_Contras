@@ -9,6 +9,8 @@ from services.mediator_queue import mediator_queue
 from services.match_queue_service import match_queue_service
 from views.match_queue_view import create_match_queue_embed, MatchQueueView
 from utils.logger import logger, log_success
+from services.pedido_mediador import PedidomediadorEmbed
+
 
 
 # ─────────────────────────────────────────────
@@ -46,6 +48,7 @@ INFO_CATEGORY_NAME        = "ℹ️ INFORMAÇÕES"
 CATEGORY_MEDIATOR_NAME    = "🧑‍⚖️ MEDIADORES"
 CATEGORY_SUPPORT_NAME     = "🎫 SUPORTE"
 BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
+QUEROSERMEDIADOR_CHANNEL  = "QUER-SER-MEDIADOR"
 
 
 class ChannelService:
@@ -194,6 +197,31 @@ class ChannelService:
                 }
             )
             await self._post_rules_embed(guild, rules_channel)
+
+            quero_mediador_channel = await self._ensure_text_channel(
+                guild,
+                name="quero-ser-mediador",
+                category=info_category,
+                topic="Veja os benefícios e torne-se um mediador do servidor.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+                    member_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True
+                    ),
+                }
+            )
+
+            # garantir posição 0 dentro da categoria
+            await quero_mediador_channel.edit(position=0)
+            await channel.send(embed=PedidomediadorEmbed.beneficios())
 
             await self._ensure_text_channel(
                 guild,
@@ -366,6 +394,7 @@ class ChannelService:
             },
         )
         logger.info("Categoria 📊 DASHBOARD e canal #health-check configurados")
+ 
 
 
     # ─────────────────────────────────────────────

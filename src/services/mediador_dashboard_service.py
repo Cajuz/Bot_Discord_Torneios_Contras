@@ -10,11 +10,8 @@ from discord.ext import tasks
 from urllib.parse import quote 
 from discord import client
 from discord import user
-
 from discord.errors import NotFound
-from discord.ext import tasks
 from zoneinfo import ZoneInfo 
-from discord.ext import tasks
 from config.channels_config import ChannelsConfig
 
 

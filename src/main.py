@@ -49,6 +49,8 @@ from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service
 from services.health_check_service import init_health_check_service, set_bot_start_time
 from views.health_check_view import build_overview_embed, HealthCheckView
 # ─────────────────────────────────────────────────────────────────────────────
+#TESTE
+from services.pedido_mediador import PedidomediadorEmbed, PedidoMediadorVAlor
 
 
 load_dotenv()
@@ -354,6 +356,23 @@ async def setup_canais(ctx):
     except Exception as e:
         logger.error(f"Erro no setupcanais: {e}")
         await ctx.send(f"❌ Erro: {str(e)}")
+
+@bot.command(name="testecanal")
+@commands.has_permissions(administrator=True)
+async def teste_possivel_mediador(ctx):
+    try:
+        embed = PedidomediadorEmbed.beneficios()
+
+        await ctx.send(
+            embed=embed,
+            view=PedidoMediadorVAlor()
+        )
+    except Exception as e:
+        logger.error(f"Erro de teste: {e}")
+        await ctx.send(f"❌ Erro: {str(e)}")
+
+
+
 
 
 
