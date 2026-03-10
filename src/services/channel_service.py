@@ -9,7 +9,8 @@ from services.mediator_queue import mediator_queue
 from services.match_queue_service import match_queue_service
 from views.match_queue_view import create_match_queue_embed, MatchQueueView
 from utils.logger import logger, log_success
-from services.pedido_mediador import PedidomediadorEmbed
+from services.pedido_mediador import PedidomediadorEmbed, PedidoMediadorView
+
 
 
 
@@ -48,8 +49,12 @@ INFO_CATEGORY_NAME        = "ℹ️ INFORMAÇÕES"
 CATEGORY_MEDIATOR_NAME    = "🧑‍⚖️ MEDIADORES"
 CATEGORY_SUPPORT_NAME     = "🎫 SUPORTE"
 BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
-QUEROSERMEDIADOR_CHANNEL  = "QUER-SER-MEDIADOR"
-
+#teste
+QUEROSERMEDIADOR_CHANNEL = "quero-ser-mediador"
+MEDIATOR_CATEGORY = "mediadores"
+ATENDIMENTO_CATEGORY = "atendimento-mediador"
+SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
+CATEGORIA_ATENDIMENTO = "Atendimento"
 
 class ChannelService:
 
@@ -221,7 +226,14 @@ class ChannelService:
 
             # garantir posição 0 dentro da categoria
             await quero_mediador_channel.edit(position=0)
-            await channel.send(embed=PedidomediadorEmbed.beneficios())
+
+            embed = PedidomediadorEmbed.beneficios()
+
+            await quero_mediador_channel.send(
+            embed=embed,
+            view=PedidoMediadorView()
+            )   
+            
 
             await self._ensure_text_channel(
                 guild,
@@ -288,6 +300,26 @@ class ChannelService:
                         view_channel=True,
                         send_messages=True
                     ),
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+                }
+            )
+            # CANAL DE SOLICITAÇÕES DE MEDIADOR
+            await self._ensure_text_channel(
+                guild,
+                name=SOLICITACOES_MEDIADOR_CHANNEL,
+                category=controller_category,
+                topic="Solicitações de usuários que desejam se tornar mediadores.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+
                     guild.me: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True

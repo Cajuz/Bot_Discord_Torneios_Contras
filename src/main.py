@@ -39,18 +39,20 @@ from services.channel_service import (
     SUPPORT_ROLE_NAME,
     ADM_ROLE_NAME,
     HEALTH_CHECK_CHANNEL_NAME,       # ← NOVO
+    QUEROSERMEDIADOR_CHANNEL,
 )
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
 from services.anti_spam_service import AntiSpamService, SPAM_BLOCK_ROLE_NAME
 from views.spam_block_card_view import SpamBlockCardView, set_anti_spam_service
+from services.channel_service import QUEROSERMEDIADOR_CHANNEL,ATENDIMENTO_CATEGORY,MEDIATOR_CATEGORY
 
 # ── NOVO — Health Check ───────────────────────────────────────────────────────
 from services.health_check_service import init_health_check_service, set_bot_start_time
 from views.health_check_view import build_overview_embed, HealthCheckView
 # ─────────────────────────────────────────────────────────────────────────────
 #TESTE
-from services.pedido_mediador import PedidomediadorEmbed, PedidoMediadorVAlor
+from services.pedido_mediador import PedidomediadorEmbed, PedidoMediadorValor, PedidoMediadorAdminView
 
 
 load_dotenv()
@@ -260,9 +262,37 @@ async def faturamentos_geral_error(ctx, error):
 
 # ==================== COMANDOS ADMINISTRATIVOS ====================
 
+@bot.command(name="confirmarmediador")
+@commands.has_permissions(administrator=True)
+async def confirmarmediador(ctx, membro: discord.Member):
+    guild = ctx.guild
 
+    # Pega o cargo de mediador
+    mediator_role = discord.utils.get(guild.roles, name=MEDIATOR_ROLE_NAME)
+    if not mediator_role:
+        await ctx.send(f"❌ Cargo `{MEDIATOR_ROLE_NAME}` não encontrado.")
+        return
+
+    # Adiciona o cargo ao usuário
+    try:
+        await membro.add_roles(mediator_role, reason=f"Aprovado por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"❌ Erro ao adicionar cargo: {e}")
+        return
+
+    # Envia DM para o usuário
+    try:
+        await membro.send(
+            f"✅ Parabéns! Você foi promovido a **{MEDIATOR_ROLE_NAME}** pelo {ctx.author.mention}.\n"
+            "Agora você tem acesso aos canais e privilégios de mediador."
+        )
+    except discord.Forbidden:
+        await ctx.send(f"⚠️ Não foi possível enviar DM para {membro.mention}.")
+
+    await ctx.send(f"✅ {membro.mention} agora é **{MEDIATOR_ROLE_NAME}** e recebeu a DM de confirmação.")
 
 @bot.command(name="faturamento")
+@commands.has_permissions(administrator=True)
 async def faturamento(ctx, mediador_id: str = None):
     """Comando !faturamento ID"""
     
@@ -365,7 +395,7 @@ async def teste_possivel_mediador(ctx):
 
         await ctx.send(
             embed=embed,
-            view=PedidoMediadorVAlor()
+            view=PedidoMediadorValor()
         )
     except Exception as e:
         logger.error(f"Erro de teste: {e}")

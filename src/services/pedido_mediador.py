@@ -14,144 +14,24 @@ from discord.errors import NotFound
 from zoneinfo import ZoneInfo 
 from config.channels_config import ChannelsConfig
 
+SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
 
 
 
 
 
-from services.channel_service import (
-    QUEROSERMEDIADOR_CHANNEL,
-    #CATEGORY_ANALYTICS_NAME,
-    #ADM_ROLE_NAME,
-)
 
 horario_brasilia = time(3, 0, 0)
 
 
-# quero ser mediador 
-class querosermediador:
-    def __int__(self):
-        self.bot= None
-        
-    # ==================== TASK DIÁRIA ====================
-
-
-    @tasks.loop(time=horario_brasilia)
-    async def daily_update(self):
-        logger.info("Executando atualização automática de meia-noite...")
-        for guild in self.bot.guilds:
-            try:
-                channel = await self.resolve_dashboard_channel(guild)
-                if channel:
-                    await self.update_dashboard_for_channel(channel)
-            except Exception as e:
-                logger.error(f"Erro no daily_update para guild {guild.name}: {e}")
-
-
-    @daily_update.before_loop
-    async def before_daily_update(self):
-        await self.bot.wait_until_ready()
-
-
-    # ==================== RESOLUÇÃO DO CANAL ====================
-
-
-    async def resolve_canalmediador(self, guild: discord.Guild) -> discord.TextChannel | None:
-        """
-        Garante que a categoria Analytics e o canal quero ser mediador existam.
-        Usado pela task diária e como fallback independente.
-        """
-        try:
-            # Categoria Analytics
-            category = discord.utils.get(guild.categories, name=CATEGORY_ANALYTICS_NAME)
-            if not category:
-                category = await guild.create_category(CATEGORY_ANALYTICS_NAME)
-                logger.info(f"✅ Categoria '{CATEGORY_ANALYTICS_NAME}' criada em {guild.name}")
-
-            # Cargo ADM
-            adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
-            if not adm_role:
-                adm_role = await guild.create_role(name=ADM_ROLE_NAME, mentionable=True)
-                logger.info(f"✅ Cargo '{ADM_ROLE_NAME}' criado em {guild.name}")
-
-            # Permissões: só ADM vê, @everyone bloqueado, bot pode tudo
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                adm_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=False,
-                    read_message_history=True
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    manage_messages=True,
-                    manage_channels=True
-                ),
-            }
-
-            # Canal dashboard-partidas
-            channel = discord.utils.get(guild.text_channels, name=DASHBOARD_CHANNEL_NAME)
-            if not channel:
-                channel = await guild.create_text_channel(
-                    name=DASHBOARD_CHANNEL_NAME,
-                    category=category,
-                    overwrites=overwrites,
-                    topic="📊 Dashboard automático de partidas — atualizado diariamente"
-                )
-                logger.info(f"✅ Canal '{DASHBOARD_CHANNEL_NAME}' criado em {guild.name}")
-            else:
-                await channel.edit(
-                    category=category,
-                    overwrites=overwrites,
-                    topic="📊 Dashboard automático de partidas — atualizado diariamente"
-                )
-                logger.info(f"✅ Canal '{DASHBOARD_CHANNEL_NAME}' atualizado em {guild.name}")
-
-            return channel
-
-        except discord.Forbidden:
-            logger.error(f"❌ Sem permissão para criar/editar canal em {guild.name}")
-            return None
-        except Exception as e:
-            logger.error(f"Erro no resolve_dashboard_channel ({guild.name}): {e}")
-            return None
-        
-
-
-    async def queroser_mediador(interaction: discord.Interaction):
-
-        guild = interaction.guild
-        usuario = interaction.user
-
-
-        
-        # Permissões do canal
-        await canal.set_permissions(usuario, view_channel=True, send_messages=True)
-
-        for membro in guild.members:
-            if ADM_ROLE_NAME in [r.id for r in membro.roles]:
-                await canal.set_permissions(membro, view_channel=True, send_messages=True)
-
-        await interaction.response.send_message(
-            "📨 Sua solicitação foi enviada. Aguarde um ADM.",
-            ephemeral=True
-        )
-
-        await canal.send(
-            f"🔔 **Pedido de Mediador**\n\n"
-            f"Usuário: {usuario.mention}\n\n"
-            f"ADM, decidam abaixo⬇️:", 
-            view=AprovarMediador(usuario)
-        ) 
 
 
 
+# Embed de Benefícios
 class PedidomediadorEmbed:
 
     @staticmethod
     def beneficios():
-
         embed = discord.Embed(
             title="💼 Torne-se um Mediador",
             description=(
@@ -183,11 +63,8 @@ class PedidomediadorEmbed:
         )
 
         embed.add_field(
-            name="📅 Planos Disponíveis",
-            value=(
-                "• Plano semanal\n"
-                "• Plano mensal"
-            ),
+            name="📅 Plano Disponível",
+            value="• Plano semanal",
             inline=False
         )
 
@@ -198,76 +75,194 @@ class PedidomediadorEmbed:
         return embed
 
 
-import discord
+# Modal de Solicitação
+class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
 
-MAX_SALAS = 3
-CATEGORIA_ATENDIMENTO = "atendimento-mediador"
+    def __init__(self, plano: str):
+        super().__init__()
+        self.plano = plano
 
+    mensagem = discord.ui.TextInput(
+        label="Por que você quer ser mediador?",
+        placeholder="Explique brevemente...",
+        style=discord.TextStyle.paragraph,
+        max_length=500
+    )
 
-class PedidoMediadorVAlor(discord.ui.View):
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            adm_role = discord.utils.get(interaction.guild.roles, name="ADM")
 
-    async def criar_sala(self, interaction: discord.Interaction, plano: str):
+            canal = discord.utils.get(interaction.guild.text_channels, name="solicitacoes-mediador")
+            if not canal:
+                canal = await interaction.guild.create_text_channel(
+                    "solicitacoes-mediador",
+                    overwrites={
+                        interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                        adm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                        interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
+                    },
+                    topic="Solicitações de novos mediadores — apenas ADM pode ver"
+                )
 
-        guild = interaction.guild
-        user = interaction.user
+            embed = discord.Embed(
+                title="📩 Nova solicitação de mediador",
+                color=discord.Color.yellow()
+            )
 
-        categoria = discord.utils.get(guild.categories, name=CATEGORIA_ATENDIMENTO)
+            embed.add_field(name="Usuário", value=interaction.user.mention, inline=False)
+            embed.add_field(name="Mensagem", value=self.mensagem.value, inline=False)
 
-        if not categoria:
-            categoria = await guild.create_category(CATEGORIA_ATENDIMENTO)
+            # CORREÇÃO: passe o plano ao criar a View
+            await canal.send(
+                embed=embed,
+                view=PedidoMediadorAdminView(plano=self.plano, user_id=interaction.user.id)
+            )
 
-        canais_abertos = len(categoria.text_channels)
-
-        # sala cheia
-        if canais_abertos >= MAX_SALAS:
             await interaction.response.send_message(
-                "⚠️ Todas as salas estão ocupadas.\n"
-                "Você entrou na **fila de espera**.",
+                "✅ Sua solicitação foi enviada para a equipe!",
                 ephemeral=True
             )
-            return
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            user: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Ocorreu um erro: {e}",
+                ephemeral=True
             )
-        }
 
-        canal = await guild.create_text_channel(
-            name=f"pedido-{user.name}",
-            category=categoria,
-            overwrites=overwrites
-        )
 
-        await canal.send(
-            f"{user.mention} bem-vindo!\n"
-            f"Plano escolhido: **{plano}**\n"
-            "Aguarde um administrador para continuar o pagamento via **PIX**."
-        )
+# View com apenas plano semanal
+class PedidoMediadorValor(discord.ui.View):
 
-        await interaction.response.send_message(
-            f"✅ Sua sala foi criada: {canal.mention}",
-            ephemeral=True
-        )
-
+    def __init__(self):
+        super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Plano Semanal - R$50",
         style=discord.ButtonStyle.green
     )
     async def semanal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.criar_sala(interaction, "Semanal R$50")
+        try:
+            modal = PedidoMediadorModal("Semanal - R$50")
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Erro botão semanal: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Erro ao abrir o formulário.",
+                    ephemeral=True
+                )
 
+
+# View principal do usuário
+class PedidoMediadorView(discord.ui.View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Plano Mensal - R$200",
-        style=discord.ButtonStyle.blurple
+        label="Quero ser mediador",
+        style=discord.ButtonStyle.green
     )
-    async def mensal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.criar_sala(interaction, "Mensal R$200")
+    async def pedir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.send_message(
+                "Escolha um plano:",
+                view=PedidoMediadorValor(),
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"Erro botão pedir mediador: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Ocorreu um erro.",
+                    ephemeral=True
+                )
+
+
+# View para ADM aprovar/recusar
+class PedidoMediadorAdminView(discord.ui.View):
+    def __init__(self, plano: str, user_id: int):
+        super().__init__(timeout=None)
+        self.plano = plano
+        self.user_id = user_id
+
+    @discord.ui.button(label="Aprovar", style=discord.ButtonStyle.green, custom_id="aprovar_mediador")
+    async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild = interaction.guild
+            user = guild.get_member(self.user_id)
+            admin = interaction.user
+
+            if not user:
+                await interaction.response.send_message(
+                    "❌ Usuário não encontrado no servidor.", ephemeral=True
+                )
+                return
+
+            # DM para o usuário
+            try:
+                await user.send(
+                    f"✅ Sua solicitação para ser mediador foi **aprovada** pelo {admin.mention}.\n"
+                    f"Plano escolhido: **{self.plano}**\n"
+                    "Por favor, entre em contato com o ADM para enviar o comprovante."
+                )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    f"⚠️ Não foi possível enviar DM para {user.mention}.", ephemeral=True
+                )
+
+            # DM para o ADM
+            try:
+                await admin.send(
+                    f"📩 Você aprovou {user.mention} para o plano **{self.plano}**.\n"
+                    "O usuário foi notificado para entrar em contato com você."
+                )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    f"⚠️ Não foi possível enviar DM para {admin.mention}.", ephemeral=True
+                )
+
+            # Confirmação no canal para o ADM
+            await interaction.response.send_message(
+                f"✅ Solicitação aprovada! DMs enviadas para {user.mention} e você.", ephemeral=True
+            )
+
+            button.disabled = True
+            await interaction.message.edit(view=self)
+
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Ocorreu um erro ao aprovar a solicitação: {e}", ephemeral=True
+            )
+
+    @discord.ui.button(label="Recusar", style=discord.ButtonStyle.red, custom_id="recusar_mediador")
+    async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild = interaction.guild
+            user = guild.get_member(self.user_id)
+            admin = interaction.user
+
+            if user:
+                try:
+                    await user.send(
+                        f"❌ Sua solicitação para ser mediador foi **recusada** pelo {admin.mention}."
+                    )
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        f"⚠️ Não foi possível enviar DM para {user.mention}.",
+                        ephemeral=True
+                    )
+
+            await interaction.response.send_message(
+                f"❌ Você recusou {user.mention}.", ephemeral=True
+            )
+
+            button.disabled = True
+            await interaction.message.edit(view=self)
+
+        except Exception as e:
+            await interaction.response.send_message(
+                "❌ Ocorreu um erro ao recusar a solicitação.", ephemeral=True
+            )
+
