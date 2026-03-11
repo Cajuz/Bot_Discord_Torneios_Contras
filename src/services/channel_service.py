@@ -139,6 +139,49 @@ class ChannelService:
                 }
             )
             logger.info("Canal #historico-partidas configurado")
+            # ─────────────────────────────────────────────
+            # Canal do Painel Analytics
+            # ─────────────────────────────────────────────
+            analytics_channel = await self._ensure_text_channel(
+                guild,
+                name="📊・analytics",
+                category=analytics_category,
+                topic="Painel central de análises do servidor.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=False,
+                        read_message_history=True,
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        manage_messages=True,
+                    ),
+                }
+            )
+
+            logger.info("Canal #analytics configurado")
+
+            # Enviar painel
+            if analytics_channel:
+
+                embed = discord.Embed(
+                    title="📊 Painel Analytics",
+                    description=(
+                        "Visualize rapidamente métricas como faturamento "
+                        "e análise das filas dos mediadores.\n\n"
+                        "**Status:** 🟢"
+                    ),
+                    color=0x2B2D31
+                )
+
+                view = AnalyticsView()
+
+                await analytics_channel.purge(limit=5)
+
+                await analytics_channel.send(embed=embed, view=view)
 
             await self._ensure_text_channel(
                 guild,
@@ -264,6 +307,38 @@ class ChannelService:
             # ── 6. MEDIADORES (posição 4) ──────────────────────────
             controller_category = await self._ensure_category(guild, CATEGORY_MEDIATOR_NAME)
             await controller_category.edit(position=4)
+            quero_mediador_channel = await self._ensure_text_channel(
+                guild,
+                name="quero-ser-mediador",
+                category=info_category,
+                topic="Veja os benefícios e torne-se um mediador do servidor.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+
+                    member_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+
+                    guild.me: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True
+                    ),
+                }
+            )
+
+            # garantir posição 0 dentro da categoria
+            await quero_mediador_channel.edit(position=0)
+
+            embed = PedidomediadorEmbed.beneficios()
+
+            await quero_mediador_channel.send(
+                embed=embed,
+                view=PedidoMediadorView()
+            )
 
             mediator_channel = await self._ensure_text_channel(
                 guild,
