@@ -144,24 +144,27 @@ class ChannelService:
             # ─────────────────────────────────────────────
             analytics_channel = await self._ensure_text_channel(
                 guild,
-                name="📊・analytics",
+                name="analytics",
                 category=analytics_category,
                 topic="Painel central de análises do servidor.",
-                overwrites={
-                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(
+                        view_channel=False
+                    ),
+
                     adm_role: discord.PermissionOverwrite(
                         view_channel=True,
-                        send_messages=False,
-                        read_message_history=True,
+                        send_messages=True,
+                        read_message_history=True
                     ),
+
                     guild.me: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True,
-                        manage_messages=True,
-                    ),
+                        manage_messages=True
+                    )
                 }
             )
-
             logger.info("Canal #analytics configurado")
 
             # Enviar painel
@@ -250,37 +253,7 @@ class ChannelService:
                 }
             )
             await self._post_rules_embed(guild, rules_channel)
-
-            quero_mediador_channel = await self._ensure_text_channel(
-                guild,
-                name="quero-ser-mediador",
-                category=info_category,
-                topic="Veja os benefícios e torne-se um mediador do servidor.",
-                overwrites={
-                    guild.default_role: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=False
-                    ),
-                    member_role: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=False
-                    ),
-                    guild.me: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True
-                    ),
-                }
-            )
-
-            # garantir posição 0 dentro da categoria
-            await quero_mediador_channel.edit(position=0)
-
-            embed = PedidomediadorEmbed.beneficios()
-
-            await quero_mediador_channel.send(
-            embed=embed,
-            view=PedidoMediadorView()
-            )   
+  
             
 
             await self._ensure_text_channel(
