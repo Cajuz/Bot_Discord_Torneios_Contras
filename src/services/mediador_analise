@@ -1,0 +1,63 @@
+from models.mediator import Mediator
+from models.match import Match
+from typing import List, Dict
+from datetime import datetime, timedelta
+
+
+class ActiveMediatorService:
+
+    def __init__(self, db):
+        self.db = db
+        self.mediator_collection = db.get_collection("mediators")
+        self.match_collection = db.get_collection("matches")
+
+    async def get_active_mediators(self) -> List[Mediator]:
+        """
+        Retorna todos os mediadores ativos, atualizando limite de partidas a cada 8 minutos.
+        """
+        now = datetime.utcnow()
+        docs = await self.mediator_collection.find({"is_active": True}).to_list(length=None)
+        mediators = [Mediator(doc) for doc in docs]
+
+        for m in mediators:
+            if not m.last_reset_at or m.last_reset_at < now - timedelta(minutes=8):
+                m.matches_in_last_8_minutes = 0
+                m.last_reset_at = now
+
+        return mediators
+
+    async def get_mediators_with_stats(self) -> List[Dict]:
+        """
+        Retorna mediadores ativos com estatísticas de partidas.
+        Único método centralizado para todos os módulos.
+        """
+        active_mediators = await self.get_active_mediators()
+
+        match_docs = await self.match_collection.find({
+            "status": {"$in": Match.ACTIVE_STATUSES}
+        }).to_list(length=None)
+        matches = [Match(doc) for doc in match_docs]
+
+        mediator_stats = []
+
+        for m in active_mediators:
+            in_queue = sum(1 for mt in matches if mt.mediator_id == m.discord_id and mt.status != Match.STATUS_AGUARDANDO_PREMIO)
+            confirmed = sum(1 for mt in matches if mt.mediator_id == m.discord_id and mt.status == Match.STATUS_AGUARDANDO_PREMIO)
+
+            mediator_stats.append({
+                "discord_id": m.discord_id,
+                "username": m.username,
+                "in_queue": in_queue,
+                "confirmed": confirmed,
+                "total_matches": m.total_matches,
+                "can_mediate": m.can_mediate()
+            })
+
+        return mediator_stats
+
+    async def count_active_mediators(self) -> int:
+        """
+        Retorna total de mediadores ativos.
+        """
+        active = await self.get_active_mediators()
+        return len(active)

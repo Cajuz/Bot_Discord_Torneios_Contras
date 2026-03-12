@@ -7,8 +7,17 @@ from config.database import db
 from config.channels_config import ChannelsConfig
 from services.mediator_queue import mediator_queue
 from services.match_queue_service import match_queue_service
+from services.analise_fila import AnalyticsView
 from views.match_queue_view import create_match_queue_embed, MatchQueueView
 from utils.logger import logger, log_success
+from services.pedido_mediador_service import PedidomediadorEmbed, PedidoMediadorView
+from views.quero_ser_mediador_view import  VerificacaoMediadoresEmbed
+
+
+
+
+
+
 
 
 # ─────────────────────────────────────────────
@@ -46,6 +55,12 @@ INFO_CATEGORY_NAME        = "ℹ️ INFORMAÇÕES"
 CATEGORY_MEDIATOR_NAME    = "🧑‍⚖️ MEDIADORES"
 CATEGORY_SUPPORT_NAME     = "🎫 SUPORTE"
 BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
+#teste
+SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
+VERIFICACAO_MEDIADORES_CHANNEL = "verificacao-mediadores"
+QUERO_SER_MEDIADOR_CHANNEL = "quero-ser-mediador"
+
+# ─────────────────────────────────────────────
 
 
 class ChannelService:
@@ -126,6 +141,52 @@ class ChannelService:
                 }
             )
             logger.info("Canal #historico-partidas configurado")
+            # ─────────────────────────────────────────────
+            # Canal do Painel Analytics
+            # ─────────────────────────────────────────────
+            analytics_channel = await self._ensure_text_channel(
+                guild,
+                name="analytics",
+                category=analytics_category,
+                topic="Painel central de análises do servidor.",
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(
+                        view_channel=False
+                    ),
+
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True
+                    ),
+
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        manage_messages=True
+                    )
+                }
+            )
+            logger.info("Canal #analytics configurado")
+
+            # Enviar painel
+            if analytics_channel:
+
+                embed = discord.Embed(
+                    title="📊 Painel Analytics",
+                    description=(
+                        "Visualize rapidamente métricas como faturamento "
+                        "e análise das filas dos mediadores.\n\n"
+                        "**Status:** 🟢"
+                    ),
+                    color=0x2B2D31
+                )
+
+                view = AnalyticsView()
+
+                await analytics_channel.purge(limit=5)
+
+                await analytics_channel.send(embed=embed, view=view)
 
             await self._ensure_text_channel(
                 guild,
@@ -194,6 +255,8 @@ class ChannelService:
                 }
             )
             await self._post_rules_embed(guild, rules_channel)
+  
+            
 
             await self._ensure_text_channel(
                 guild,
@@ -219,6 +282,43 @@ class ChannelService:
             # ── 6. MEDIADORES (posição 4) ──────────────────────────
             controller_category = await self._ensure_category(guild, CATEGORY_MEDIATOR_NAME)
             await controller_category.edit(position=4)
+
+            quero_mediador_channel = await self._ensure_text_channel(
+                guild,
+                name=QUERO_SER_MEDIADOR_CHANNEL,
+                category=info_category,
+                topic="Veja os benefícios e torne-se um mediador do servidor.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+
+                    member_role: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False
+                    ),
+
+                    guild.me: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True
+                    ),
+                }
+            )
+
+            # garantir posição 0 dentro da categoria
+            await quero_mediador_channel.edit(position=0)
+
+            # 🧹 LIMPAR MENSAGENS ANTIGAS
+            logger.info(f"🧹 Limpando mensagens em #{quero_mediador_channel.name}...")
+            await quero_mediador_channel.purge(limit=20)
+
+            embed = PedidomediadorEmbed.beneficios()
+
+            await quero_mediador_channel.send(
+                embed=embed,
+                view=PedidoMediadorView()
+            )
 
             mediator_channel = await self._ensure_text_channel(
                 guild,
@@ -266,6 +366,53 @@ class ChannelService:
                     ),
                 }
             )
+            # CANAL DE SOLICITAÇÕES DE MEDIADOR
+            await self._ensure_text_channel(
+                guild,
+                name=SOLICITACOES_MEDIADOR_CHANNEL,
+                category=controller_category,
+                topic="Solicitações de usuários que desejam se tornar mediadores.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+                }
+            )
+            # CANAL DE VERIFICAÇÃO DE MEDIADORES
+            verificacao_mediadores_channel = await self._ensure_text_channel(
+                guild,
+                name=VERIFICACAO_MEDIADORES_CHANNEL,
+                category=controller_category,  # categoria definida no setcanais
+                topic="Canal para exibir diariamente o relatório de mediadores ativos e dias restantes.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        view_channel=False
+                    ),
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+                }
+            )
+
+
+            embed = await VerificacaoMediadoresEmbed(db).create_embed()
+            await verificacao_mediadores_channel.send(
+                embed=embed
+            )
+
 
             # ── 7. SUPORTE (posição 5) ─────────────────────────────
             await self._setup_support_category(
@@ -366,8 +513,66 @@ class ChannelService:
             },
         )
         logger.info("Categoria 📊 DASHBOARD e canal #health-check configurados")
+ 
+    # ─────────────────────────────────────────────
+    # analytics-painel
+    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────
+# analytics-painel
+# ─────────────────────────────────────────────
+
+    async def resolve_analytics_channel(self, guild: discord.Guild):
+
+        channel_name = "📊・analytics"
+
+        # pega categoria dashboard
+        category = discord.utils.get(guild.categories, name=CATEGORY_DASHBOARD_NAME)
+
+        channel = discord.utils.get(guild.text_channels, name=channel_name)
+
+        if not channel:
+
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=False,
+                    send_messages=False
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True
+                )
+            }
+
+            channel = await guild.create_text_channel(
+                name=channel_name,
+                category=category,
+                overwrites=overwrites,
+                topic="📊 Painel central de analytics do servidor"
+            )
+
+        return channel
 
 
+    async def send_analytics_panel(self, guild):
+
+        channel = await self.resolve_analytics_channel(guild)
+
+        embed = discord.Embed(
+            title="📊 Painel Analytics",
+            description=(
+                "Visualize rapidamente métricas como faturamento "
+                "e análise das filas dos mediadores.\n\n"
+                "**Status:** 🟢"
+            ),
+            color=0x2B2D31
+        )
+
+        view = AnalyticsView()
+
+        await channel.purge(limit=5)
+
+        await channel.send(embed=embed, view=view)
     # ─────────────────────────────────────────────
     # Ban Control — só ADM visualiza
     # ─────────────────────────────────────────────
