@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 
 from services.thread_log_service import init_thread_log_service
 from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView, RelatorioGeralView
-from views.mediator_panel_view import create_mediator_panel_embed, MediatorPanelView
+from views.quero_ser_mediador_view import MediatorConfirmation
+from views.mediator_panel_view import MediatorPanelView
+from views.mediator_panel_view import  create_mediator_panel_embed
 from services.thread_reuse_service import init_thread_reuse_service
 from views.match_thread_view import (
     PrizeConfirmView,
@@ -39,7 +41,6 @@ from services.channel_service import (
     SUPPORT_ROLE_NAME,
     ADM_ROLE_NAME,
     HEALTH_CHECK_CHANNEL_NAME,       # ← NOVO
-    QUEROSERMEDIADOR_CHANNEL,
 )
 from services.onboarding_service import OnboardingService
 from services.mediador_dashboard_service import mediator_dashboard_service
@@ -51,9 +52,10 @@ from services.health_check_service import init_health_check_service, set_bot_sta
 from views.health_check_view import build_overview_embed, HealthCheckView
 # ─────────────────────────────────────────────────────────────────────────────
 #TESTE
-from services.pedido_mediador_service import( PedidomediadorEmbed, PedidoMediadorValor, 
-MediatorConfirmation)
-from services.pedido_mediador_service import( MediatorConfirmation, )
+from services.pedido_mediador_service import( PedidomediadorEmbed, PedidoMediadorValor)
+from views.mediator_panel_view import MediatorPanelView
+
+
 
 
 load_dotenv()
@@ -266,10 +268,100 @@ async def faturamentos_geral_error(ctx, error):
 
 @bot.command(name="confirmarmediador")
 @commands.has_permissions(administrator=True)
-async def confirmarmediador(ctx, membro: discord.Member, pix_key: str):
-    confirmation = MediatorConfirmation(db, MEDIATOR_ROLE_NAME)
-    await confirmation.confirm(ctx, membro, pix_key)
+async def confirmarmediador(ctx, membro: discord.Member):
+    """
+    Confirma um usuário como mediador: salva no banco e adiciona o cargo no Discord.
+    Uso: !confirmarmediador @usuario
+    """
+    guild = ctx.guild
+    cargo_mediador = discord.utils.get(guild.roles, name=MEDIATOR_ROLE_NAME)
 
+    if not cargo_mediador:
+        await ctx.send(f"❌ Cargo `{MEDIATOR_ROLE_NAME}` não encontrado.")
+        return
+
+    collection = db.get_collection("mediators")
+
+    # Verificar se já existe no banco
+    existe = await collection.find_one({"discord_id": str(membro.id)})
+
+    if existe:
+        # Garante que o usuário tenha o cargo no Discord
+        if cargo_mediador not in membro.roles:
+            try:
+                await membro.add_roles(cargo_mediador, reason=f"Aprovado por {ctx.author}")
+            except discord.Forbidden:
+                await ctx.send("❌ Não foi possível adicionar o cargo no Discord.")
+                return
+
+        await ctx.send(f"⚠️ {membro.mention} já é mediador no banco. Cargo atualizado no Discord se necessário.")
+        return
+
+    # Salvar mediador no banco
+    await collection.insert_one({
+        "discord_id": str(membro.id),
+        "username": membro.name,
+        "created_at": datetime.utcnow(),
+        "benefit_days": 7,
+        "active": True
+    })
+
+    # Adicionar o cargo no Discord
+    try:
+        await membro.add_roles(cargo_mediador, reason=f"Aprovado por {ctx.author}")
+    except discord.Forbidden:
+        await ctx.send("❌ Não foi possível adicionar o cargo no Discord, mas o banco foi atualizado.")
+        return
+
+    await ctx.send(f"✅ {membro.mention} agora é um mediador!")
+
+
+@bot.command(name="remover_mediador")
+@commands.has_permissions(administrator=True)
+async def remover_mediador(ctx, membro: discord.Member):
+    """
+    Remove o cargo de mediador de um usuário e atualiza o banco.
+    Uso: !remover_mediador @usuario
+    """
+    guild = ctx.guild
+    cargo_mediador = discord.utils.get(guild.roles, name=MEDIATOR_ROLE_NAME)
+
+    if not cargo_mediador:
+        await ctx.send(f"❌ Cargo `{MEDIATOR_ROLE_NAME}` não encontrado.")
+        return
+
+    # Mensagem inicial
+    cargo_msg = ""
+    if cargo_mediador in membro.roles:
+        try:
+            await membro.remove_roles(cargo_mediador, reason=f"Removido por {ctx.author}")
+            cargo_msg = f"✅ Cargo de mediador removido de {membro.mention}."
+        except Exception as e:
+            cargo_msg = f"❌ Erro ao remover cargo: {e}"
+    else:
+        cargo_msg = f"⚠️ {membro.mention} não possui o cargo de mediador no servidor."
+
+    # Atualiza banco
+    collection = db.get_collection("payment_confirmations")
+    user_doc = await collection.find_one({"discord_id": str(membro.id)})
+
+    if user_doc and user_doc.get("active", True):
+        await collection.update_one(
+            {"discord_id": str(membro.id)},
+            {"$set": {"active": False}}  # Marca como inativo
+        )
+        banco_msg = "✅ Status de mediador atualizado no banco."
+    else:
+        banco_msg = "⚠️ Usuário já estava inativo no banco ou não registrado."
+
+    # Envia mensagem de retorno
+    await ctx.send(f"{cargo_msg}\n{banco_msg}")
+
+    # DM opcional
+    try:
+        await membro.send("❌ Seu cargo de mediador foi removido e seu status atualizado.")
+    except discord.Forbidden:
+        pass
 
 @bot.command(name="testecanal")
 @commands.has_permissions(administrator=True)

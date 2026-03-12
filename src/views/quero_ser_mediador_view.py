@@ -1,8 +1,18 @@
 import discord
-from datetime import datetime
+
+from pymongo import collection
 from config.database import db
 from models.pedido_mediador import PaymentConfirmation
-from src.services.pedido_mediador_service import MediatorManager
+from services.pedido_mediador_service import PedidoMediadorAdminView
+from datetime import datetime, timedelta
+from typing import List, Dict
+from models.mediator import Mediator
+from models.match import Match
+from config.database import db
+
+
+
+
 
 
 SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
@@ -71,7 +81,7 @@ class MediatorConfirmation:
 
         self.db = db
         self.role_name = role_name
-        self.collection = db.payment_confirmations
+        self.collection = db.get_collection("payment_confirmations")
 
     async def confirm(self, ctx, membro: discord.Member, pix_key: str):
 
@@ -91,10 +101,9 @@ class MediatorConfirmation:
             reason=f"Aprovado por {ctx.author}"
         )
 
-        user_doc = self.collection.find_one(
+        user_doc = await self.collection.find_one(
             {"discord_id": str(membro.id)}
         )
-
         if user_doc:
 
             user_model = PaymentConfirmation(user_doc)
@@ -104,7 +113,7 @@ class MediatorConfirmation:
                 pix_key=pix_key
             )
 
-            self.collection.update_one(
+            await self.collection.update_one(
                 {"_id": user_model._id},
                 {"$set": user_model.to_dict()}
             )
@@ -117,7 +126,7 @@ class MediatorConfirmation:
                 pix_key=pix_key
             )
 
-            self.collection.insert_one(new_doc)
+            await self.collection.insert_one(new_doc)
 
         try:
 
@@ -142,13 +151,14 @@ class MediatorConfirmation:
 class MediatorReportEmbed:
 
     def __init__(self, db, benefit_days: int = 7):
+        from services.pedido_mediador_service import MediatorManager
 
         self.manager = MediatorManager(db, benefit_days)
         self.benefit_days = benefit_days
 
-    def create_embed(self):
+    async def create_embed(self):
 
-        mediators_list = self.manager.get_mediators_with_days()
+        mediators_list = await self.manager.get_mediators_with_days()
 
         embed = discord.Embed(
             title="📋 Relatório de Mediadores Ativos",
@@ -189,35 +199,194 @@ class MediatorReportEmbed:
 # =====================================================
 
 
+
+import discord
+from datetime import datetime
+
 class VerificacaoMediadoresEmbed:
 
-    @staticmethod
-    def painel():
+    def __init__(self, db, benefit_days: int = 7):
+        from services.pedido_mediador_service import MediatorManager
+
+        self.manager = MediatorManager(db, benefit_days)
+        self.benefit_days = benefit_days
+
+    async def create_embed(self):
+        mediators = await self.manager.get_mediators_with_days()
 
         embed = discord.Embed(
             title="📊 Painel de Verificação de Mediadores",
-            description="Aqui será exibido automaticamente o status de todos os mediadores ativos.",
-            color=discord.Color.green()
-        )
-
-        embed.add_field(
-            name="📅 Atualização automática",
-            value="Atualiza todos os dias à **00:00 (horário de Brasília)**.",
-            inline=False
-        )
-
-        embed.add_field(
-            name="📋 Informações exibidas",
-            value=(
+            description=(
+                "Aqui será exibido automaticamente o status de todos os mediadores ativos.\n\n"
+                "📅 **Atualização automática**\n"
+                "Atualiza todos os dias às **00:00 (horário de Brasília)**.\n\n"
+                "📋 **Informações exibidas**\n"
                 "• Nome do mediador\n"
                 "• Dias restantes\n"
                 "• Status do benefício"
             ),
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+
+        embed.add_field(
+            name="👥 Total de Mediadores",
+            value=str(len(mediators)),
             inline=False
         )
 
-        embed.set_footer(
-            text="Sistema automático de mediadores"
+        if not mediators:
+            embed.add_field(
+                name="📋 Mediadores",
+                value="Nenhum mediador ativo no momento.",
+                inline=False
+            )
+            embed.set_footer(text="Sistema automático de mediadores")
+            return embed
+
+        lista = ""
+        for m in mediators:
+            status = f"{m['days_remaining']} dias restantes" if m["days_remaining"] > 0 else "❌ Benefício expirado"
+            lista += f"• **{m['username']}** — {status}\n"
+
+        embed.add_field(name="📋 Mediadores", value=lista, inline=False)
+        embed.set_footer(text="Sistema automático de mediadores")
+        return embed
+    
+
+
+# =====================================================
+# PEDIDO MEDIADOR
+# =====================================================
+
+
+class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
+    def __init__(self, plano: str):
+        super().__init__(title="Solicitação de Mediador")
+
+        self.plano = plano
+
+        self.nome_pix = discord.ui.TextInput(
+            label="Nome do titular do PIX",
+            placeholder="Digite o nome do titular da chave PIX",
+            required=True,
+            max_length=100
         )
 
-        return embed
+        self.chave_pix = discord.ui.TextInput(
+            label="Chave PIX",
+            placeholder="Digite sua chave PIX",
+            required=True,
+            max_length=120
+        )
+
+        self.add_item(self.nome_pix)
+        self.add_item(self.chave_pix)
+
+    async def on_submit(self, interaction: discord.Interaction):
+
+        nome_pix = self.nome_pix.value
+        chave_pix = self.chave_pix.value
+        user = interaction.user
+
+        # Embed da solicitação
+        embed = discord.Embed(
+            title="📨 Nova solicitação de Mediador",
+            color=discord.Color.blue()
+        )
+
+        embed.add_field(
+            name="Usuário",
+            value=f"{user.mention}\nID: `{user.id}`",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Nome PIX",
+            value=nome_pix,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Chave PIX",
+            value=f"`{chave_pix}`",
+            inline=False
+        )
+
+        embed.set_footer(text="Aguardando aprovação do administrador")
+        view=PedidoMediadorAdminView(self.plano, user.id)
+
+
+
+        # responde para o usuário
+        await interaction.response.send_message(
+            "✅ Sua solicitação foi enviada para análise do administrador.",
+            ephemeral=True
+        )
+
+        # envia para o canal de solicitações
+        channel = discord.utils.get(
+            interaction.guild.text_channels,
+            name=SOLICITACOES_MEDIADOR_CHANNEL
+        )
+
+        if channel:
+            await channel.send(embed=embed, view=view)
+
+class ActiveMediatorService:
+
+    def __init__(self, db):
+        self.db = db
+        self.mediator_collection = db.get_collection("mediators")
+        self.match_collection = db.get_collection("matches")
+
+    async def get_active_mediators(self) -> List[Mediator]:
+        """
+        Retorna todos os mediadores ativos, atualizando limite de partidas a cada 8 minutos.
+        """
+        now = datetime.utcnow()
+        docs = await self.mediator_collection.find({"is_active": True}).to_list(length=None)
+        mediators = [Mediator(doc) for doc in docs]
+
+        for m in mediators:
+            if not m.last_reset_at or m.last_reset_at < now - timedelta(minutes=8):
+                m.matches_in_last_8_minutes = 0
+                m.last_reset_at = now
+
+        return mediators
+
+    async def get_mediators_with_stats(self) -> List[Dict]:
+        """
+        Retorna mediadores ativos com estatísticas de partidas.
+        Único método centralizado para todos os módulos.
+        """
+        active_mediators = await self.get_active_mediators()
+
+        match_docs = await self.match_collection.find({
+            "status": {"$in": Match.ACTIVE_STATUSES}
+        }).to_list(length=None)
+        matches = [Match(doc) for doc in match_docs]
+
+        mediator_stats = []
+
+        for m in active_mediators:
+            in_queue = sum(1 for mt in matches if mt.mediator_id == m.discord_id and mt.status != Match.STATUS_AGUARDANDO_PREMIO)
+            confirmed = sum(1 for mt in matches if mt.mediator_id == m.discord_id and mt.status == Match.STATUS_AGUARDANDO_PREMIO)
+
+            mediator_stats.append({
+                "discord_id": m.discord_id,
+                "username": m.username,
+                "in_queue": in_queue,
+                "confirmed": confirmed,
+                "total_matches": m.total_matches,
+                "can_mediate": m.can_mediate()
+            })
+
+        return mediator_stats
+
+    async def count_active_mediators(self) -> int:
+        """
+        Retorna total de mediadores ativos.
+        """
+        active = await self.get_active_mediators()
+        return len(active)

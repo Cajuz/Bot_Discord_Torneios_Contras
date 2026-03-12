@@ -7,12 +7,11 @@ from config.database import db
 from config.channels_config import ChannelsConfig
 from services.mediator_queue import mediator_queue
 from services.match_queue_service import match_queue_service
-from src.services.analise_fila import AnalyticsView
+from services.analise_fila import AnalyticsView
 from views.match_queue_view import create_match_queue_embed, MatchQueueView
 from utils.logger import logger, log_success
-from src.services.pedido_mediador_service import PedidomediadorEmbed, PedidoMediadorView, VerificacaoMediadoresEmbed
-from pedido_mediador_service import  PedidoMediadorView
-from views.quero_ser_mediador_view import PedidoMediadorView
+from services.pedido_mediador_service import PedidomediadorEmbed, PedidoMediadorView
+from views.quero_ser_mediador_view import  VerificacaoMediadoresEmbed
 
 
 
@@ -59,6 +58,9 @@ BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
 #teste
 SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
 VERIFICACAO_MEDIADORES_CHANNEL = "verificacao-mediadores"
+QUERO_SER_MEDIADOR_CHANNEL = "quero-ser-mediador"
+
+# ─────────────────────────────────────────────
 
 
 class ChannelService:
@@ -280,9 +282,10 @@ class ChannelService:
             # ── 6. MEDIADORES (posição 4) ──────────────────────────
             controller_category = await self._ensure_category(guild, CATEGORY_MEDIATOR_NAME)
             await controller_category.edit(position=4)
+
             quero_mediador_channel = await self._ensure_text_channel(
                 guild,
-                name="quero-ser-mediador",
+                name=QUERO_SER_MEDIADOR_CHANNEL,
                 category=info_category,
                 topic="Veja os benefícios e torne-se um mediador do servidor.",
                 overwrites={
@@ -305,6 +308,10 @@ class ChannelService:
 
             # garantir posição 0 dentro da categoria
             await quero_mediador_channel.edit(position=0)
+
+            # 🧹 LIMPAR MENSAGENS ANTIGAS
+            logger.info(f"🧹 Limpando mensagens em #{quero_mediador_channel.name}...")
+            await quero_mediador_channel.purge(limit=20)
 
             embed = PedidomediadorEmbed.beneficios()
 
@@ -382,7 +389,7 @@ class ChannelService:
             # CANAL DE VERIFICAÇÃO DE MEDIADORES
             verificacao_mediadores_channel = await self._ensure_text_channel(
                 guild,
-                name="verificacao-mediadores",
+                name=VERIFICACAO_MEDIADORES_CHANNEL,
                 category=controller_category,  # categoria definida no setcanais
                 topic="Canal para exibir diariamente o relatório de mediadores ativos e dias restantes.",
                 overwrites={
@@ -401,7 +408,7 @@ class ChannelService:
             )
 
 
-            embed = VerificacaoMediadoresEmbed.painel()
+            embed = await VerificacaoMediadoresEmbed(db).create_embed()
             await verificacao_mediadores_channel.send(
                 embed=embed
             )

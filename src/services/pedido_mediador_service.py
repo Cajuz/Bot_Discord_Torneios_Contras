@@ -1,8 +1,6 @@
 import discord
 from datetime import datetime
-from config.database import db
 from models.pedido_mediador import PaymentConfirmation
-from services.pedido_mediador_service import PedidoMediadorModal
 
 
 
@@ -71,18 +69,19 @@ class PedidomediadorEmbed:
 # =====================================================
 
 class PedidoMediadorValor(discord.ui.View):
+    
 
     def __init__(self):
         super().__init__(timeout=None)
+        
 
-    @discord.ui.button(
-        label="Plano Semanal - R$50",
-        style=discord.ButtonStyle.green
-    )
-    async def semanal(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Plano Semanal - R$50", style=discord.ButtonStyle.green)
+    async def plano_semanal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from views.quero_ser_mediador_view import PedidoMediadorModal
 
-        modal = PedidoMediadorModal("Semanal - R$50")
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(PedidoMediadorModal(plano="semanal"))
+
+
 
 
 # =====================================================
@@ -134,23 +133,49 @@ class PedidoMediadorAdminView(discord.ui.View):
             return
 
         try:
-
             await user.send(
-                f"✅ Sua solicitação foi **aprovada** por {admin.mention}\n"
-                f"Plano escolhido: **{self.plano}**\n\n"
-                "Entre em contato com o ADM para enviar o comprovante."
+                f"🎉 Sua solicitação para ser **Mediador** foi **aprovada**!\n\n"
+                f"👤 Aprovado por: {admin}\n"
+                f"📦 Plano escolhido: **{self.plano}**\n\n"
+                f"💳 Agora envie o comprovante de pagamento para o administrador{admin.mention}."
             )
-
         except discord.Forbidden:
             pass
 
+
+        # DM PARA O ADM
+        try:
+            await admin.send(
+                f"✅ Você aprovou uma solicitação de mediador.\n\n"
+                f"👤 Usuário: {user} (`{user.id}`)\n"
+                f"📦 Plano: **{self.plano}**"
+            )
+        except discord.Forbidden:
+            pass
+
+
+        # RESPOSTA NO BOTÃO
         await interaction.response.send_message(
             f"✅ Solicitação de {user.mention} aprovada.",
             ephemeral=True
         )
 
-        button.disabled = True
-        await interaction.message.edit(view=self)
+
+        # ATUALIZA EMBED NO CANAL
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+
+        embed.add_field(
+            name="Status",
+            value=f"✅ Aprovado por {admin.mention}",
+            inline=False
+        )
+
+        # DESATIVA BOTÕES
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.message.edit(embed=embed, view=self)
 
     @discord.ui.button(label="Recusar", style=discord.ButtonStyle.red)
     async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -186,48 +211,35 @@ class PedidoMediadorAdminView(discord.ui.View):
 class MediatorManager:
 
     def __init__(self, db, benefit_days: int = 7):
-
-        self.collection = db.payment_confirmations
+        self.collection = db.get_collection("payment_confirmations")
         self.benefit_days = benefit_days
 
-    def get_active_mediators(self):
-
-        mediators = self.collection.find(
-            {"is_active": {"$ne": False}}
-        )
-
-        return [PaymentConfirmation(m) for m in mediators]
+    async def get_active_mediators(self):
+        mediators = []
+        cursor = self.collection.find({"confirmation_date": {"$ne": None}})
+        async for m in cursor:
+            mediators.append(PaymentConfirmation(m))
+        return mediators
 
     def calculate_days_remaining(self, mediator: PaymentConfirmation):
-
-        reference_date = mediator.role_received_date or mediator.confirmation_date
-
+        reference_date = mediator.confirmation_date or mediator.role_received_date
         if not reference_date:
             return 0
-
         if isinstance(reference_date, str):
             reference_date = datetime.fromisoformat(reference_date)
-
         elapsed_days = (datetime.utcnow() - reference_date).days
-
         remaining_days = self.benefit_days - elapsed_days
-
         return max(remaining_days, 0)
 
-    def get_mediators_with_days(self):
-
-        mediators = self.get_active_mediators()
-
+    async def get_mediators_with_days(self):
+        mediators = await self.get_active_mediators()
         return [
-
             {
                 "username": m.username,
                 "discord_id": m.discord_id,
                 "days_remaining": self.calculate_days_remaining(m)
             }
-
             for m in mediators
-
         ]
 
 
