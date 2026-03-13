@@ -58,6 +58,9 @@ from views.mediator_panel_view import MediatorPanelView
 
 
 
+
+
+
 load_dotenv()
 
 bot = create_discord_bot()
@@ -270,9 +273,10 @@ async def faturamentos_geral_error(ctx, error):
 @commands.has_permissions(administrator=True)
 async def confirmarmediador(ctx, membro: discord.Member):
     """
-    Confirma um usuário como mediador: salva no banco e adiciona o cargo no Discord.
+    Confirma um usuário como mediador
     Uso: !confirmarmediador @usuario
     """
+
     guild = ctx.guild
     cargo_mediador = discord.utils.get(guild.roles, name=MEDIATOR_ROLE_NAME)
 
@@ -280,49 +284,77 @@ async def confirmarmediador(ctx, membro: discord.Member):
         await ctx.send(f"❌ Cargo `{MEDIATOR_ROLE_NAME}` não encontrado.")
         return
 
-    collection = db.get_collection("mediators")
+    payment_collection = db.get_collection("payment_confirmations")
+    mediator_collection = db.get_collection("mediators")
 
-    # Verificar se já existe no banco
-    existe = await collection.find_one({"discord_id": str(membro.id)})
+    # verificar se já existe pagamento
+    payment_doc = await payment_collection.find_one({"discord_id": str(membro.id)})
 
-    if existe:
-        # Garante que o usuário tenha o cargo no Discord
-        if cargo_mediador not in membro.roles:
-            try:
-                await membro.add_roles(cargo_mediador, reason=f"Aprovado por {ctx.author}")
-            except discord.Forbidden:
-                await ctx.send("❌ Não foi possível adicionar o cargo no Discord.")
-                return
+    if payment_doc:
 
-        await ctx.send(f"⚠️ {membro.mention} já é mediador no banco. Cargo atualizado no Discord se necessário.")
-        return
+        await payment_collection.update_one(
+            {"discord_id": str(membro.id)},
+            {
+                "$set": {
+                    "active": True,
+                    "confirmation_date": datetime.utcnow()
+                }
+            }
+        )
 
-    # Salvar mediador no banco
-    await collection.insert_one({
-        "discord_id": str(membro.id),
-        "username": membro.name,
-        "created_at": datetime.utcnow(),
-        "benefit_days": 7,
-        "active": True
-    })
+    else:
 
-    # Adicionar o cargo no Discord
+        await payment_collection.insert_one({
+            "discord_id": str(membro.id),
+            "username": membro.name,
+            "confirmation_date": datetime.utcnow(),
+            "active": True,
+            "benefit_days": 7
+        })
+
+    # atualizar mediators collection
+    mediator_doc = await mediator_collection.find_one({"discord_id": str(membro.id)})
+
+    if mediator_doc:
+
+        await mediator_collection.update_one(
+            {"discord_id": str(membro.id)},
+            {"$set": {"is_active": True}}
+        )
+
+    else:
+
+        await mediator_collection.insert_one({
+            "discord_id": str(membro.id),
+            "username": membro.name,
+            "created_at": datetime.utcnow(),
+            "is_active": True
+        })
+
+    # adicionar cargo
     try:
-        await membro.add_roles(cargo_mediador, reason=f"Aprovado por {ctx.author}")
+        if cargo_mediador not in membro.roles:
+            await membro.add_roles(
+                cargo_mediador,
+                reason=f"Mediador aprovado por {ctx.author}"
+            )
     except discord.Forbidden:
-        await ctx.send("❌ Não foi possível adicionar o cargo no Discord, mas o banco foi atualizado.")
+        await ctx.send("❌ Não tenho permissão para adicionar o cargo.")
         return
 
     await ctx.send(f"✅ {membro.mention} agora é um mediador!")
+
+
 
 
 @bot.command(name="remover_mediador")
 @commands.has_permissions(administrator=True)
 async def remover_mediador(ctx, membro: discord.Member):
     """
-    Remove o cargo de mediador de um usuário e atualiza o banco.
+    Remove um mediador
     Uso: !remover_mediador @usuario
     """
+
     guild = ctx.guild
     cargo_mediador = discord.utils.get(guild.roles, name=MEDIATOR_ROLE_NAME)
 
@@ -330,38 +362,136 @@ async def remover_mediador(ctx, membro: discord.Member):
         await ctx.send(f"❌ Cargo `{MEDIATOR_ROLE_NAME}` não encontrado.")
         return
 
-    # Mensagem inicial
+    payment_collection = db.get_collection("payment_confirmations")
+    mediator_collection = db.get_collection("mediators")
+    pix_collection = db.get_collection("mediator_pix")
+
     cargo_msg = ""
+
+    # =========================
+    # REMOVER CARGO
+    # =========================
+
     if cargo_mediador in membro.roles:
+
         try:
-            await membro.remove_roles(cargo_mediador, reason=f"Removido por {ctx.author}")
-            cargo_msg = f"✅ Cargo de mediador removido de {membro.mention}."
+            await membro.remove_roles(
+                cargo_mediador,
+                reason=f"Removido por {ctx.author}"
+            )
+
+            cargo_msg = f"✅ Cargo removido de {membro.mention}"
+
         except Exception as e:
+
             cargo_msg = f"❌ Erro ao remover cargo: {e}"
+
     else:
-        cargo_msg = f"⚠️ {membro.mention} não possui o cargo de mediador no servidor."
 
-    # Atualiza banco
-    collection = db.get_collection("payment_confirmations")
-    user_doc = await collection.find_one({"discord_id": str(membro.id)})
+        cargo_msg = f"⚠️ {membro.mention} não possui cargo de mediador."
 
-    if user_doc and user_doc.get("active", True):
-        await collection.update_one(
-            {"discord_id": str(membro.id)},
-            {"$set": {"active": False}}  # Marca como inativo
-        )
-        banco_msg = "✅ Status de mediador atualizado no banco."
-    else:
-        banco_msg = "⚠️ Usuário já estava inativo no banco ou não registrado."
+    # =========================
+    # DESATIVAR PAGAMENTO
+    # =========================
 
-    # Envia mensagem de retorno
-    await ctx.send(f"{cargo_msg}\n{banco_msg}")
+    await payment_collection.update_one(
+        {"discord_id": str(membro.id)},
+        {
+            "$set": {
+                "active": False
+            }
+        }
+    )
 
-    # DM opcional
+    # =========================
+    # DESATIVAR MEDIADOR
+    # =========================
+
+    await mediator_collection.update_one(
+        {"discord_id": str(membro.id)},
+        {
+            "$set": {
+                "is_active": False
+            }
+        }
+    )
+
+    # =========================
+    # REMOVER PIX
+    # =========================
+
+    await pix_collection.delete_one(
+        {"discord_id": str(membro.id)}
+    )
+
+    # =========================
+    # RESPOSTA
+    # =========================
+
+    await ctx.send(
+        f"""{cargo_msg}
+💳 PIX removido
+🗄️ Status atualizado no banco"""
+    )
+
+    # =========================
+    # AVISAR USUÁRIO
+    # =========================
+
     try:
-        await membro.send("❌ Seu cargo de mediador foi removido e seu status atualizado.")
+
+        await membro.send(
+            "❌ Seu cargo de mediador foi removido.\n"
+            "💳 Sua chave PIX foi removida.\n"
+            "📉 Seu plano foi desativado."
+        )
+
     except discord.Forbidden:
         pass
+
+@bot.command(name="verpix")
+@commands.has_permissions(administrator=True)
+
+async def ver_pix(ctx):
+
+    cargo_mediador = discord.utils.get(ctx.guild.roles, name=MEDIATOR_ROLE_NAME)
+
+    if cargo_mediador not in ctx.author.roles not in ctx.author.roles:
+        await ctx.send("❌ Apenas mediadores ou administradores podem usar este comando.")
+        return
+
+    payment_collection = db.get_collection("payment_confirmations")
+
+    doc = await payment_collection.find_one({
+        "discord_id": str(ctx.author.id)
+    })
+
+    if not doc or not doc.get("pix_key"):
+        await ctx.send("⚠️ Nenhuma chave PIX cadastrada.")
+        return
+
+    pix_key = doc.get("pix_key")
+
+    embed = discord.Embed(
+        title="💳 Chave PIX Cadastrada",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="Usuário",
+        value=ctx.author.mention,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Chave PIX",
+        value=f"`{pix_key}`",
+        inline=False
+    )
+
+    embed.set_footer(text="Sistema de Mediação")
+
+    await ctx.send(embed=embed)
 
 @bot.command(name="testecanal")
 @commands.has_permissions(administrator=True)
