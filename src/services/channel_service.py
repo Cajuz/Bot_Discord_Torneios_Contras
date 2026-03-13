@@ -12,6 +12,7 @@ from views.match_queue_view import create_match_queue_embed, MatchQueueView
 from utils.logger import logger, log_success
 from services.pedido_mediador_service import PedidomediadorEmbed, PedidoMediadorView
 from views.quero_ser_mediador_view import  VerificacaoMediadoresEmbed
+from services.pix_mediador import MediatorPixEmbed,MediatorPixView
 
 
 
@@ -59,7 +60,7 @@ BAN_CONTROL_CATEGORY_NAME = "🚫 BANS-CONTROL"
 SOLICITACOES_MEDIADOR_CHANNEL = "solicitacoes-mediador"
 VERIFICACAO_MEDIADORES_CHANNEL = "verificacao-mediadores"
 QUERO_SER_MEDIADOR_CHANNEL = "quero-ser-mediador"
-
+PIX_CHANNEL_NAME="pix-mediadores"
 # ─────────────────────────────────────────────
 
 
@@ -318,6 +319,42 @@ class ChannelService:
             await quero_mediador_channel.send(
                 embed=embed,
                 view=PedidoMediadorView()
+            )
+            pix_channel = await self._ensure_text_channel(
+                guild,
+                name=PIX_CHANNEL_NAME,
+                category=controller_category,
+                topic="Canal para cadastro da chave PIX dos mediadores.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        view_channel=False
+                    ),
+
+                    mediator_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+
+                    adm_role: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    ),
+
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True
+                    )
+                }
+            )
+
+
+            await pix_channel.purge(limit=10)
+
+            embed = MediatorPixEmbed.cadastro_pix()
+
+            await pix_channel.send(
+                embed=embed,
+                 view=MediatorPixView()
             )
 
             mediator_channel = await self._ensure_text_channel(

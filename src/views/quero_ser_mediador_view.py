@@ -83,17 +83,13 @@ class MediatorConfirmation:
         self.role_name = role_name
         self.collection = db.get_collection("payment_confirmations")
 
-    async def confirm(self, ctx, membro: discord.Member, pix_key: str):
+    async def confirm(self, ctx, membro: discord.Member):
 
         guild = ctx.guild
-
         mediator_role = discord.utils.get(guild.roles, name=self.role_name)
 
         if not mediator_role:
-
-            await ctx.send(
-                f"❌ Cargo `{self.role_name}` não encontrado."
-            )
+            await ctx.send(f"❌ Cargo `{self.role_name}` não encontrado.")
             return
 
         await membro.add_roles(
@@ -104,13 +100,13 @@ class MediatorConfirmation:
         user_doc = await self.collection.find_one(
             {"discord_id": str(membro.id)}
         )
+
         if user_doc:
 
             user_model = PaymentConfirmation(user_doc)
 
             user_model.confirm_payment(
-                admin_name=str(ctx.author),
-                pix_key=pix_key
+                admin_name=str(ctx.author)
             )
 
             await self.collection.update_one(
@@ -122,8 +118,7 @@ class MediatorConfirmation:
 
             new_doc = PaymentConfirmation.create_document(
                 discord_id=str(membro.id),
-                username=str(membro),
-                pix_key=pix_key
+                username=str(membro)
             )
 
             await self.collection.insert_one(new_doc)
@@ -131,8 +126,7 @@ class MediatorConfirmation:
         try:
 
             await membro.send(
-                f"✅ Você foi promovido a **{self.role_name}**\n"
-                f"💳 Chave PIX registrada: `{pix_key}`"
+                f"✅ Você foi promovido a **{self.role_name}**"
             )
 
         except discord.Forbidden:
@@ -141,7 +135,6 @@ class MediatorConfirmation:
         await ctx.send(
             f"✅ {membro.mention} agora é **{self.role_name}**."
         )
-
 
 # =====================================================
 # EMBED RELATÓRIO
@@ -266,30 +259,13 @@ class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
 
         self.plano = plano
 
-        self.nome_pix = discord.ui.TextInput(
-            label="Nome do titular do PIX",
-            placeholder="Digite o nome do titular da chave PIX",
-            required=True,
-            max_length=100
-        )
-
-        self.chave_pix = discord.ui.TextInput(
-            label="Chave PIX",
-            placeholder="Digite sua chave PIX",
-            required=True,
-            max_length=120
-        )
-
-        self.add_item(self.nome_pix)
+        
         self.add_item(self.chave_pix)
 
     async def on_submit(self, interaction: discord.Interaction):
 
-        nome_pix = self.nome_pix.value
-        chave_pix = self.chave_pix.value
         user = interaction.user
 
-        # Embed da solicitação
         embed = discord.Embed(
             title="📨 Nova solicitação de Mediador",
             color=discord.Color.blue()
@@ -301,30 +277,15 @@ class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
             inline=False
         )
 
-        embed.add_field(
-            name="Nome PIX",
-            value=nome_pix,
-            inline=False
-        )
-
-        embed.add_field(
-            name="Chave PIX",
-            value=f"`{chave_pix}`",
-            inline=False
-        )
-
         embed.set_footer(text="Aguardando aprovação do administrador")
-        view=PedidoMediadorAdminView(self.plano, user.id)
 
+        view = PedidoMediadorAdminView(self.plano, user.id)
 
-
-        # responde para o usuário
         await interaction.response.send_message(
             "✅ Sua solicitação foi enviada para análise do administrador.",
             ephemeral=True
         )
 
-        # envia para o canal de solicitações
         channel = discord.utils.get(
             interaction.guild.text_channels,
             name=SOLICITACOES_MEDIADOR_CHANNEL

@@ -54,7 +54,6 @@ from views.health_check_view import build_overview_embed, HealthCheckView
 #TESTE
 from services.pedido_mediador_service import( PedidomediadorEmbed, PedidoMediadorValor)
 from views.mediator_panel_view import MediatorPanelView
-from services.confirmação_e_remoção import ConfirmMediatorService, RemoveMediatorService
 
 
 
@@ -365,10 +364,14 @@ async def remover_mediador(ctx, membro: discord.Member):
 
     payment_collection = db.get_collection("payment_confirmations")
     mediator_collection = db.get_collection("mediators")
+    pix_collection = db.get_collection("mediator_pix")
 
     cargo_msg = ""
 
-    # remover cargo
+    # =========================
+    # REMOVER CARGO
+    # =========================
+
     if cargo_mediador in membro.roles:
 
         try:
@@ -387,28 +390,108 @@ async def remover_mediador(ctx, membro: discord.Member):
 
         cargo_msg = f"⚠️ {membro.mention} não possui cargo de mediador."
 
-    # desativar pagamento
+    # =========================
+    # DESATIVAR PAGAMENTO
+    # =========================
+
     await payment_collection.update_one(
         {"discord_id": str(membro.id)},
-        {"$set": {"active": False}}
+        {
+            "$set": {
+                "active": False
+            }
+        }
     )
 
-    # desativar mediador
+    # =========================
+    # DESATIVAR MEDIADOR
+    # =========================
+
     await mediator_collection.update_one(
         {"discord_id": str(membro.id)},
-        {"$set": {"is_active": False}}
+        {
+            "$set": {
+                "is_active": False
+            }
+        }
     )
+
+    # =========================
+    # REMOVER PIX
+    # =========================
+
+    await pix_collection.delete_one(
+        {"discord_id": str(membro.id)}
+    )
+
+    # =========================
+    # RESPOSTA
+    # =========================
 
     await ctx.send(
-        f"{cargo_msg}\n✅ Status atualizado no banco."
+        f"""{cargo_msg}
+💳 PIX removido
+🗄️ Status atualizado no banco"""
     )
 
+    # =========================
+    # AVISAR USUÁRIO
+    # =========================
+
     try:
+
         await membro.send(
-            "❌ Seu cargo de mediador foi removido e seu plano foi desativado."
+            "❌ Seu cargo de mediador foi removido.\n"
+            "💳 Sua chave PIX foi removida.\n"
+            "📉 Seu plano foi desativado."
         )
+
     except discord.Forbidden:
         pass
+
+@bot.command(name="verpix")
+@commands.has_permissions(administrator=True)
+
+async def ver_pix(ctx):
+
+    cargo_mediador = discord.utils.get(ctx.guild.roles, name=MEDIATOR_ROLE_NAME)
+
+    if cargo_mediador not in ctx.author.roles not in ctx.author.roles:
+        await ctx.send("❌ Apenas mediadores ou administradores podem usar este comando.")
+        return
+
+    payment_collection = db.get_collection("payment_confirmations")
+
+    doc = await payment_collection.find_one({
+        "discord_id": str(ctx.author.id)
+    })
+
+    if not doc or not doc.get("pix_key"):
+        await ctx.send("⚠️ Nenhuma chave PIX cadastrada.")
+        return
+
+    pix_key = doc.get("pix_key")
+
+    embed = discord.Embed(
+        title="💳 Chave PIX Cadastrada",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="Usuário",
+        value=ctx.author.mention,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Chave PIX",
+        value=f"`{pix_key}`",
+        inline=False
+    )
+
+    embed.set_footer(text="Sistema de Mediação")
+
+    await ctx.send(embed=embed)
 
 @bot.command(name="testecanal")
 @commands.has_permissions(administrator=True)
