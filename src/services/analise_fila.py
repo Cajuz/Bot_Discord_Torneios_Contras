@@ -1,6 +1,9 @@
-# ❌ antes — só existia isso:
-queue_analysis_service = QueueAnalysisService()
+"""
+analise_fila.py — Aliases de compatibilidade para o serviço de fila.
+A implementação real está em match_queue_service.py.
+"""
+from services.match_queue_service import match_queue_service, MatchQueueService
 
-# ✅ depois — alias para o nome que o resto do projeto importa:
-queue_analysis_service = QueueAnalysisService()
-analise_fila_service   = queue_analysis_service
+# Aliases usados por outros módulos que importam deste arquivo
+queue_analysis_service = match_queue_service
+analise_fila_service   = match_queue_service

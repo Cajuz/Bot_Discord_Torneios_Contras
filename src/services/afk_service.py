@@ -1,14 +1,13 @@
 """
-afk_service.py — F15: AFK Check para mediadores.
+afk_service.py — AFK Check para mediadores.
 
-Regras (conforme alinhamento):
-  • Na fila: 5 min sem ação → alerta DM → 2 min para confirmar → remove da fila
-  • Em partida (antes de confirmar pagamento): 5 min sem interagir na thread →
-    substitui mediador, avisa jogadores por DM e loga no #logs-mediadores.
+  • Na fila: 5 min sem ação → alerta DM → 2 min para confirmar → remove
+  • Em partida (antes de confirmar pagamento): 5 min sem interagir →
+    substitui mediador, avisa jogadores por DM e loga em #logs-mediadores
 """
 from __future__ import annotations
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 import discord
@@ -24,25 +23,26 @@ CONFIRM_WINDOW = timedelta(minutes=2)
 
 
 class AFKService:
+
     def __init__(self):
         self.bot: Optional[discord.Client] = None
-        # mediator_id → datetime da última atividade na fila
-        self._queue_activity:  dict[int, object] = {}
-        # mediator_id → datetime da última atividade em partida
-        self._match_activity:  dict[int, object] = {}
-        # mediator_id → asyncio.Task de confirmação pendente
-        self._pending_confirm: dict[int, asyncio.Task] = {}
+        self._queue_activity:   dict[int, datetime]      = {}
+        self._match_activity:   dict[int, datetime]      = {}
+        self._pending_confirm:  dict[int, asyncio.Task]  = {}
+        # Proteção contra substituição dupla: match_id → True
+        self._replacing_match:  dict[str, bool]          = {}
 
     # ─────────────────────────────────────────
-    # Atualiza timestamp de atividade
+    # Atividade
     # ─────────────────────────────────────────
+
     def mark_queue_activity(self, mediator_id: int):
         self._queue_activity[mediator_id] = utcnow()
 
     def mark_match_activity(self, mediator_id: int):
-        self._match_activity[mediator_id] = utcnow()
-        # Também atualiza na fila (ele está agindo)
-        self._queue_activity[mediator_id] = utcnow()
+        now = utcnow()
+        self._match_activity[mediator_id] = now
+        self._queue_activity[mediator_id] = now
 
     def remove_mediator(self, mediator_id: int):
         self._queue_activity.pop(mediator_id, None)
@@ -52,29 +52,34 @@ class AFKService:
             task.cancel()
 
     # ─────────────────────────────────────────
-    # Task: verifica AFK na fila a cada 1 min
+    # AFK na fila
     # ─────────────────────────────────────────
+
     @tasks.loop(minutes=1)
     async def check_queue_afk(self):
         if not self.bot:
             return
         collection = db.get_collection("mediators")
-        in_queue   = await collection.find({"in_queue": True, "is_active": True}).to_list(None)
+        # ← usa discord_id (string) consistente com o modelo Mediator
+        in_queue = await collection.find(
+            {"in_queue": True, "is_active": True}).to_list(None)
         now = utcnow()
         for doc in in_queue:
-            uid = doc.get("user_id")
+            uid = int(doc.get("discord_id", 0))
+            if not uid:
+                continue
             if uid in self._pending_confirm:
-                continue  # já aguardando confirmação
+                continue
             last = self._queue_activity.get(uid, doc.get("updated_at", now))
-            if isinstance(last, type(now)) and (now - last) >= AFK_TIMEOUT:
+            if isinstance(last, datetime) and (now - last) >= AFK_TIMEOUT:
                 asyncio.create_task(self._warn_and_remove_queue(uid, doc))
 
     @check_queue_afk.before_loop
     async def before_check_queue_afk(self):
-        await self.bot.wait_until_ready()
+        if self.bot:
+            await self.bot.wait_until_ready()
 
     async def _warn_and_remove_queue(self, uid: int, doc: dict):
-        """Envia alerta e aguarda 2 min; remove se não confirmar."""
         if uid in self._pending_confirm:
             return
         try:
@@ -88,7 +93,8 @@ class AFKService:
             title="Você ainda está na fila?",
             description=(
                 "Detectamos **5 minutos** de inatividade.\n"
-                "Clique em **Confirmar Presença** em 2 minutos ou será removido da fila."
+                "Clique em **Confirmar Presença** em 2 minutos "
+                "ou será removido da fila."
             ),
             color=THEME_COLOR
         )
@@ -100,7 +106,6 @@ class AFKService:
 
         async def _timeout():
             await asyncio.sleep(CONFIRM_WINDOW.total_seconds())
-            # Se ainda está pendente → remover
             if uid in self._pending_confirm:
                 self._pending_confirm.pop(uid, None)
                 await self._remove_from_queue(uid)
@@ -119,7 +124,7 @@ class AFKService:
     async def _remove_from_queue(self, uid: int):
         collection = db.get_collection("mediators")
         await collection.update_one(
-            {"user_id": uid},
+            {"discord_id": str(uid)},
             {"$set": {"in_queue": False, "updated_at": utcnow()}}
         )
         from services.mediator_queue import mediator_queue
@@ -133,94 +138,117 @@ class AFKService:
     # ─────────────────────────────────────────
     # AFK em partida ativa
     # ─────────────────────────────────────────
+
     @tasks.loop(minutes=1)
     async def check_match_afk(self):
-        """Verifica mediadores afk em threads de partida (antes do pagamento confirmado)."""
         if not self.bot:
             return
-        col = db.get_collection("matches")
-        # Partidas aguardando pagamento (antes de confirmar)
-        active = await col.find({"status": {"$in": ["aguardando_pagamento", "iniciada"]}}).to_list(None)
+        col    = db.get_collection("matches")
+        active = await col.find({
+            "status": {"$in": ["aguardando_pagamento", "iniciada"]}
+        }).to_list(None)
         now = utcnow()
         for match in active:
-            med_id = match.get("mediator_id")
+            med_id   = match.get("mediator_id")
+            match_id = str(match.get("_id"))
             if not med_id:
                 continue
-            last = self._match_activity.get(int(med_id), match.get("created_at", now))
-            if isinstance(last, type(now)) and (now - last) >= AFK_TIMEOUT:
-                asyncio.create_task(self._replace_afk_mediator(match, int(med_id)))
+            # ← proteção contra substituição dupla
+            if self._replacing_match.get(match_id):
+                continue
+            last = self._match_activity.get(
+                int(med_id), match.get("created_at", now))
+            if isinstance(last, datetime) and (now - last) >= AFK_TIMEOUT:
+                self._replacing_match[match_id] = True
+                asyncio.create_task(
+                    self._replace_afk_mediator(match, int(med_id)))
 
     @check_match_afk.before_loop
     async def before_check_match_afk(self):
-        await self.bot.wait_until_ready()
+        if self.bot:
+            await self.bot.wait_until_ready()
 
     async def _replace_afk_mediator(self, match: dict, med_id: int):
-        """Substitui mediador AFK na partida."""
-        match_id   = match.get("match_id") or str(match.get("_id"))
+        match_id   = str(match.get("_id"))
         thread_id  = match.get("thread_id")
         player_ids = match.get("player_ids", [])
 
-        # Pega novo mediador da fila
-        from services.mediator_queue import mediator_queue
-        new_med_id = await mediator_queue.get_next_mediator()
-        if not new_med_id or new_med_id == med_id:
-            logger.warning(f"[AFK] Sem mediador disponível para substituir em {match_id}")
-            return
+        try:
+            from services.mediator_queue import mediator_queue
+            new_med_id = await mediator_queue.get_next_mediator()
+            if not new_med_id or new_med_id == med_id:
+                logger.warning(
+                    f"[AFK] Sem mediador disponível para substituir em {match_id}")
+                return
 
-        # Atualiza banco
-        col = db.get_collection("matches")
-        await col.update_one(
-            {"match_id": match_id},
-            {"$set": {"mediator_id": str(new_med_id), "updated_at": utcnow()}}
-        )
-        self.remove_mediator(med_id)
+            # ← usa _id (ObjectId) como filtro — garante encontrar o documento
+            col = db.get_collection("matches")
+            await col.update_one(
+                {"_id": match["_id"]},
+                {"$set": {"mediator_id": str(new_med_id), "updated_at": utcnow()}}
+            )
+            self.remove_mediator(med_id)
 
-        # Avisa na thread
-        if thread_id:
-            for guild in self.bot.guilds:
-                thread = guild.get_thread(int(thread_id))
-                if thread:
-                    embed = discord.Embed(
-                        description="O mediador ficou inativo. Um novo mediador assumiu a partida.",
+            # Avisa na thread
+            if thread_id:
+                for guild in self.bot.guilds:
+                    thread = guild.get_thread(int(thread_id))
+                    if thread:
+                        await thread.send(embed=discord.Embed(
+                            description=(
+                                "O mediador ficou inativo. "
+                                "Um novo mediador assumiu a partida."
+                            ),
+                            color=THEME_COLOR
+                        ))
+                        break
+
+            # Avisa jogadores por DM
+            for pid in player_ids:
+                try:
+                    user = await self.bot.fetch_user(int(pid))
+                    await user.send(embed=discord.Embed(
+                        description=(
+                            f"O mediador da partida `{match_id}` ficou inativo "
+                            "e foi substituído.\n"
+                            "Um novo mediador foi designado. "
+                            "Aguarde as instruções na thread."
+                        ),
                         color=THEME_COLOR
-                    )
-                    try:
-                        await thread.send(embed=embed)
-                    except Exception:
-                        pass
-                    break
+                    ))
+                except Exception:
+                    pass
 
-        # Avisa jogadores por DM
-        for pid in player_ids:
+            # Avisa mediador afastado
             try:
-                user = await self.bot.fetch_user(int(pid))
-                await user.send(embed=discord.Embed(
+                old_user = await self.bot.fetch_user(med_id)
+                await old_user.send(embed=discord.Embed(
                     description=(
-                        f"O mediador da partida `{match_id}` ficou inativo e foi substituído.\n"
-                        "Um novo mediador foi designado. Aguarde as instruções na thread."
+                        f"Você foi removido da partida `{match_id}` por inatividade."
                     ),
-                    color=THEME_COLOR
+                    color=0xE74C3C
                 ))
             except Exception:
                 pass
 
-        # Avisa mediador afastado
-        try:
-            old_user = await self.bot.fetch_user(med_id)
-            await old_user.send(embed=discord.Embed(
-                description=f"Você foi removido da partida `{match_id}` por inatividade.",
-                color=0xE74C3C
-            ))
-        except Exception:
-            pass
+            await self._log_afk(med_id, f"Substituído na partida `{match_id}`.")
+            logger.info(
+                f"[AFK] Mediador {med_id} substituído em {match_id} por {new_med_id}")
 
-        await self._log_afk(med_id, f"Substituído na partida {match_id}.")
-        logger.info(f"[AFK] Mediador {med_id} substituído em {match_id} por {new_med_id}")
+        except Exception as e:
+            logger.error(f"[AFK] Erro ao substituir mediador em {match_id}: {e}",
+                         exc_info=True)
+        finally:
+            # Limpa flag independente de sucesso ou erro
+            self._replacing_match.pop(match_id, None)
 
     # ─────────────────────────────────────────
-    # Log no canal #logs-mediadores
+    # Log no #logs-mediadores
     # ─────────────────────────────────────────
+
     async def _log_afk(self, uid: int, msg: str):
+        if not self.bot:
+            return
         for guild in self.bot.guilds:
             ch = discord.utils.get(guild.text_channels, name="logs-mediadores")
             if ch:
@@ -235,23 +263,35 @@ class AFKService:
                     pass
 
 
+# ─────────────────────────────────────────
+# View de confirmação de presença (DM)
+# ─────────────────────────────────────────
+
 class _AFK_ConfirmView(discord.ui.View):
+
     def __init__(self, uid: int, svc: AFKService):
         super().__init__(timeout=130)
         self.uid = uid
         self.svc = svc
 
-    @discord.ui.button(label="Confirmar Presença", style=discord.ButtonStyle.success, emoji="✅")
+    @discord.ui.button(
+        label="Confirmar Presença",
+        style=discord.ButtonStyle.success,
+        emoji="✅"
+    )
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
         if interaction.user.id != self.uid:
-            await interaction.response.send_message("Esta confirmação não é sua.", ephemeral=True)
+            await interaction.response.send_message(
+                "Esta confirmação não é sua.", ephemeral=True)
             return
         task = self.svc._pending_confirm.pop(self.uid, None)
         if task and not task.done():
             task.cancel()
         self.svc.mark_queue_activity(self.uid)
         await interaction.response.edit_message(
-            embed=discord.Embed(description="Presença confirmada! Você permanece na fila.", color=0x27AE60),
+            embed=discord.Embed(
+                description="Presença confirmada! Você permanece na fila.",
+                color=0x27AE60),
             view=None
         )
 

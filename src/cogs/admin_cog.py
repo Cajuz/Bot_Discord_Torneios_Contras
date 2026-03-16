@@ -34,6 +34,13 @@ class AdminCog(commands.Cog, name="Admin"):
     # ─────────────────────────────────────────
     # SETUP INDIVIDUAIS
     # ─────────────────────────────────────────
+    @commands.command(name="setup_faturamento")
+    @commands.has_permissions(administrator=True)
+    async def setup_faturamento(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_faturamento(ctx.guild)
+        await ctx.reply("✅ Painel de faturamento postado.")
+
     @commands.command(name="setup_guias")
     @commands.has_permissions(administrator=True)
     async def setup_guias(self, ctx: commands.Context):
@@ -215,7 +222,8 @@ class AdminCog(commands.Cog, name="Admin"):
         embed.add_field(name="Setup individual", value=(
             "`!setup_guias`  `!setup_suporte`  `!setup_mediador`\n"
             "`!setup_influencers`  `!setup_pix`  `!setup_renovacao`\n"
-            "`!setup_quero_ser_mediador`  `!setup_partidas`  `!setup_dashboards`"
+            "`!setup_quero_ser_mediador`  `!setup_partidas`  `!setup_dashboards`\n"
+            "`!setup_faturamento`"
         ), inline=False)
         embed.add_field(name="Moderação", value=(
             "`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`"
