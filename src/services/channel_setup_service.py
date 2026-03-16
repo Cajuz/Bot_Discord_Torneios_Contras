@@ -1,3 +1,6 @@
+# ══════════════════════════════════════════════════════════════
+# channel_setup_service.py
+# ══════════════════════════════════════════════════════════════
 from __future__ import annotations
 import discord
 from utils.logger import logger, log_success
@@ -12,10 +15,10 @@ from services.channel_service import (
     SOLICITAR_ANALISE_CHANNEL, EXPOSED_CHANNEL_NAME,
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
     SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,
+    FATURAMENTO_CHANNEL, HEALTH_CHECK_CHANNEL,    # ← adicionado
     permission_service,
 )
 from config.channels_config import ChannelsConfig
-
 
 THEME = 0xFFD54F
 
@@ -32,6 +35,7 @@ class ChannelSetupService:
         await self.setup_all_panels(guild)
         await self.setup_match_cards(guild)
         await self.setup_dashboards(guild)
+        await self.setup_faturamento(guild)
         log_success(f"[ChannelSetup] Setup completo em {guild.name}")
         return f"Servidor **{guild.name}** configurado com sucesso."
 
@@ -48,22 +52,27 @@ class ChannelSetupService:
         return roles
 
     async def setup_categories_and_channels(self, guild: discord.Guild):
-        roles = {r.name: r for r in guild.roles}
+        roles             = {r.name: r for r in guild.roles}
         existing_channels = {c.name: c for c in guild.channels}
 
         for category_name, channels in CHANNEL_STRUCTURE.items():
             category = discord.utils.get(guild.categories, name=category_name)
             if not category:
-                ow = await permission_service.get_category_overwrites(guild, category_name, roles)
+                ow       = await permission_service.get_category_overwrites(guild, category_name, roles)
                 category = await guild.create_category(category_name, overwrites=ow)
                 logger.info(f"[ChannelSetup] Categoria criada: {category_name}")
 
             for ch_name in channels:
-                if ch_name in existing_channels:
-                    continue
                 ow = await permission_service.get_channel_overwrites(guild, ch_name, roles)
-                await guild.create_text_channel(ch_name, category=category, overwrites=ow)
-                logger.info(f"[ChannelSetup] Canal criado: #{ch_name}")
+                if ch_name in existing_channels:
+                    # ← atualiza permissões mesmo em canal existente
+                    try:
+                        await existing_channels[ch_name].edit(overwrites=ow)
+                    except Exception as e:
+                        logger.warning(f"[ChannelSetup] Permissões #{ch_name}: {e}")
+                else:
+                    await guild.create_text_channel(ch_name, category=category, overwrites=ow)
+                    logger.info(f"[ChannelSetup] Canal criado: #{ch_name}")
 
     async def setup_guide_channels(self, guild: discord.Guild):
         guides = {
@@ -76,13 +85,7 @@ class ChannelSetupService:
             ch = discord.utils.get(guild.text_channels, name=ch_name)
             if not ch:
                 continue
-            async for msg in ch.history(limit=10):
-                if msg.author == guild.me and msg.embeds:
-                    try:
-                        await msg.delete()
-                    except Exception:
-                        pass
-                    break
+            await self._clear_bot_messages(ch)
             await ch.send(embed=embed)
             logger.info(f"[ChannelSetup] Guia postado: #{ch_name}")
 
@@ -95,6 +98,7 @@ class ChannelSetupService:
         await self.setup_pix(guild)
         await self.setup_renovacao(guild)
         await self.setup_status_bot(guild)
+        await self.setup_health_check(guild)    # ← adicionado
         logger.info("[ChannelSetup] Todos os painéis postados")
 
     async def setup_suporte(self, guild: discord.Guild):
@@ -163,7 +167,7 @@ class ChannelSetupService:
         embed = discord.Embed(
             title="Status do Sistema",
             description="Todos os sistemas operacionais.",
-            color=0x2ECC71
+            color=0x2ECC71,
         )
         embed.add_field(name="Bot",   value="🟢 Online",    inline=True)
         embed.add_field(name="Banco", value="🟢 Conectado", inline=True)
@@ -171,8 +175,48 @@ class ChannelSetupService:
         embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         await self._post_panel(guild, STATUS_BOT_CHANNEL, embed, None)
 
+    async def setup_health_check(self, guild: discord.Guild):
+        """Posta o painel de health check com HealthCheckView no canal #health-check."""
+        try:
+            from views.health_check_view import HealthCheckView, build_overview_embed
+            from services.health_check_service import health_check_service
+
+            if health_check_service:
+                report = await health_check_service.run_check(guild)
+                embed  = await build_overview_embed(report)
+                view   = HealthCheckView(report=report, service=health_check_service, guild=guild)
+            elif self.bot:
+                from main import BOT_START_TIME
+                embed = await build_overview_embed(self.bot, BOT_START_TIME)
+                view  = HealthCheckView(bot=self.bot, start_time=BOT_START_TIME)
+            else:
+                logger.warning("[ChannelSetup] Health check: bot e service indisponíveis")
+                return
+
+            await self._post_panel(guild, HEALTH_CHECK_CHANNEL, embed, view)
+
+            # Salva a mensagem no banco para auto-refresh do thread_pool_cog
+            ch = discord.utils.get(guild.text_channels, name=HEALTH_CHECK_CHANNEL)
+            if ch:
+                async for msg in ch.history(limit=3):
+                    if msg.author == guild.me and msg.embeds:
+                        from config.database import db
+                        from utils.datetime_utils import utcnow
+                        await db.get_collection("thread_pool_panels").update_one(
+                            {"guild_id": str(guild.id), "channel_id": str(ch.id)},
+                            {"$set": {
+                                "guild_id":   str(guild.id),
+                                "channel_id": str(ch.id),
+                                "message_id": str(msg.id),
+                                "updated_at": utcnow(),
+                            }},
+                            upsert=True,
+                        )
+                        break
+        except Exception as e:
+            logger.error(f"[ChannelSetup] setup_health_check erro: {e}", exc_info=True)
+
     async def setup_match_cards(self, guild: discord.Guild):
-        """Posta um card por valor com status de fila em cada canal de jogo."""
         from views.match_queue_view import MatchQueueView, create_match_queue_embed
 
         for cat in ChannelsConfig.CATEGORIES.values():
@@ -181,18 +225,9 @@ class ChannelSetupService:
                 if not ch:
                     continue
 
-                # Limpa mensagens antigas do bot
-                to_delete = []
-                async for msg in ch.history(limit=30):
-                    if msg.author == guild.me and (msg.embeds or msg.components):
-                        to_delete.append(msg)
-                for msg in to_delete:
-                    try:
-                        await msg.delete()
-                    except Exception:
-                        pass
+                # ← bulk_delete para mensagens < 14 dias (muito mais rápido)
+                await self._clear_bot_messages(ch, limit=50)
 
-                # Posta um card por valor com fila 0/2
                 for value in ChannelsConfig.BET_VALUES:
                     try:
                         embed = create_match_queue_embed(
@@ -207,21 +242,64 @@ class ChannelSetupService:
                         )
                         await ch.send(embed=embed, view=view)
                     except Exception as e:
-                        logger.warning(f"[ChannelSetup] Card {ch_config['name']} R${value}: {e}")
+                        logger.warning(
+                            f"[ChannelSetup] Card {ch_config['name']} R${value}: {e}")
 
-                logger.info(f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
+                logger.info(
+                    f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
 
-
+    async def setup_faturamento(self, guild: discord.Guild):
+        from services.faturamento_mediador import RelatorioGeralView
+        embed = discord.Embed(
+            title="💰 Faturamento dos Mediadores",
+            description=(
+                "Use o botão abaixo para gerar o relatório geral de faturamento.\n\n"
+                "Este painel é restrito à equipe responsável pela mediação."
+            ),
+            color=0xFFA500,
+        )
+        await self._post_panel(guild, FATURAMENTO_CHANNEL, embed, RelatorioGeralView())
 
     async def setup_dashboards(self, guild: discord.Guild):
+        if not self.bot:                              # ← guard adicionado
+            logger.warning("[ChannelSetup] Dashboards: bot não disponível")
+            return
         try:
             from services.analytics_service import analytics_service
-            if self.bot:
-                analytics_service.bot = self.bot
+            analytics_service.bot = self.bot
             await analytics_service.update_all(guild)
             logger.info("[ChannelSetup] Dashboards atualizados")
         except Exception as e:
             logger.warning(f"[ChannelSetup] Dashboards: {e}")
+
+    # ── Helpers ───────────────────────────────────────────────
+
+    async def _clear_bot_messages(
+        self, channel: discord.TextChannel, limit: int = 10
+    ):
+        """
+        Remove TODAS as mensagens do bot no canal (até `limit`).
+        Usa bulk_delete quando possível (< 14 dias).
+        """
+        to_delete = []
+        async for msg in channel.history(limit=limit):
+            if msg.author == channel.guild.me and (msg.embeds or msg.components):
+                to_delete.append(msg)
+        if not to_delete:
+            return
+        try:
+            # bulk_delete exige 2+ mensagens
+            if len(to_delete) >= 2:
+                await channel.delete_messages(to_delete)
+            else:
+                await to_delete[0].delete()
+        except discord.HTTPException:
+            # Fallback individual se algumas tiverem > 14 dias
+            for msg in to_delete:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
 
     async def _post_panel(
         self,
@@ -234,18 +312,25 @@ class ChannelSetupService:
         if not ch:
             logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
             return
-        async for msg in ch.history(limit=10):
-            if msg.author == guild.me and msg.embeds:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                break
+        await self._clear_bot_messages(ch)   # ← limpa TODOS, não só o primeiro
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
         except Exception as e:
             logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
+
+    async def get_or_create_channel(
+        self, guild: discord.Guild, name: str, category_name: str | None = None
+    ) -> discord.TextChannel:
+        ch = discord.utils.get(guild.text_channels, name=name)
+        if ch:
+            return ch
+        category = discord.utils.get(guild.categories, name=category_name) if category_name else None
+        ch = await guild.create_text_channel(name, category=category)
+        logger.info(f"[ChannelSetup] Canal criado on-demand: #{name}")
+        return ch
+
+    # ── Embeds de guia ────────────────────────────────────────
 
     def _guide_player_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Guia do Jogador", color=THEME)
@@ -265,7 +350,7 @@ class ChannelSetupService:
         embed.add_field(
             name="Valores",
             value=" | ".join(f"R${v:.0f}" for v in ChannelsConfig.BET_VALUES),
-            inline=False
+            inline=False,
         )
         embed.add_field(name="Pagamento", value="✅ Apenas **PIX**\n❌ Inter, Neon, PagBank", inline=False)
         embed.add_field(name="Comandos",  value="`!cancelar`  `/perfil`  `/solicitar_analise`", inline=False)
@@ -304,9 +389,7 @@ class ChannelSetupService:
             "5. `!fechar_chamado <ID>` → fecha e remove jogador"
         ), inline=False)
         embed.add_field(name="Comandos", value=(
-            "`!fechar_chamado <ID>`\n"
-            "`/renomear_canal <sufixo>`"
-        ), inline=False)
+            "`!fechar_chamado <ID>`\n`/renomear_canal <sufixo>`"), inline=False)
         return embed
 
     def _guide_analyst_embed(self) -> discord.Embed:
@@ -318,24 +401,10 @@ class ChannelSetupService:
             "4. Investigue e clique na decisão\n"
             "5. Se confirmado → jogador vai para blacklist automaticamente"
         ), inline=False)
-        embed.add_field(name="Blacklist", value=(
-            f"`#{EXPOSED_CHANNEL_NAME}` — painel com botões de gestão"
-        ), inline=False)
+        embed.add_field(name="Blacklist",
+                        value=f"`#{EXPOSED_CHANNEL_NAME}` — painel com botões de gestão",
+                        inline=False)
         return embed
-
-    async def get_or_create_channel(
-        self,
-        guild: discord.Guild,
-        name: str,
-        category_name: str | None = None,
-    ) -> discord.TextChannel:
-        ch = discord.utils.get(guild.text_channels, name=name)
-        if ch:
-            return ch
-        category = discord.utils.get(guild.categories, name=category_name) if category_name else None
-        ch = await guild.create_text_channel(name, category=category)
-        logger.info(f"[ChannelSetup] Canal criado on-demand: #{name}")
-        return ch
 
 
 channel_setup_service = ChannelSetupService()

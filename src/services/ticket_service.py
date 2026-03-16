@@ -129,13 +129,6 @@ class TicketService:
         ).sort("created_at", -1).to_list(length=20)
         return [Ticket.from_dict(d) for d in docs]
 
-    # Alias para compatibilidade
-    async def get_tickets_by_user(self, discord_id: str, guild_id: int, status: str = None) -> List[Ticket]:
-        tickets = await self.get_user_tickets(discord_id, guild_id)
-        if status:
-            tickets = [t for t in tickets if t.status == status]
-        return tickets
-
     async def get_ticket(self, ticket_id: str, guild_id: int) -> Optional[Ticket]:
         doc = await db.get_collection("tickets").find_one(
             {"ticket_id": ticket_id, "guild_id": guild_id}
