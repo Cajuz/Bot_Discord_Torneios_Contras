@@ -1,5 +1,6 @@
 import discord
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from typing import Dict, Any
 from bson import ObjectId
 
@@ -15,8 +16,8 @@ class MediatorPix:
 
         self.pix_key = data.get("pix_key")
 
-        self.created_at = data.get("created_at", datetime.utcnow())
-        self.updated_at = data.get("updated_at", datetime.utcnow())
+        self.created_at = data.get("created_at", utcnow())
+        self.updated_at = data.get("updated_at", utcnow())
 
     # =========================
     # ATUALIZAR PIX
@@ -25,7 +26,7 @@ class MediatorPix:
     def update_pix(self, pix_key: str):
 
         self.pix_key = pix_key
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utcnow()
 
     # =========================
     # CONVERTER PARA DICT
@@ -38,7 +39,7 @@ class MediatorPix:
             "username": self.username,
             "pix_key": self.pix_key,
             "created_at": self.created_at,
-            "updated_at": datetime.utcnow()
+            "updated_at": utcnow()
         }
 
         if self._id:
@@ -53,7 +54,7 @@ class MediatorPix:
     @staticmethod
     def create_document(discord_id: str, username: str, pix_key: str) -> Dict[str, Any]:
 
-        now = datetime.utcnow()
+        now = utcnow()
 
         return {
             "discord_id": discord_id,

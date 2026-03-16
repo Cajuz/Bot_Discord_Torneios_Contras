@@ -4,6 +4,7 @@ from pymongo import collection
 from config.database import db
 from models.pedido_mediador import PaymentConfirmation
 from datetime import datetime, timedelta
+from utils.datetime_utils import utcnow
 from typing import List, Dict
 from models.mediator import Mediator
 from models.match import Match
@@ -156,7 +157,7 @@ class MediatorReportEmbed:
             title="📋 Relatório de Mediadores Ativos",
             description=f"Dias restantes do plano de {self.benefit_days} dias",
             color=discord.Color.green(),
-            timestamp=datetime.utcnow()
+            timestamp=utcnow()
         )
 
         if not mediators_list:
@@ -218,7 +219,7 @@ class VerificacaoMediadoresEmbed:
                 "• Status do benefício"
             ),
             color=discord.Color.green(),
-            timestamp=datetime.utcnow()
+            timestamp=utcnow()
         )
 
         embed.add_field(
@@ -330,7 +331,7 @@ class ActiveMediatorService:
         """
         Retorna todos os mediadores ativos, atualizando limite de partidas a cada 8 minutos.
         """
-        now = datetime.utcnow()
+        now = utcnow()
         docs = await self.mediator_collection.find({"is_active": True}).to_list(length=None)
         mediators = [Mediator(doc) for doc in docs]
 
@@ -483,3 +484,16 @@ class PedidoMediadorValor(discord.ui.View):
     async def plano_semanal(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Como a classe Modal está logo acima, o botão agora a encontra
         await interaction.response.send_modal(PedidoMediadorModal(plano="semanal"))
+
+# ── Alias para main.py ──────────────────────────────────────────
+class PedidoMediadorView(PedidoMediadorAdminView.__bases__[0]):
+    """View principal do painel 'Quero ser mediador'."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Quero ser mediador", style=discord.ButtonStyle.success,
+                       custom_id="quero_ser_mediador_btn")
+    async def pedir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Escolha um plano:", view=PedidoMediadorValor(), ephemeral=True
+        )

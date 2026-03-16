@@ -9,12 +9,25 @@ class Database:
     def __init__(self):
         self.client  = None
         self.db      = None
-        self.uri     = os.getenv('MONGODB_URI', 'mongodb://localhost:27017')
-        self.db_name = os.getenv('MONGODB_DB_NAME', 'x1_bot')
+        self.uri     = (
+            os.getenv('MONGODB_URI')
+            or os.getenv('MONGO_URI')
+            or 'mongodb://localhost:27017'
+        )
+        self.db_name = (
+            os.getenv('MONGODB_DB_NAME')
+            or os.getenv('MONGO_DB_NAME')
+            or 'x1_bot'
+        )
 
     async def connect(self):
         try:
-            self.client = AsyncIOMotorClient(self.uri)
+            self.client = AsyncIOMotorClient(
+                self.uri,
+                serverSelectionTimeoutMS=10000,
+                connectTimeoutMS=10000,
+                socketTimeoutMS=20000,
+            )
             self.db     = self.client[self.db_name]
             await self.client.admin.command('ping')
             log_success(f"MongoDB conectado — Database: {self.db_name}")
@@ -29,37 +42,29 @@ class Database:
 
     async def _create_indexes(self):
         try:
-            # ── match_queues ─────────────────────────────────────────
             await self.db.match_queues.create_index(
                 [("channel_name", 1), ("bet_value", 1), ("gel_type", 1)]
             )
             await self.db.match_queues.create_index("status")
             await self.db.match_queues.create_index("expires_at")
 
-            # ── mediators ────────────────────────────────────────────
             await self.db.mediators.create_index("discord_id", unique=True)
             await self.db.mediators.create_index("position")
             await self.db.mediators.create_index("is_active")
 
-            # ── matches ──────────────────────────────────────────────
             await self.db.matches.create_index("status")
             await self.db.matches.create_index("created_at")
             await self.db.matches.create_index("mediator_id")
             await self.db.matches.create_index([("status", 1), ("created_at", -1)])
 
-            # ── users ────────────────────────────────────────────────
             await self.db.users.create_index("discord_id", unique=True)
             await self.db.users.create_index("is_active")
 
-            # ── thread_pool ──────────────────────────────────────────
             await self.db.thread_pool.create_index("channel_id")
 
-            # ── active_threads ───────────────────────────────────────
             await self.db.active_threads.create_index("expires_at")
             await self.db.active_threads.create_index("thread_id", unique=True)
 
-            # ── match_history_messages (TTL 90 dias) ─────────────────
-            # expireAfterSeconds=0 → o MongoDB deleta quando utcnow() >= expires_at
             await self.db.match_history_messages.create_index(
                 "expires_at", expireAfterSeconds=0
             )

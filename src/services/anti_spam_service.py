@@ -2,6 +2,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from typing import Deque, Dict, Optional
 
 import discord
@@ -225,7 +226,7 @@ class AntiSpamService:
         guild       = member.guild
         block_role  = await self._get_block_role(guild)
         member_role = await self._get_member_role(guild)
-        now         = datetime.utcnow()
+        now         = utcnow()
 
         # Remove cargo Membro
         try:
@@ -354,7 +355,7 @@ class AntiSpamService:
             except Exception as e:
                 logger.warning(f"[AntiSpam] Não consegui devolver Membro para {member_name}: {e}")
 
-        now = datetime.utcnow()
+        now = utcnow()
 
         # Busca dados originais no banco
         col = db.get_collection("users")
@@ -408,3 +409,15 @@ class AntiSpamService:
                 logger.warning(f"[AntiSpam] Não consegui atualizar card: {e}")
 
         logger.info(f"[AntiSpam] {member_name} desbloqueado por {by.name}")
+
+    # Alias para compatibilidade com main.py
+    async def check_message(self, message: discord.Message) -> bool:
+        """Retorna True se a mensagem foi bloqueada (spam)."""
+        await self.process_message(message)
+        return False  # main.py usa o retorno como "bloquear processamento"
+
+
+# Instância global — precisa de bot; será inicializado no on_ready
+from discord.ext import commands as _commands
+_bot_placeholder = _commands.Bot.__new__(_commands.Bot)
+anti_spam_service = AntiSpamService(_bot_placeholder)

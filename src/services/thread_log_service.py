@@ -13,6 +13,7 @@ import zipfile
 import aiohttp
 import discord
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from typing import Optional, List, Tuple
 from config.database import db
 from utils.logger import logger
@@ -355,7 +356,7 @@ class ThreadLogService:
                 ),
                 inline=False
             )
-            embed.set_footer(text=f"Gerado em {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
+            embed.set_footer(text=f"Gerado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
 
             await logs_channel.send(embed=embed, file=file)
             logger.info(f"[ThreadLog] ZIP enviado para #{LOGS_CHANNEL_NAME}: {filename}")
@@ -521,7 +522,7 @@ class ThreadLogService:
         total_media = sum(len(m.attachments) for m in messages)
         total_bot   = sum(1 for m in messages if m.author.bot)
         total_user  = len(messages) - total_bot
-        now_str     = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
+        now_str     = utcnow().strftime("%d/%m/%Y %H:%M UTC")
 
         footer = f"""
 <div class="footer">

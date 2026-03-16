@@ -3,6 +3,7 @@
 from __future__ import annotations
 import discord
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from typing import Optional, List
 from config.database import db
 from models.match import Match
@@ -64,7 +65,7 @@ async def _post_log(
     color: discord.Color = discord.Color.blurple()
 ):
     embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=f"Log de partida • {datetime.utcnow().strftime('%H:%M')}")
+    embed.set_footer(text=f"Log de partida • {utcnow().strftime('%H:%M')}")
     await channel.send(embed=embed)
 
 
@@ -150,23 +151,22 @@ def embed_prize_instructions(match: dict) -> discord.Embed:
 # ─────────────────────────────────────────────
 
 class PrizeConfirmView(discord.ui.View):
-    """
-    Enviado publicamente na thread após mediador usar !prize.
-    Apenas os jogadores vencedores podem confirmar.
-    """
-
     def __init__(self, match_id: str, winner_players: List, winner_team: str):
         super().__init__(timeout=None)
         self.match_id       = match_id
         self.winner_players = [str(p) for p in winner_players]
         self.winner_team    = winner_team
 
-    @discord.ui.button(
-        label="✅ Confirmar Recebimento do Prêmio",
-        style=discord.ButtonStyle.success,
-        custom_id="prize_confirm"
-    )
-    async def confirm_prize(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # ✅ custom_id único por partida
+        btn = discord.ui.Button(
+            label="✅ Confirmar Recebimento do Prêmio",
+            style=discord.ButtonStyle.success,
+            custom_id=f"prize_confirm_{match_id}"
+        )
+        btn.callback = self.confirm_prize
+        self.add_item(btn)
+
+    async def confirm_prize(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
 
         if user_id not in self.winner_players:
@@ -190,8 +190,10 @@ class PrizeConfirmView(discord.ui.View):
             await interaction.response.send_message("❌ Erro ao finalizar partida.", ephemeral=True)
             return
 
-        button.disabled = True
-        button.label    = "✅ Prêmio Confirmado"
+        # Desabilita botão
+        for item in self.children:
+            item.disabled = True
+            item.label    = "✅ Prêmio Confirmado"
         await interaction.response.edit_message(view=self)
 
         if isinstance(interaction.channel, discord.Thread):
@@ -208,7 +210,6 @@ class PrizeConfirmView(discord.ui.View):
         )
         await interaction.channel.send(embed=embed)
 
-        # ← NOVO: devolve thread ao pool após finalização
         try:
             from services.thread_reuse_service import thread_reuse_service
             if thread_reuse_service and isinstance(interaction.channel, discord.Thread):
@@ -218,6 +219,7 @@ class PrizeConfirmView(discord.ui.View):
                 )
         except Exception as e:
             logger.warning(f"[PrizeConfirmView] Erro ao devolver thread ao pool: {e}")
+
 
 
 # ─────────────────────────────────────────────
@@ -553,3 +555,11 @@ async def cmd_cancelar_match(ctx, reason: str = None):
             )
     except Exception as e:
         logger.warning(f"[cmd_cancelar_match] Erro ao devolver thread ao pool: {e}")
+
+
+# ── View persistente para registro no on_ready ─────────────────
+class MatchThreadView(discord.ui.View):
+    """Stub persistente — registrada no on_ready para sobreviver a reinicializações."""
+    def __init__(self, match_id: str = "__persistent__"):
+        super().__init__(timeout=None)
+        self.match_id = match_id

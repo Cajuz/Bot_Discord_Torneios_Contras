@@ -1,4 +1,5 @@
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from typing import List, Optional
 from bson import ObjectId
 
@@ -35,7 +36,7 @@ class MatchQueue:
         self.max_players             = max_players
         self.players                 = players or []
         self.status                  = status
-        self.created_at              = created_at or datetime.utcnow()
+        self.created_at              = created_at or utcnow()
         self.expires_at              = expires_at
         self.confirmation_message_id = confirmation_message_id
         self.confirmations           = confirmations or []
@@ -117,7 +118,7 @@ class MatchQueue:
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return utcnow() > self.expires_at
 
     def mark_as_matched(self, match_id: str):
         """Sela a fila como convertida em partida."""

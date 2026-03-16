@@ -3,6 +3,7 @@
 from typing import Dict, Any, List, Optional
 from bson import ObjectId
 from datetime import datetime
+from utils.datetime_utils import utcnow
 import discord
 
 from config.database import db
@@ -23,7 +24,7 @@ class MatchService:
 
     async def _update(self, match_id: str, fields: dict) -> Optional[Dict[str, Any]]:
         col = await self._get_collection()
-        fields['updated_at'] = datetime.utcnow()
+        fields['updated_at'] = utcnow()
         await col.update_one({'_id': ObjectId(match_id)}, {'$set': fields})
         return await col.find_one({'_id': ObjectId(match_id)})
 
@@ -175,7 +176,7 @@ class MatchService:
             inline=True
         )
 
-        completed_at = match.get("completed_at") or match.get("cancelled_at") or datetime.utcnow()
+        completed_at = match.get("completed_at") or match.get("cancelled_at") or utcnow()
         embed.set_footer(text=f"Encerrada em")
         embed.timestamp = completed_at
 
@@ -217,8 +218,8 @@ class MatchService:
                 "premio_confirmado_jogador": False,
                 "cancelled_by":            None,
                 "cancel_reason":           None,
-                "created_at":              datetime.utcnow(),
-                "updated_at":              datetime.utcnow(),
+                "created_at":              utcnow(),
+                "updated_at":              utcnow(),
                 "started_at":              None,
                 "completed_at":            None,
                 "cancelled_at":            None,
@@ -331,7 +332,7 @@ class MatchService:
                 return None
             result = await self._update(match_id, {
                 'status':     Match.STATUS_EM_ANDAMENTO,
-                'started_at': datetime.utcnow(),
+                'started_at': utcnow(),
             })
             logger.info(f"▶️ Partida iniciada: {match_id}")
             return result
@@ -357,9 +358,11 @@ class MatchService:
             if not self._validate_transition(match_doc, Match.STATUS_AGUARDANDO_PREMIO):
                 logger.warning(f"Transição inválida: {match_doc['status']} → aguardando_premio")
                 return None
+            win_ids = time_blue if vencedor == 'blue' else time_red
             result = await self._update(match_id, {
                 'status':    Match.STATUS_AGUARDANDO_PREMIO,
                 'vencedor':  vencedor,
+                'winner_id': str(win_ids[0]) if win_ids else None,
                 'time_blue': [str(p) for p in time_blue],
                 'time_red':  [str(p) for p in time_red],
             })
@@ -401,7 +404,7 @@ class MatchService:
             result = await self._update(match_id, {
                 'status':                   Match.STATUS_FINALIZADO,
                 'premio_confirmado_jogador': True,
-                'completed_at':             datetime.utcnow(),
+                'completed_at':             utcnow(),
             })
             log_success(f"✅ Partida finalizada: {match_id}")
 
@@ -441,7 +444,7 @@ class MatchService:
                 'status':       Match.STATUS_CANCELADO,
                 'cancelled_by': str(cancelled_by) if cancelled_by else None,
                 'cancel_reason': reason,
-                'cancelled_at': datetime.utcnow(),
+                'cancelled_at': utcnow(),
             })
             logger.info(f"🚫 Partida {match_id} cancelada por {cancelled_by} | motivo: {reason}")
 
@@ -470,7 +473,7 @@ class MatchService:
 
             result = await self._update(match_id, {
                 'status':        Match.STATUS_FINALIZADO,
-                'completed_at':  datetime.utcnow(),
+                'completed_at':  utcnow(),
                 'cancelled_by':  str(admin_id) if admin_id else None,
                 'cancel_reason': 'force_complete_admin',
             })

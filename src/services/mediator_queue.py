@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from utils.datetime_utils import utcnow as _utcnow
 import discord
 
 from config.database import db
@@ -39,6 +40,11 @@ class MediatorQueue:
             new_count = 0
 
             for user_id in members_with_role:
+                # ✅ ignora user_id inválido antes de qualquer operação
+                if not user_id:
+                    logger.warning("sync_mediators_by_role: user_id inválido ignorado")
+                    continue
+
                 existing = await collection.find_one({'user_id': user_id})
                 if not existing:
                     member = guild.get_member(user_id)
@@ -52,7 +58,7 @@ class MediatorQueue:
                     if not existing.get('is_active', False):
                         await collection.update_one(
                             {'user_id': user_id},
-                            {'$set': {'is_active': True, 'updated_at': datetime.utcnow()}}
+                            {'$set': {'is_active': True, 'updated_at': _utcnow()}}
                         )
                         synced_count += 1
 
@@ -61,7 +67,7 @@ class MediatorQueue:
                 if mediator['user_id'] not in members_with_role and mediator.get('is_active', False):
                     await collection.update_one(
                         {'user_id': mediator['user_id']},
-                        {'$set': {'is_active': False, 'in_queue': False, 'updated_at': datetime.utcnow()}}
+                        {'$set': {'is_active': False, 'in_queue': False, 'updated_at': _utcnow()}}
                     )
                     if mediator['user_id'] in self.queue:
                         self.queue.remove(mediator['user_id'])
@@ -72,6 +78,11 @@ class MediatorQueue:
             logger.error(f"Erro ao sincronizar mediadores por cargo: {e}")
 
     async def register_mediator(self, user_id: int, username: str, guild_id: int) -> bool:
+        # ✅ guarda contra user_id nulo — evita o E11000 com discord_id: null
+        if not user_id:
+            logger.warning("register_mediator: user_id inválido (None/0), ignorado")
+            return False
+
         try:
             collection = db.get_collection('mediators')
             existing = await collection.find_one({'user_id': user_id})
@@ -79,15 +90,16 @@ class MediatorQueue:
                 return False
 
             await collection.insert_one({
-                'user_id': user_id,
-                'username': username,
-                'guild_id': guild_id,
-                'is_active': True,
-                'in_queue': False,
+                'user_id':          user_id,
+                'discord_id':       str(user_id),   # ✅ campo que o índice único exige
+                'username':         username,
+                'guild_id':         guild_id,
+                'is_active':        True,
+                'in_queue':         False,
                 'matches_mediated': 0,
-                'created_at': datetime.utcnow(),
-                'updated_at': datetime.utcnow(),
-                'last_match_at': None
+                'created_at':       _utcnow(),
+                'updated_at':       _utcnow(),
+                'last_match_at':    None
             })
             log_success(f"Mediador cadastrado: {username} (ID: {user_id})")
             return True
@@ -96,6 +108,9 @@ class MediatorQueue:
             return False
 
     async def add_to_queue(self, user_id: int) -> bool:
+        if not user_id:
+            logger.warning("add_to_queue: user_id inválido ignorado")
+            return False
         try:
             collection = db.get_collection('mediators')
             mediator = await collection.find_one({'user_id': user_id})
@@ -108,7 +123,7 @@ class MediatorQueue:
             self.queue.append(user_id)
             await collection.update_one(
                 {'user_id': user_id},
-                {'$set': {'in_queue': True, 'updated_at': datetime.utcnow()}}
+                {'$set': {'in_queue': True, 'updated_at': _utcnow()}}
             )
             log_success(f"Mediador {user_id} entrou na fila (Posição: {len(self.queue)})")
             return True
@@ -124,7 +139,7 @@ class MediatorQueue:
             collection = db.get_collection('mediators')
             await collection.update_one(
                 {'user_id': user_id},
-                {'$set': {'in_queue': False, 'updated_at': datetime.utcnow()}}
+                {'$set': {'in_queue': False, 'updated_at': _utcnow()}}
             )
             logger.info(f"Mediador {user_id} saiu da fila")
             return True
@@ -133,7 +148,7 @@ class MediatorQueue:
             return False
 
     async def get_next_mediator(self) -> Optional[int]:
-        """Retorna o discord_id (int) do próximo mediador via round-robin"""
+        """Retorna o user_id (int) do próximo mediador via round-robin"""
         if not self.queue:
             logger.warning("Fila de mediadores vazia!")
             return None
@@ -146,7 +161,7 @@ class MediatorQueue:
             await collection.update_one(
                 {'user_id': mediator_id},
                 {
-                    '$set': {'last_match_at': datetime.utcnow()},
+                    '$set': {'last_match_at': _utcnow()},
                     '$inc': {'matches_mediated': 1}
                 }
             )
@@ -187,13 +202,21 @@ class MediatorQueue:
     def has_available_mediators(self) -> bool:
         return len(self.queue) > 0
 
-    # ✏️ Métodos que o main.py usa via !addmediador / !removemediador / !fila
+    # ✏️ Aliases usados pelo admin_cog e main.py
 
     async def add_mediator(self, user_id: str, username: str):
-        """Alias para register + add_to_queue — retorna objeto compatível com main.py"""
-        uid = int(user_id)
-        collection = db.get_collection('mediators')
+        """Alias para register + add_to_queue"""
+        # ✅ valida antes de converter
+        if not user_id:
+            logger.warning("add_mediator: user_id vazio ignorado")
+            return None
 
+        uid = int(user_id)
+        if not uid:
+            logger.warning("add_mediator: uid == 0 ignorado")
+            return None
+
+        collection = db.get_collection('mediators')
         existing = await collection.find_one({'user_id': uid})
         if not existing:
             await self.register_mediator(uid, username, guild_id=0)
@@ -202,7 +225,6 @@ class MediatorQueue:
 
         pos = await self.get_mediator_position(uid)
 
-        # Retorna objeto simples com .position para o main.py
         class _Result:
             pass
         r = _Result()
@@ -211,13 +233,15 @@ class MediatorQueue:
 
     async def remove_mediador(self, user_id: str):
         """Alias para remove_from_queue"""
+        if not user_id:
+            return
         await self.remove_from_queue(int(user_id))
 
     async def get_queue_stats(self) -> Dict[str, Any]:
-        """Retorna stats formatados para o comando !fila do main.py"""
+        """Stats formatados para o comando !fila"""
         try:
             collection = db.get_collection('mediators')
-            now = datetime.utcnow()
+            now = _utcnow()
             eight_min_ago = now - timedelta(minutes=8)
 
             mediators_info = []
@@ -226,25 +250,24 @@ class MediatorQueue:
                 if not doc:
                     continue
 
-                # Contar partidas nos últimos 8 min
                 matches_recent = await db.get_collection('matches').count_documents({
                     'mediator_id': str(uid),
                     'created_at': {'$gte': eight_min_ago}
                 })
 
                 mediators_info.append({
-                    'position': self.queue.index(uid) + 1,
-                    'username': doc.get('username', f'User_{uid}'),
-                    'total_matches': doc.get('matches_mediated', 0),
+                    'position':              self.queue.index(uid) + 1,
+                    'username':              doc.get('username', f'User_{uid}'),
+                    'total_matches':         doc.get('matches_mediated', 0),
                     'matches_in_last_8_min': matches_recent,
-                    'can_mediate': matches_recent < 5
+                    'can_mediate':           matches_recent < 5
                 })
 
             total = await collection.count_documents({'is_active': True})
 
             return {
                 'total_active': total,
-                'mediators': mediators_info
+                'mediators':    mediators_info
             }
         except Exception as e:
             logger.error(f"Erro ao obter stats da fila: {e}")

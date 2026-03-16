@@ -2,6 +2,7 @@ import asyncio
 import discord
 from typing import Optional
 from datetime import datetime
+from utils.datetime_utils import utcnow
 
 from config.database import db
 from config.rules import ServerRules
@@ -65,7 +66,7 @@ class OnboardingService:
                         {'discord_id': str(member.id)},
                         {'$set': {
                             'username':           member.name,
-                            'joined_at':          datetime.utcnow(),
+                            'joined_at':          utcnow(),
                             'is_active':          True,
                             'onboarding_result':  'pendente',
                             'captcha_status':     'pendente',  # ✅ reseta captcha
@@ -154,7 +155,7 @@ class OnboardingService:
                     {'discord_id': str(member.id)},
                     {'$set': {
                         'captcha_status': 'aprovado',
-                        'updated_at':     datetime.utcnow()
+                        'updated_at':     utcnow()
                     }}
                 )
                 await dm_channel.send(embed=CaptchaService.get_success_embed())
@@ -178,7 +179,7 @@ class OnboardingService:
                     {'discord_id': str(member.id)},
                     {'$set': {
                         'captcha_status': captcha_status,
-                        'updated_at':     datetime.utcnow()
+                        'updated_at':     utcnow()
                     }}
                 )
 
@@ -256,8 +257,8 @@ class OnboardingService:
                 {'$set': {
                     'has_accepted_rules':  True,
                     'onboarding_result':   'aceito',
-                    'rules_accepted_at':   datetime.utcnow(),
-                    'updated_at':          datetime.utcnow(),
+                    'rules_accepted_at':   utcnow(),
+                    'updated_at':          utcnow(),
                 }},
                 upsert=True
             )
@@ -414,7 +415,7 @@ class OnboardingService:
                 {'$set': {
                     'is_active':         False,
                     'onboarding_result': result,
-                    'updated_at':        datetime.utcnow()
+                    'updated_at':        utcnow()
                 }}
             )
             self._pending_onboarding.discard(member.id)

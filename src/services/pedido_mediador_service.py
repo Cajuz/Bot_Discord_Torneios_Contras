@@ -1,5 +1,6 @@
 import discord
 from datetime import datetime
+from utils.datetime_utils import utcnow
 from utils.logger import logger
 from models.pedido_mediador import PaymentConfirmation
 from views.quero_ser_mediador_view import PedidoMediadorValor
@@ -151,7 +152,7 @@ class MediatorManager:
         if isinstance(reference_date, str):
             reference_date = datetime.fromisoformat(reference_date)
 
-        elapsed_days = (datetime.utcnow() - reference_date).days
+        elapsed_days = (utcnow() - reference_date).days
 
         remaining_days = self.benefit_days - elapsed_days
 
