@@ -1,188 +1,328 @@
+# views/match_queue_view.py
+
 import discord
 from typing import Optional
 from services.match_queue_service import match_queue_service
+from models.queue import MatchQueue
+from models.match import Match
+from config.database import db
 from config.channels_config import ChannelsConfig
 from utils.logger import logger
 
+
+def is_1x1_mob(channel_name: str) -> bool:
+    return channel_name == "1x1-mob"
+
+
+# ─────────────────────────────────────────────
+# Opção C — verifica partida ativa do jogador
+# ─────────────────────────────────────────────
+
+async def _player_has_active_match(player_id: int) -> bool:
+    """Retorna True se o jogador já está em uma partida ativa."""
+    try:
+        col    = db.get_collection('matches')
+        active = await col.find_one({
+            'player_ids': str(player_id),
+            'status':     {'$in': Match.ACTIVE_STATUSES}
+        })
+        return active is not None
+    except Exception as e:
+        logger.warning(f"[Queue] Erro ao checar partida ativa: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
+# View do card
+# ─────────────────────────────────────────────
+
 class MatchQueueView(discord.ui.View):
-    """View para os cards de fila de partida"""
-    
-    def __init__(self, channel_name: str, bet_value: float, max_players: int):
+    """
+    Card de fila.
+    - 1x1-mob : GEL NORMAL + GEL INFINITO + SAIR
+    - Demais  : ENTRAR NA FILA + SAIR
+
+    locked_gel: "normal" | "infinito" | "all" | None
+      → desabilita botões do gel em confirmação (Opção A)
+    """
+
+    def __init__(
+        self,
+        channel_name: str,
+        bet_value:    float,
+        max_players:  int  = 2,
+        locked_gel:   str  = None,   # ← Opção A
+    ):
         super().__init__(timeout=None)
         self.channel_name = channel_name
-        self.bet_value = bet_value
-        self.max_players = max_players
-        
-        # Adicionar custom_ids únicos
-        self.children[0].custom_id = f"gel_normal_{channel_name}_{bet_value}"
-        self.children[1].custom_id = f"gel_infinito_{channel_name}_{bet_value}"
-        self.children[2].custom_id = f"sair_fila_{channel_name}_{bet_value}"
-    
-    @discord.ui.button(
-        label="🔥 GEL NORMAL",
-        style=discord.ButtonStyle.green,
-        custom_id="gel_normal"
-    )
-    async def gel_normal_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Botão para entrar na fila de GEL Normal"""
-        await self._handle_queue_join(interaction, "normal")
-    
-    @discord.ui.button(
-        label="♾️ GEL INFINITO",
-        style=discord.ButtonStyle.blurple,
-        custom_id="gel_infinito"
-    )
-    async def gel_infinito_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Botão para entrar na fila de GEL Infinito"""
-        await self._handle_queue_join(interaction, "infinito")
-    
-    @discord.ui.button(
-        label="🚪 SAIR DA FILA",
-        style=discord.ButtonStyle.red,
-        custom_id="sair_fila"
-    )
-    async def leave_queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Botão para sair de todas as filas deste valor"""
+        self.bet_value    = bet_value
+        self.max_players  = 2
+        self.locked_gel   = locked_gel
+
+        def _is_locked(gel: str) -> bool:
+            if locked_gel is None:
+                return False
+            return locked_gel in (gel, "all")
+
+        if is_1x1_mob(channel_name):
+            btn_normal = discord.ui.Button(
+                label     = "⏳ AGUARDANDO..." if _is_locked("normal") else "🔥 GEL NORMAL",
+                style     = discord.ButtonStyle.grey if _is_locked("normal") else discord.ButtonStyle.green,
+                custom_id = f"gel_normal_{channel_name}_{bet_value}",
+                disabled  = _is_locked("normal"),
+            )
+            btn_normal.callback = self._join_normal
+
+            btn_inf = discord.ui.Button(
+                label     = "⏳ AGUARDANDO..." if _is_locked("infinito") else "♾️ GEL INFINITO",
+                style     = discord.ButtonStyle.grey if _is_locked("infinito") else discord.ButtonStyle.blurple,
+                custom_id = f"gel_infinito_{channel_name}_{bet_value}",
+                disabled  = _is_locked("infinito"),
+            )
+            btn_inf.callback = self._join_infinito
+
+            btn_sair = discord.ui.Button(
+                label     = "🚪 SAIR DA FILA",
+                style     = discord.ButtonStyle.red,
+                custom_id = f"sair_fila_{channel_name}_{bet_value}",
+            )
+            btn_sair.callback = self._leave_queue
+
+            self.add_item(btn_normal)
+            self.add_item(btn_inf)
+            self.add_item(btn_sair)
+
+        else:
+            locked_all = _is_locked("normal")
+            btn_entrar = discord.ui.Button(
+                label     = "⏳ CONFIRMAÇÃO EM ANDAMENTO..." if locked_all else "⚔️ ENTRAR NA FILA",
+                style     = discord.ButtonStyle.grey if locked_all else discord.ButtonStyle.green,
+                custom_id = f"entrar_fila_{channel_name}_{bet_value}",
+                disabled  = locked_all,
+            )
+            btn_entrar.callback = self._join_normal
+
+            btn_sair = discord.ui.Button(
+                label     = "🚪 SAIR DA FILA",
+                style     = discord.ButtonStyle.red,
+                custom_id = f"sair_fila_{channel_name}_{bet_value}",
+            )
+            btn_sair.callback = self._leave_queue
+
+            self.add_item(btn_entrar)
+            self.add_item(btn_sair)
+
+    # ── Callbacks ─────────────────────────────────────────────
+
+    async def _join_normal(self, interaction: discord.Interaction):
+        await self._handle_join(interaction, "normal")
+
+    async def _join_infinito(self, interaction: discord.Interaction):
+        await self._handle_join(interaction, "infinito")
+
+    async def _handle_join(self, interaction: discord.Interaction, gel_type: str):
         try:
-            # Tentar remover de ambas as filas
-            removed_normal, queue_normal = await match_queue_service.remove_player_from_queue(
-                self.channel_name,
-                self.bet_value,
-                "normal",
-                interaction.user.id
-            )
-            
-            removed_infinito, queue_infinito = await match_queue_service.remove_player_from_queue(
-                self.channel_name,
-                self.bet_value,
-                "infinito",
-                interaction.user.id
-            )
-            
-            if removed_normal or removed_infinito:
+            # ── Opção C: jogador já tem partida ativa ─────────
+            if await _player_has_active_match(interaction.user.id):
                 await interaction.response.send_message(
-                    "✅ Você saiu da fila!",
+                    "❌ Você já está em uma **partida ativa**!\n"
+                    "Finalize-a antes de entrar em uma nova fila.",
                     ephemeral=True
                 )
-                
-                # Atualizar os cards
-                if removed_normal and queue_normal:
-                    await self._update_queue_card(interaction, "normal", queue_normal)
-                if removed_infinito and queue_infinito:
-                    await self._update_queue_card(interaction, "infinito", queue_infinito)
-            else:
+                return
+
+            # ── Opção A: confirmação em andamento nesta fila ──
+            current_q = await match_queue_service.get_queue_status(
+                self.channel_name, self.bet_value, gel_type
+            )
+            if current_q and current_q.status == MatchQueue.STATUS_CONFIRMING:
                 await interaction.response.send_message(
-                    "❌ Você não está em nenhuma fila deste valor.",
+                    "⏳ Uma **confirmação está em andamento** para este valor e gel.\n"
+                    "Aguarde ela terminar para entrar na próxima fila.",
                     ephemeral=True
                 )
-                
-        except Exception as e:
-            logger.error(f"Erro ao sair da fila: {e}")
-            await interaction.response.send_message(
-                "❌ Erro ao sair da fila. Tente novamente.",
-                ephemeral=True
-            )
-    
-    async def _handle_queue_join(self, interaction: discord.Interaction, gel_type: str):
-        """Processar entrada na fila"""
-        try:
+                return
+
+            # ── Bloqueia dois géis ao mesmo tempo (1x1-mob) ───
+            if is_1x1_mob(self.channel_name):
+                other_gel   = "infinito" if gel_type == "normal" else "normal"
+                other_queue = await match_queue_service.get_queue_status(
+                    self.channel_name, self.bet_value, other_gel
+                )
+                if other_queue and interaction.user.id in other_queue.players:
+                    await interaction.response.send_message(
+                        f"⚠️ Você já está na fila de **GEL {other_gel.upper()}**. Saia dela primeiro.",
+                        ephemeral=True
+                    )
+                    return
+
+            # ── Entra na fila ─────────────────────────────────
             success, queue, message = await match_queue_service.add_player_to_queue(
-                self.channel_name,
-                self.bet_value,
-                gel_type,
-                self.max_players,
-                interaction.user.id
+                channel_name = self.channel_name,
+                bet_value    = self.bet_value,
+                gel_type     = gel_type,
+                max_players  = 2,
+                player_id    = interaction.user.id
             )
-            
-            if success:
-                if message == "full":
-                    # Fila cheia - iniciar timer de confirmação
-                    await interaction.response.send_message(
-                        "⏰ Fila completa! Iniciando confirmação...",
-                        ephemeral=True
-                    )
-                    
-                    await match_queue_service.start_confirmation_timer(
-                        queue,
-                        interaction.client,
-                        interaction.channel
-                    )
-                else:
-                    # Jogador adicionado com sucesso
-                    await interaction.response.send_message(
-                        f"✅ {message}",
-                        ephemeral=True
-                    )
-                
-                # Atualizar o card
-                await self._update_queue_card(interaction, gel_type, queue)
-            else:
+
+            if not success:
+                await interaction.response.send_message(f"❌ {message}", ephemeral=True)
+                return
+
+            if message == "full":
                 await interaction.response.send_message(
-                    f"❌ {message}",
+                    "⚡ Fila completa! Um tópico de confirmação foi criado.",
                     ephemeral=True
                 )
-                
+                await match_queue_service.start_confirmation_timer(
+                    queue   = queue,
+                    bot     = interaction.client,
+                    channel = interaction.channel
+                )
+            else:
+                await interaction.response.send_message(f"✅ {message}", ephemeral=True)
+                await self._refresh_card(interaction, gel_type)
+
         except Exception as e:
             logger.error(f"Erro ao entrar na fila: {e}")
-            await interaction.response.send_message(
-                "❌ Erro ao entrar na fila. Tente novamente.",
-                ephemeral=True
-            )
-    
-    async def _update_queue_card(
-        self,
-        interaction: discord.Interaction,
-        gel_type: str,
-        queue
-    ):
-        """Atualizar o card da fila com informações atualizadas"""
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Erro ao entrar na fila.", ephemeral=True)
+
+    async def _leave_queue(self, interaction: discord.Interaction):
         try:
-            # Buscar todas as mensagens com cards neste canal
-            # e atualizar a que corresponde a este valor
-            
-            # Por enquanto, apenas log
-            logger.info(f"Fila atualizada: {self.channel_name} R$ {self.bet_value} - {gel_type}: {len(queue.players)}/{queue.max_players}")
-            
+            gel_types = ["normal", "infinito"] if is_1x1_mob(self.channel_name) else ["normal"]
+            removed   = False
+
+            for gel in gel_types:
+                ok, queue = await match_queue_service.remove_player_from_queue(
+                    self.channel_name, self.bet_value, gel, interaction.user.id
+                )
+                if ok:
+                    removed = True
+
+            if removed:
+                await interaction.response.send_message("✅ Você saiu da fila!", ephemeral=True)
+                await self._refresh_card(interaction, "normal")
+            else:
+                await interaction.response.send_message(
+                    "❌ Você não está em nenhuma fila deste valor.", ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Erro ao sair da fila: {e}")
+            await interaction.response.send_message("❌ Erro ao sair da fila.", ephemeral=True)
+
+    # ── Refresh do card ───────────────────────────────────────
+
+    async def _refresh_card(self, interaction: discord.Interaction, gel_type: str):
+        try:
+            q_normal   = await match_queue_service.get_queue_status(self.channel_name, self.bet_value, "normal")
+            q_infinito = await match_queue_service.get_queue_status(self.channel_name, self.bet_value, "infinito")
+
+            normal_count   = len(q_normal.players)   if q_normal   else 0
+            infinito_count = len(q_infinito.players) if q_infinito else 0
+
+            # Confirma se algum gel está em confirmação (para manter lock visual)
+            locked_gel = None
+            if q_normal and q_normal.status == MatchQueue.STATUS_CONFIRMING:
+                locked_gel = "normal"
+            if q_infinito and q_infinito.status == MatchQueue.STATUS_CONFIRMING:
+                locked_gel = "infinito" if locked_gel is None else "all"
+
+            embed = create_match_queue_embed(
+                channel_name       = self.channel_name,
+                bet_value          = self.bet_value,
+                queue_normal_count = normal_count,
+                queue_infinito_count = infinito_count,
+                locked_gel         = locked_gel,
+            )
+            view = MatchQueueView(
+                channel_name = self.channel_name,
+                bet_value    = self.bet_value,
+                locked_gel   = locked_gel,
+            )
+            try:
+                await interaction.message.edit(embed=embed, view=view)
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Erro ao atualizar card: {e}")
 
 
+# ─────────────────────────────────────────────
+# Embed do card
+# ─────────────────────────────────────────────
+
 def create_match_queue_embed(
-    channel_name: str,
-    bet_value: float,
-    max_players: int,
-    queue_normal_count: int = 0,
-    queue_infinito_count: int = 0
+    channel_name:         str,
+    bet_value:            float,
+    queue_normal_count:   int = 0,
+    queue_infinito_count: int = 0,
+    locked_gel:           str = None,   # ← Opção A: "normal" | "infinito" | "all" | None
 ) -> discord.Embed:
-    """Criar embed para card de fila de partida"""
-    
-    # Mapear nome do canal para nome amigável
-    channel_display = channel_name.upper()
-    if "mob" in channel_name:
-        channel_display = channel_name.replace("mob", "Mobile")
-    elif "emu" in channel_name:
-        channel_display = channel_name.replace("emu", "Emulador")
-    elif "misto" in channel_name:
-        channel_display = channel_name.replace("misto", "Misto")
-    
+
+    display = (
+        channel_name.upper()
+        .replace("-MOB",   " Mobile")
+        .replace("-EMU",   " Emulador")
+        .replace("-MISTO", " Misto")
+    )
+
+    def bar(n: int) -> str:
+        return "🟩" * n + "⬜" * (2 - n)
+
+    def _is_locked(gel: str) -> bool:
+        return locked_gel in (gel, "all") if locked_gel else False
+
+    color = discord.Color.orange() if locked_gel else discord.Color.gold()
+
     embed = discord.Embed(
-        title=f"💰 R$ {bet_value:.2f}",
-        description=f"**Modo:** {channel_display}\n**Jogadores necessários:** {max_players}",
-        color=discord.Color.gold()
+        title       = f"💰 R$ {bet_value:.2f}",
+        description = f"**Modo:** {display}",
+        color       = color
     )
-    
-    embed.add_field(
-        name="🔥 GEL NORMAL",
-        value=f"Na fila: **{queue_normal_count}/{max_players}** jogadores",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="♾️ GEL INFINITO",
-        value=f"Na fila: **{queue_infinito_count}/{max_players}** jogadores",
-        inline=True
-    )
-    
-    embed.set_footer(text="Clique no botão do modo desejado para entrar na fila")
-    
+
+    if is_1x1_mob(channel_name):
+        # GEL NORMAL
+        if _is_locked("normal"):
+            embed.add_field(
+                name  = "🔥 GEL NORMAL",
+                value = f"⏳ **Confirmação em andamento...**\n{bar(queue_normal_count)}",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name  = "🔥 GEL NORMAL",
+                value = f"Na fila: **{queue_normal_count}/2**\n{bar(queue_normal_count)}",
+                inline=True
+            )
+
+        # GEL INFINITO
+        if _is_locked("infinito"):
+            embed.add_field(
+                name  = "♾️ GEL INFINITO",
+                value = f"⏳ **Confirmação em andamento...**\n{bar(queue_infinito_count)}",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name  = "♾️ GEL INFINITO",
+                value = f"Na fila: **{queue_infinito_count}/2**\n{bar(queue_infinito_count)}",
+                inline=True
+            )
+    else:
+        if _is_locked("normal"):
+            embed.add_field(
+                name  = "⚔️ FILA",
+                value = f"⏳ **Confirmação em andamento...**\n{bar(queue_normal_count)}",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name  = "⚔️ FILA",
+                value = f"Na fila: **{queue_normal_count}/2**\n{bar(queue_normal_count)}",
+                inline=True
+            )
+
+    footer = "⏳ Aguardando confirmação dos jogadores..." if locked_gel else "Clique para entrar na fila"
+    embed.set_footer(text=footer)
     return embed

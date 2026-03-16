@@ -1,0 +1,28 @@
+[Unit]
+Description=X1 Frifas Discord Bot
+Documentation=https://github.com/Cajuz/X1_frifas-Discord_bot
+After=network-online.target mongod.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/x1frifas
+EnvironmentFile=/opt/x1frifas/.env
+ExecStart=/opt/x1frifas/venv/bin/python src/main.py
+Restart=always
+RestartSec=10
+StartLimitInterval=120
+StartLimitBurst=5
+
+# Garante que o processo seja morto completamente antes de reiniciar
+KillMode=mixed
+TimeoutStopSec=30
+
+# Logs via journald (ver com: journalctl -u x1frifas -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=x1frifas
+
+[Install]
+WantedBy=multi-user.target
