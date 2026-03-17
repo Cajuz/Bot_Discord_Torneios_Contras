@@ -1,13 +1,14 @@
-"""
-quero_ser_mediador_view.py — Painel de candidatura a mediador.
-"""
+# quero_ser_mediador_view.py — Painel de candidatura a mediador.
 from __future__ import annotations
 import discord
 from datetime import timedelta
 
 from config.database import db
 from utils.datetime_utils import utcnow
-from services.channel_service import SOLICITACOES_CHANNEL as SOLICITACOES_MEDIADOR_CHANNEL
+from services.channel_service import (
+    SOLICITACOES_CHANNEL as SOLICITACOES_MEDIADOR_CHANNEL,
+    APROVAR_MEDIADORES_CHANNEL,   # ← NOVO: cards de aprovação vão para cá
+)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -63,18 +64,15 @@ class MediatorReportEmbed:
 
     async def create_embed(self) -> discord.Embed:
         mediators_list = await self.manager.get_mediators_with_days()
-
         embed = discord.Embed(
             title="📋 Relatório de Mediadores Ativos",
             description=f"Dias restantes do plano de {self.benefit_days} dias",
             color=discord.Color.green(),
             timestamp=utcnow()
         )
-
         if not mediators_list:
             embed.add_field(name="Nenhum mediador ativo", value="—", inline=False)
             return embed
-
         for m in mediators_list:
             status = (
                 f"{m['days_remaining']} dias restantes"
@@ -82,7 +80,6 @@ class MediatorReportEmbed:
                 else "❌ Benefício expirado"
             )
             embed.add_field(name=m["username"], value=status, inline=False)
-
         return embed
 
 
@@ -99,7 +96,6 @@ class VerificacaoMediadoresEmbed:
 
     async def create_embed(self) -> discord.Embed:
         mediators = await self.manager.get_mediators_with_days()
-
         embed = discord.Embed(
             title="📊 Painel de Verificação de Mediadores",
             description=(
@@ -114,14 +110,11 @@ class VerificacaoMediadoresEmbed:
             color=discord.Color.green(),
             timestamp=utcnow()
         )
-
         embed.add_field(name="👥 Total de Mediadores", value=str(len(mediators)), inline=False)
-
         if not mediators:
             embed.add_field(name="📋 Mediadores", value="Nenhum mediador ativo no momento.", inline=False)
             embed.set_footer(text="Sistema automático de mediadores")
             return embed
-
         lista = "\n".join(
             f"• **{m['username']}** — "
             f"{m['days_remaining']} dias restantes" if m["days_remaining"] > 0
@@ -140,23 +133,18 @@ class VerificacaoMediadoresEmbed:
 class MediatorConfirmation:
 
     def __init__(self, role_name: str):
-        self.role_name = role_name
+        self.role_name  = role_name
         self.collection = db.get_collection("payment_confirmations")
 
     async def confirm(self, ctx, membro: discord.Member):
         from models.pedido_mediador import PaymentConfirmation
-
-        guild = ctx.guild
+        guild         = ctx.guild
         mediator_role = discord.utils.get(guild.roles, name=self.role_name)
-
         if not mediator_role:
             await ctx.send(f"❌ Cargo `{self.role_name}` não encontrado.")
             return
-
         await membro.add_roles(mediator_role, reason=f"Aprovado por {ctx.author}")
-
         user_doc = await self.collection.find_one({"discord_id": str(membro.id)})
-
         if user_doc:
             user_model = PaymentConfirmation(user_doc)
             user_model.confirm_payment(admin_name=str(ctx.author))
@@ -170,12 +158,10 @@ class MediatorConfirmation:
                 username=str(membro)
             )
             await self.collection.insert_one(new_doc)
-
         try:
             await membro.send(f"✅ Você foi promovido a **{self.role_name}**")
         except discord.Forbidden:
             pass
-
         await ctx.send(f"✅ {membro.mention} agora é **{self.role_name}**.")
 
 
@@ -217,10 +203,11 @@ class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
         )
         if self.obs.value:
             embed.add_field(name="📝 Observação", value=self.obs.value, inline=False)
-        embed.set_footer(text="Clique nos botões abaixo para gerenciar.")
+        embed.set_footer(text="Clique nos botões abaixo para aprovar ou recusar.")
 
+        # ← ATUALIZADO: card vai para #aprovar-mediadores (era #solicitacoes-mediador)
         channel = discord.utils.get(
-            interaction.guild.text_channels, name=SOLICITACOES_MEDIADOR_CHANNEL
+            interaction.guild.text_channels, name=APROVAR_MEDIADORES_CHANNEL
         )
 
         if channel:
@@ -232,7 +219,7 @@ class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
             )
         else:
             await interaction.response.send_message(
-                f"❌ Erro: Canal `#{SOLICITACOES_MEDIADOR_CHANNEL}` não encontrado.",
+                f"❌ Erro: Canal `#{APROVAR_MEDIADORES_CHANNEL}` não encontrado.",
                 ephemeral=True
             )
 
@@ -256,7 +243,7 @@ class PedidoMediadorValor(discord.ui.View):
 
 
 # ═══════════════════════════════════════════════════════════════
-# VIEW — Admin (card de solicitação no canal de solicitações)
+# VIEW — Admin (card de aprovação no #aprovar-mediadores)
 # Nota: não é persistente intencionalmente — é criada por solicitação
 # e o user_id fica em memória. Após restart, cards antigos não respondem.
 # Para persistência total, seria necessário salvar user_id no banco.
@@ -271,9 +258,9 @@ class PedidoMediadorAdminView(discord.ui.View):
 
     @discord.ui.button(label="Aprovar", style=discord.ButtonStyle.green, custom_id="pedido_med_aprovar")
     async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild  = interaction.guild
-        user   = guild.get_member(self.user_id)
-        admin  = interaction.user
+        guild = interaction.guild
+        user  = guild.get_member(self.user_id)
+        admin = interaction.user
 
         if not user:
             await interaction.response.send_message("❌ Usuário não encontrado.", ephemeral=True)

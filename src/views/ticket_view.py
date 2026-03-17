@@ -1,12 +1,11 @@
-"""
-ticket_view.py — Sistema de tickets com SELECT MENU + BUTTON.
-"""
+# ticket_view.py — Sistema de tickets com SELECT MENU + BUTTON.
 from __future__ import annotations
 import discord
 from typing import Optional
 
 from models.ticket import Ticket
 from services.ticket_service import ticket_service, CHAMADOS_CHANNEL_NAME, SUPORTE_ROLE_NAME
+from services.channel_service import SOLICITAR_SUPORTE_CHANNEL  # ← NOVO import
 from utils.logger import logger
 
 THEME_COLOR   = 0xFFD54F
@@ -54,10 +53,10 @@ def build_card_embed(ticket: Ticket, guild: discord.Guild) -> discord.Embed:
         title=f"Ticket {ticket.ticket_id}",
         color=color_map.get(ticket.status, discord.Color.greyple())
     )
-    embed.add_field(name="Usuário",   value=f"<@{ticket.discord_id}>",                       inline=True)
-    embed.add_field(name="Categoria", value=ticket.categoria,                                 inline=True)
-    embed.add_field(name="Status",    value=status_label.get(ticket.status, ticket.status),   inline=True)
-    embed.add_field(name="Descrição", value=ticket.descricao[:1024],                          inline=False)
+    embed.add_field(name="Usuário",   value=f"<@{ticket.discord_id}>",                      inline=True)
+    embed.add_field(name="Categoria", value=ticket.categoria,                                inline=True)
+    embed.add_field(name="Status",    value=status_label.get(ticket.status, ticket.status),  inline=True)
+    embed.add_field(name="Descrição", value=ticket.descricao[:1024],                         inline=False)
     if ticket.atendente_id:
         embed.add_field(name="Atendente", value=f"<@{ticket.atendente_id}>", inline=True)
     ts = ticket.resolved_at or ticket.closed_at
@@ -79,14 +78,13 @@ async def post_or_update_card(
     embed = build_card_embed(ticket, guild)
     view  = SupportCardView() if ticket.status == Ticket.STATUS_ABERTO else None
 
-    # Tenta editar mensagem existente em vez de deletar e recriar
     if ticket.card_message_id:
         try:
             old = await chamados_channel.fetch_message(ticket.card_message_id)
             await old.edit(embed=embed, view=view)
             return old
         except discord.NotFound:
-            pass  # Mensagem deletada manualmente — cria nova abaixo
+            pass
 
     msg = await chamados_channel.send(embed=embed, view=view)
     await ticket_service.save_card_message_id(ticket.ticket_id, msg.id)
@@ -160,12 +158,11 @@ class TicketPanelView(discord.ui.View):
 class TicketOpenView(discord.ui.View):
 
     def __init__(self, categoria: str, user: discord.Member):
-        super().__init__(timeout=300)  # 5 min — era 120s, muito curto
+        super().__init__(timeout=300)
         self.categoria = categoria
         self.user      = user
 
     async def on_timeout(self):
-        # View expira silenciosamente — sem ação necessária
         pass
 
     @discord.ui.button(label="Abrir Ticket", style=discord.ButtonStyle.success, emoji="🎫")
@@ -273,13 +270,9 @@ class SupportCardView(discord.ui.View):
             await interaction.followup.send(f"❌ {msg}", ephemeral=True)
             return
 
-        # Atualiza card via edit (não deleta mais)
         await post_or_update_card(ticket, interaction.guild, interaction.client)
 
-        # Cria canal privado se não existir e adiciona jogador
-        support_ch = await _get_or_create_support_channel(
-            interaction.guild, interaction.user
-        )
+        support_ch = await _get_or_create_support_channel(interaction.guild, interaction.user)
         if support_ch:
             await _add_player_to_channel(support_ch, interaction.guild, ticket)
 
@@ -316,7 +309,6 @@ async def _get_or_create_support_channel(
     guild: discord.Guild,
     support_member: discord.Member,
 ) -> Optional[discord.TextChannel]:
-    """Retorna o canal privado do atendente, criando se não existir."""
     try:
         from services.channel_service import CATEGORY_SUPORTE
         ch_name = f"support-{support_member.name.lower()}"
@@ -347,7 +339,6 @@ async def _add_player_to_channel(
     guild: discord.Guild,
     ticket: Ticket,
 ):
-    """Adiciona o jogador ao canal privado do atendente."""
     try:
         player = guild.get_member(int(ticket.discord_id))
         if not player:
@@ -392,7 +383,7 @@ async def cmd_fechar_chamado(ctx, ticket_id: str):
         except discord.Forbidden:
             pass
         return
-    await post_or_update_card(ticket, ctx.guild, ctx.bot)  # ← ctx.bot, não _state
+    await post_or_update_card(ticket, ctx.guild, ctx.bot)
     try:
         await ctx.author.send(f"✅ Chamado `{ticket_id}` fechado.")
     except discord.Forbidden:
@@ -414,9 +405,8 @@ async def cmd_concluir_chamado(ctx, ticket_id: str):
         except discord.Forbidden:
             pass
         return
-    await post_or_update_card(ticket, ctx.guild, ctx.bot)  # ← ctx.bot, não _state
+    await post_or_update_card(ticket, ctx.guild, ctx.bot)
 
-    # Remove jogador do canal privado
     try:
         ch_name    = f"support-{ctx.author.name.lower()}"
         support_ch = discord.utils.get(ctx.guild.text_channels, name=ch_name)
@@ -432,7 +422,8 @@ async def cmd_concluir_chamado(ctx, ticket_id: str):
         try:
             await membro.send(
                 f"✅ Seu chamado `{ticket.ticket_id}` foi resolvido!\n"
-                "Se precisar de mais ajuda, abra um novo ticket em `#chat-suporte`."
+                # ← ATUALIZADO: referencia constante em vez de string hardcoded
+                f"Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
             )
         except discord.Forbidden:
             pass

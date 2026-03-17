@@ -1,6 +1,4 @@
-# ══════════════════════════════════════════════════════════════
 # channel_setup_service.py
-# ══════════════════════════════════════════════════════════════
 from __future__ import annotations
 import discord
 from utils.logger import logger, log_success
@@ -8,17 +6,36 @@ from services.channel_service import (
     CHANNEL_STRUCTURE, ALL_ROLES,
     GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL,
     GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,
-    SUPPORT_CHANNEL_NAME, CHAMADOS_CHANNEL_NAME,
+    # Suporte
+    SOLICITAR_SUPORTE_CHANNEL, SUPPORT_CHANNEL_NAME,
+    CHAMADOS_CHANNEL_NAME, CHAT_SUPORTE_STAFF_CHANNEL,
+    PAINEL_SUPORTE_CHANNEL, SUPORTE_ADMIN_CHANNEL,
+    # Mediação
     MEDIADOR_PANEL_CHANNEL, MEDIADORES_ADMIN_CHANNEL,
-    SOLICITACOES_CHANNEL, MEDIADOR_PIX_CHANNEL, RENOVACAO_CHANNEL,
-    ANALYST_QUEUE_CHANNEL, ANALISTAS_ADMIN_CHANNEL,
-    SOLICITAR_ANALISE_CHANNEL, EXPOSED_CHANNEL_NAME,
+    SOLICITACOES_CHANNEL, MEDIADOR_PIX_CHANNEL,
+    RENOVACAO_CHANNEL, FATURAMENTO_CHANNEL,
+    APROVAR_MEDIADORES_CHANNEL,
+    HISTORICO_CHANNEL,
+    # Analistas
+    SOLICITAR_ANALISE_CHANNEL,
+    CASOS_ANALISAR_CHANNEL,
+    PAINEL_ANALISTA_CHANNEL, ANALYST_QUEUE_CHANNEL,
+    ANALISTAS_ADMIN_CHANNEL,
+    EXPOSED_CHANNEL_NAME,
+    HISTORICO_EXPOSED_CHANNEL,
+    CHAT_ANALISTAS_CHANNEL,
+    # Comunidade
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,
-    FATURAMENTO_CHANNEL, HEALTH_CHECK_CHANNEL,    # ← adicionado
+    CHAT_INFLUENCERS_CHANNEL,
+    # Staff / Misc
+    STATUS_BOT_CHANNEL,
+    AVISOS_CHANNEL,
+    MEDIADORES_AFKS_CHANNEL,
+    HEALTH_CHECK_CHANNEL,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
+
 
 THEME = 0xFFD54F
 
@@ -27,6 +44,10 @@ class ChannelSetupService:
 
     def __init__(self):
         self.bot: discord.Client | None = None
+
+    # ══════════════════════════════════════════════════════════
+    # ENTRY POINT
+    # ══════════════════════════════════════════════════════════
 
     async def setup_all(self, guild: discord.Guild) -> str:
         await self.setup_roles(guild)
@@ -39,6 +60,10 @@ class ChannelSetupService:
         log_success(f"[ChannelSetup] Setup completo em {guild.name}")
         return f"Servidor **{guild.name}** configurado com sucesso."
 
+    # ══════════════════════════════════════════════════════════
+    # ROLES
+    # ══════════════════════════════════════════════════════════
+
     async def setup_roles(self, guild: discord.Guild) -> dict[str, discord.Role]:
         existing = {r.name: r for r in guild.roles}
         roles = {}
@@ -50,6 +75,10 @@ class ChannelSetupService:
                 roles[name] = role
                 logger.info(f"[ChannelSetup] Cargo criado: {name}")
         return roles
+
+    # ══════════════════════════════════════════════════════════
+    # CATEGORIAS E CANAIS
+    # ══════════════════════════════════════════════════════════
 
     async def setup_categories_and_channels(self, guild: discord.Guild):
         roles             = {r.name: r for r in guild.roles}
@@ -65,7 +94,6 @@ class ChannelSetupService:
             for ch_name in channels:
                 ow = await permission_service.get_channel_overwrites(guild, ch_name, roles)
                 if ch_name in existing_channels:
-                    # ← atualiza permissões mesmo em canal existente
                     try:
                         await existing_channels[ch_name].edit(overwrites=ow)
                     except Exception as e:
@@ -73,6 +101,10 @@ class ChannelSetupService:
                 else:
                     await guild.create_text_channel(ch_name, category=category, overwrites=ow)
                     logger.info(f"[ChannelSetup] Canal criado: #{ch_name}")
+
+    # ══════════════════════════════════════════════════════════
+    # GUIAS
+    # ══════════════════════════════════════════════════════════
 
     async def setup_guide_channels(self, guild: discord.Guild):
         guides = {
@@ -89,6 +121,10 @@ class ChannelSetupService:
             await ch.send(embed=embed)
             logger.info(f"[ChannelSetup] Guia postado: #{ch_name}")
 
+    # ══════════════════════════════════════════════════════════
+    # PAINÉIS — ORQUESTRADOR
+    # ══════════════════════════════════════════════════════════
+
     async def setup_all_panels(self, guild: discord.Guild):
         await self.setup_suporte(guild)
         await self.setup_mediador(guild)
@@ -98,13 +134,25 @@ class ChannelSetupService:
         await self.setup_pix(guild)
         await self.setup_renovacao(guild)
         await self.setup_status_bot(guild)
-        await self.setup_health_check(guild)    # ← adicionado
+        await self.setup_health_check(guild)
+        # ── Novos painéis ──────────────────────────────────────
+        await self.setup_avisos(guild)
+        await self.setup_painel_suporte(guild)
+        await self.setup_casos_analisar(guild)
+        await self.setup_aprovar_mediadores(guild)
+        await self.setup_historico_exposed(guild)
+        await self.setup_mediadores_afks(guild)
         logger.info("[ChannelSetup] Todos os painéis postados")
+
+    # ══════════════════════════════════════════════════════════
+    # PAINÉIS EXISTENTES (atualizados)
+    # ══════════════════════════════════════════════════════════
 
     async def setup_suporte(self, guild: discord.Guild):
         from views.ticket_view import TicketPanelView, build_support_embed
         from views.staff_panels import build_suporte_admin_embed, SuporteAdminView
-        await self._post_panel(guild, SUPPORT_CHANNEL_NAME,
+        # canal renomeado: solicitar-suporte (era chat-suporte)
+        await self._post_panel(guild, SOLICITAR_SUPORTE_CHANNEL,
                                build_support_embed(), TicketPanelView())
         await self._post_panel(guild, SUPORTE_ADMIN_CHANNEL,
                                build_suporte_admin_embed(), SuporteAdminView())
@@ -132,7 +180,8 @@ class ChannelSetupService:
         )
         await self._post_panel(guild, SOLICITAR_ANALISE_CHANNEL,
                                build_analise_panel_embed(), AnalisePanelView())
-        await self._post_panel(guild, ANALYST_QUEUE_CHANNEL,
+        # canal renomeado: painel-analista (era fila-analistas)
+        await self._post_panel(guild, PAINEL_ANALISTA_CHANNEL,
                                build_analista_pessoal_embed(), AnalistaPessoalView())
         await self._post_panel(guild, ANALISTAS_ADMIN_CHANNEL,
                                build_analista_admin_embed(), AnalistaAdminView())
@@ -176,7 +225,6 @@ class ChannelSetupService:
         await self._post_panel(guild, STATUS_BOT_CHANNEL, embed, None)
 
     async def setup_health_check(self, guild: discord.Guild):
-        """Posta o painel de health check com HealthCheckView no canal #health-check."""
         try:
             from views.health_check_view import HealthCheckView, build_overview_embed
             from services.health_check_service import health_check_service
@@ -195,7 +243,6 @@ class ChannelSetupService:
 
             await self._post_panel(guild, HEALTH_CHECK_CHANNEL, embed, view)
 
-            # Salva a mensagem no banco para auto-refresh do thread_pool_cog
             ch = discord.utils.get(guild.text_channels, name=HEALTH_CHECK_CHANNEL)
             if ch:
                 async for msg in ch.history(limit=3):
@@ -216,6 +263,115 @@ class ChannelSetupService:
         except Exception as e:
             logger.error(f"[ChannelSetup] setup_health_check erro: {e}", exc_info=True)
 
+    async def setup_faturamento(self, guild: discord.Guild):
+        from services.faturamento_mediador import RelatorioGeralView
+        embed = discord.Embed(
+            title="💰 Faturamento dos Mediadores",
+            description=(
+                "Use o botão abaixo para gerar o relatório geral de faturamento.\n\n"
+                "Este painel é restrito à equipe responsável pela mediação."
+            ),
+            color=0xFFA500,
+        )
+        await self._post_panel(guild, FATURAMENTO_CHANNEL, embed, RelatorioGeralView())
+
+    async def setup_dashboards(self, guild: discord.Guild):
+        if not self.bot:
+            logger.warning("[ChannelSetup] Dashboards: bot não disponível")
+            return
+        try:
+            from services.analytics_service import analytics_service
+            analytics_service.bot = self.bot
+            await analytics_service.update_all(guild)
+            logger.info("[ChannelSetup] Dashboards atualizados")
+        except Exception as e:
+            logger.warning(f"[ChannelSetup] Dashboards: {e}")
+
+    # ══════════════════════════════════════════════════════════
+    # PAINÉIS NOVOS
+    # ══════════════════════════════════════════════════════════
+
+    async def setup_avisos(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="📢 Avisos",
+            description=(
+                "Este canal é reservado para avisos oficiais da equipe.\n\n"
+                "Apenas a administração e o bot podem postar mensagens aqui."
+            ),
+            color=0xFFD54F,
+        )
+        embed.set_footer(text="Fique atento às novidades!")
+        await self._post_panel(guild, AVISOS_CHANNEL, embed, None)
+
+    async def setup_painel_suporte(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="🎫 Painel de Suporte",
+            description=(
+                "Acompanhe o status dos atendimentos e informações da equipe de suporte.\n\n"
+                f"Para abrir um chamado, acesse `#{SOLICITAR_SUPORTE_CHANNEL}`."
+            ),
+            color=0x5865F2,
+        )
+        embed.set_footer(text="Apenas leitura — atualizado automaticamente pelo bot.")
+        await self._post_panel(guild, PAINEL_SUPORTE_CHANNEL, embed, None)
+
+    async def setup_casos_analisar(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="🔍 Casos em Análise",
+            description=(
+                "Os cards de pedidos de análise aparecem automaticamente aqui.\n\n"
+                "**Analistas:** clique em **Assumir** no card para iniciar a investigação.\n\n"
+                "Apenas o bot posta neste canal."
+            ),
+            color=0xE74C3C,
+        )
+        embed.set_footer(text="Apenas leitura — cards gerados automaticamente.")
+        await self._post_panel(guild, CASOS_ANALISAR_CHANNEL, embed, None)
+
+    async def setup_aprovar_mediadores(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="⚡ Aprovação de Mediadores",
+            description=(
+                "Pedidos para se tornar mediador aparecem automaticamente aqui.\n\n"
+                "**Controllers / Adm:** revise o perfil e use os botões do card para "
+                "**aprovar** ou **recusar** o candidato.\n\n"
+                "Apenas o bot posta neste canal."
+            ),
+            color=0xFFD54F,
+        )
+        embed.set_footer(text="Apenas leitura — cards gerados automaticamente.")
+        await self._post_panel(guild, APROVAR_MEDIADORES_CHANNEL, embed, None)
+
+    async def setup_historico_exposed(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="📋 Histórico — Blacklist",
+            description=(
+                "Registro automático de todas as alterações na blacklist.\n\n"
+                "✅ **Adicionado** — membro incluído na blacklist\n"
+                "❌ **Removido** — membro retirado da blacklist\n\n"
+                "Apenas o bot posta neste canal."
+            ),
+            color=0x992D22,
+        )
+        embed.set_footer(text="Apenas leitura — logs gerados automaticamente.")
+        await self._post_panel(guild, HISTORICO_EXPOSED_CHANNEL, embed, None)
+
+    async def setup_mediadores_afks(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="💤 Mediadores AFK",
+            description=(
+                "Lista de mediadores com status AFK ou inativos.\n\n"
+                "Este painel é atualizado automaticamente pelo bot."
+            ),
+            color=0x95A5A6,
+        )
+        embed.set_footer(text="Apenas leitura — atualizado automaticamente.")
+        await self._post_panel(guild, MEDIADORES_AFKS_CHANNEL, embed, None)
+
+    # ══════════════════════════════════════════════════════════
+    # MATCH CARDS
+    # ══════════════════════════════════════════════════════════
+
     async def setup_match_cards(self, guild: discord.Guild):
         from views.match_queue_view import MatchQueueView, create_match_queue_embed
 
@@ -225,7 +381,6 @@ class ChannelSetupService:
                 if not ch:
                     continue
 
-                # ← bulk_delete para mensagens < 14 dias (muito mais rápido)
                 await self._clear_bot_messages(ch, limit=50)
 
                 for value in ChannelsConfig.BET_VALUES:
@@ -248,39 +403,13 @@ class ChannelSetupService:
                 logger.info(
                     f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
 
-    async def setup_faturamento(self, guild: discord.Guild):
-        from services.faturamento_mediador import RelatorioGeralView
-        embed = discord.Embed(
-            title="💰 Faturamento dos Mediadores",
-            description=(
-                "Use o botão abaixo para gerar o relatório geral de faturamento.\n\n"
-                "Este painel é restrito à equipe responsável pela mediação."
-            ),
-            color=0xFFA500,
-        )
-        await self._post_panel(guild, FATURAMENTO_CHANNEL, embed, RelatorioGeralView())
-
-    async def setup_dashboards(self, guild: discord.Guild):
-        if not self.bot:                              # ← guard adicionado
-            logger.warning("[ChannelSetup] Dashboards: bot não disponível")
-            return
-        try:
-            from services.analytics_service import analytics_service
-            analytics_service.bot = self.bot
-            await analytics_service.update_all(guild)
-            logger.info("[ChannelSetup] Dashboards atualizados")
-        except Exception as e:
-            logger.warning(f"[ChannelSetup] Dashboards: {e}")
-
-    # ── Helpers ───────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    # HELPERS
+    # ══════════════════════════════════════════════════════════
 
     async def _clear_bot_messages(
         self, channel: discord.TextChannel, limit: int = 10
     ):
-        """
-        Remove TODAS as mensagens do bot no canal (até `limit`).
-        Usa bulk_delete quando possível (< 14 dias).
-        """
         to_delete = []
         async for msg in channel.history(limit=limit):
             if msg.author == channel.guild.me and (msg.embeds or msg.components):
@@ -288,13 +417,11 @@ class ChannelSetupService:
         if not to_delete:
             return
         try:
-            # bulk_delete exige 2+ mensagens
             if len(to_delete) >= 2:
                 await channel.delete_messages(to_delete)
             else:
                 await to_delete[0].delete()
         except discord.HTTPException:
-            # Fallback individual se algumas tiverem > 14 dias
             for msg in to_delete:
                 try:
                     await msg.delete()
@@ -312,7 +439,7 @@ class ChannelSetupService:
         if not ch:
             logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
             return
-        await self._clear_bot_messages(ch)   # ← limpa TODOS, não só o primeiro
+        await self._clear_bot_messages(ch)
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
@@ -330,7 +457,9 @@ class ChannelSetupService:
         logger.info(f"[ChannelSetup] Canal criado on-demand: #{name}")
         return ch
 
-    # ── Embeds de guia ────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    # EMBEDS DE GUIA
+    # ══════════════════════════════════════════════════════════
 
     def _guide_player_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Guia do Jogador", color=THEME)
@@ -382,28 +511,33 @@ class ChannelSetupService:
     def _guide_support_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Guia do Suporte", color=THEME)
         embed.add_field(name="Fluxo", value=(
-            f"1. Jogador abre ticket em `#{SUPPORT_CHANNEL_NAME}`\n"
+            f"1. Jogador abre ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`\n"
             f"2. Card aparece em `#{CHAMADOS_CHANNEL_NAME}`\n"
             "3. Clique **Assumir** → jogador entra no seu canal\n"
             "4. Atenda no canal `support-<seu-nome>`\n"
-            "5. `!fechar_chamado <ID>` → fecha e remove jogador"
+            "5. `!fechar_chamado <ID>` → fecha e remove jogador\n\n"
+            f"💬 Use `#{CHAT_SUPORTE_STAFF_CHANNEL}` para comunicação interna com a equipe."
         ), inline=False)
         embed.add_field(name="Comandos", value=(
-            "`!fechar_chamado <ID>`\n`/renomear_canal <sufixo>`"), inline=False)
+            "`!fechar_chamado <ID>`\n`/renomear_canal <sufixo>`"
+        ), inline=False)
         return embed
 
     def _guide_analyst_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Guia do Analista", color=THEME)
         embed.add_field(name="Fluxo de análise", value=(
             f"1. Jogador solicita em `#{SOLICITAR_ANALISE_CHANNEL}`\n"
-            f"2. Card aparece em `#{ANALYST_QUEUE_CHANNEL}` com botão **Assumir**\n"
+            f"2. Card aparece em `#{CASOS_ANALISAR_CHANNEL}` com botão **Assumir**\n"
             "3. Clique **Assumir** → você assume o caso\n"
             "4. Investigue e clique na decisão\n"
             "5. Se confirmado → jogador vai para blacklist automaticamente"
         ), inline=False)
-        embed.add_field(name="Blacklist",
-                        value=f"`#{EXPOSED_CHANNEL_NAME}` — painel com botões de gestão",
-                        inline=False)
+        embed.add_field(name="Painel & Blacklist", value=(
+            f"`#{PAINEL_ANALISTA_CHANNEL}` — fila de casos\n"
+            f"`#{EXPOSED_CHANNEL_NAME}` — gestão da blacklist\n"
+            f"`#{HISTORICO_EXPOSED_CHANNEL}` — histórico de alterações\n\n"
+            f"💬 Use `#{CHAT_ANALISTAS_CHANNEL}` para falar com a adm."
+        ), inline=False)
         return embed
 
 
