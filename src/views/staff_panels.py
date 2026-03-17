@@ -1,11 +1,15 @@
-"""
-staff_panels.py — Painéis pessoais e admin para Mediadores, Analistas e Suporte.
-"""
+# staff_panels.py — Painéis pessoais e admin para Mediadores, Analistas e Suporte.
 from __future__ import annotations
 import discord
 from utils.datetime_utils import utcnow
 from utils.logger import logger
-
+from services.channel_service import (   # ← NOVO bloco de imports
+    CASOS_ANALISAR_CHANNEL,
+    PAINEL_ANALISTA_CHANNEL,
+    SOLICITAR_SUPORTE_CHANNEL,
+    CHAT_SUPORTE_STAFF_CHANNEL,
+    HISTORICO_EXPOSED_CHANNEL,
+)
 
 THEME  = 0xFFD54F
 THEME2 = 0xFFA726
@@ -34,7 +38,6 @@ def _is_admin(u: discord.Member) -> bool:
 # ═══════════════════════════════════════════════════════════════
 # MEDIADOR — Painel pessoal (#painel-mediador)
 # ═══════════════════════════════════════════════════════════════
-
 
 def build_mediador_pessoal_embed(info: dict | None = None) -> discord.Embed:
     total_active = info.get("total_active", 0) if info else 0
@@ -187,7 +190,6 @@ class MediadorPessoalView(discord.ui.View):
 # ═══════════════════════════════════════════════════════════════
 # MEDIADOR — Painel admin (#mediadores-admin)
 # ═══════════════════════════════════════════════════════════════
-
 
 def build_mediador_admin_embed() -> discord.Embed:
     embed = discord.Embed(
@@ -372,18 +374,19 @@ class _RemoverMediadorModal(discord.ui.Modal, title="Remover Mediador"):
 
 
 # ═══════════════════════════════════════════════════════════════
-# ANALISTA — Painel pessoal (#fila-analistas)
+# ANALISTA — Painel pessoal (#painel-analista) ← RENOMEADO
 # ═══════════════════════════════════════════════════════════════
-
 
 def build_analista_pessoal_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Painel do Analista",
         description=(
             "Acompanhe seus casos e histórico de análises.\n\n"
-            "• **Meus Casos Ativos** — casos que você está analisando\n"
-            "• **Meu Histórico** — todas as decisões que tomou\n"
-            "• **Fila de Casos** — casos aguardando análise"
+            # ← ATUALIZADO: referencia os canais com nomes novos
+            f"• **Meus Casos Ativos** — casos que você está analisando\n"
+            f"• **Meu Histórico** — todas as decisões que tomou\n"
+            f"• **Fila de Casos** — contagem em `#{CASOS_ANALISAR_CHANNEL}`\n\n"
+            f"📋 Histórico de blacklist em `#{HISTORICO_EXPOSED_CHANNEL}`"
         ),
         color=THEME
     )
@@ -464,6 +467,11 @@ class AnalistaPessoalView(discord.ui.View):
         embed = discord.Embed(title="Status da Fila de Análises", color=THEME)
         embed.add_field(name="Aguardando análise", value=f"`{aguardando}`", inline=True)
         embed.add_field(name="Em análise",         value=f"`{em_analise}`", inline=True)
+        # ← ATUALIZADO: indica onde os cards aparecem
+        embed.add_field(
+            name="Ver cards",
+            value=f"Acesse `#{CASOS_ANALISAR_CHANNEL}` para assumir casos.",
+            inline=False)
         embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -472,7 +480,6 @@ class AnalistaPessoalView(discord.ui.View):
 # ANALISTA — Painel admin (#analistas-admin)
 # ═══════════════════════════════════════════════════════════════
 
-
 def build_analista_admin_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Painel Admin — Analistas",
@@ -480,7 +487,10 @@ def build_analista_admin_embed() -> discord.Embed:
             "Supervisione todos os casos e analistas.\n\n"
             "• **Visão Geral** — todos os casos por status\n"
             "• **Stats por Analista** — desempenho individual\n"
-            "• **Buscar Caso** — detalhes de um caso específico"
+            "• **Buscar Caso** — detalhes de um caso específico\n\n"
+            # ← ATUALIZADO: referencia os canais com nomes novos
+            f"📥 Cards de análise em `#{CASOS_ANALISAR_CHANNEL}`\n"
+            f"📋 Histórico de blacklist em `#{HISTORICO_EXPOSED_CHANNEL}`"
         ),
         color=THEME2
     )
@@ -541,7 +551,6 @@ class AnalistaAdminView(discord.ui.View):
         medals = ["🥇", "🥈", "🥉"]
         lines  = []
         for i, r in enumerate(rows):
-            # ✅ extraído antes da f-string — sem backslash dentro de {}
             rid        = r["_id"]
             member_obj = interaction.guild.get_member(int(rid)) if rid else None
             name       = member_obj.display_name if member_obj else f"ID:{rid}"
@@ -583,13 +592,13 @@ class _BuscarCasoModal(discord.ui.Modal, title="Buscar Caso"):
 # SUPORTE — Painéis
 # ═══════════════════════════════════════════════════════════════
 
-
 def build_suporte_pessoal_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Central de Suporte",
         description=(
             "Precisa de ajuda? Estamos aqui.\n\n"
-            "• **Abrir Ticket** — selecione a categoria e descreva o problema\n\n"
+            # ← ATUALIZADO: referencia o canal renomeado
+            f"• Abra seu ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`\n\n"
             "Nossa equipe responderá o mais breve possível."
         ),
         color=THEME
@@ -607,7 +616,9 @@ def build_suporte_admin_embed() -> discord.Embed:
             "• **Por Agente** — tickets de cada membro do suporte\n"
             "• **Buscar Ticket** — detalhes de um ticket específico\n"
             "• **Forçar Fechar** — encerrar ticket administrativamente\n"
-            "• **Tickets Abertos** — lista todos os tickets em aberto"
+            "• **Tickets Abertos** — lista todos os tickets em aberto\n\n"
+            # ← ATUALIZADO: referencia canais com nomes novos
+            f"💬 Chat interno da equipe: `#{CHAT_SUPORTE_STAFF_CHANNEL}`"
         ),
         color=THEME2
     )
@@ -633,8 +644,8 @@ class SuporteAdminView(discord.ui.View):
         now  = utcnow()
         d30  = now - timedelta(days=30)
         embed = discord.Embed(title="Visão Geral — Suporte", color=THEME2)
-        embed.add_field(name="Abertos agora",    value=f"`{await col.count_documents({'status': 'aberto'})}`",   inline=True)
-        embed.add_field(name="Em atendimento",   value=f"`{await col.count_documents({'status': 'pendente'})}`", inline=True)
+        embed.add_field(name="Abertos agora",  value=f"`{await col.count_documents({'status': 'aberto'})}`",   inline=True)
+        embed.add_field(name="Em atendimento", value=f"`{await col.count_documents({'status': 'pendente'})}`", inline=True)
         embed.add_field(
             name="Resolvidos (30d)",
             value=f"`{await col.count_documents({'status': {'$in': ['resolvido','fechado']}, 'created_at': {'$gte': d30}})}`",
@@ -680,7 +691,6 @@ class SuporteAdminView(discord.ui.View):
         medals = ["🥇", "🥈", "🥉"]
         lines  = []
         for i, r in enumerate(rows):
-            # ✅ extraído antes da f-string — sem backslash dentro de {}
             aid    = r["_id"]
             member = interaction.guild.get_member(int(aid)) if aid else None
             name   = member.display_name if member else f"ID:{aid}"
@@ -725,7 +735,6 @@ class SuporteAdminView(discord.ui.View):
         else:
             lines = []
             for doc in docs:
-                # ✅ extraído antes da f-string — sem backslash dentro de {}
                 atendente = f"<@{doc['atendente_id']}>" if doc.get("atendente_id") else "Sem atendente"
                 lines.append(
                     f"`{doc.get('ticket_id','?')}` — {doc.get('categoria','?')} | {atendente}"

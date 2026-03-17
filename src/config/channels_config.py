@@ -12,8 +12,8 @@ class ChannelsConfig:
     INVITES_CHANNEL       = "convites"
     RATE_LIMIT_CHANNEL    = "rate-limit-logs"
     EXPOSED_CHANNEL       = "exposed"
-    ANALYST_QUEUE_CHANNEL = "fila-analistas"
-    SUPORTE_CHANNEL_NAME  = "chat-suporte"
+    ANALYST_QUEUE_CHANNEL = "painel-analista"
+    SUPORTE_CHANNEL_NAME  = "solicitar-suporte"
 
     # Estrutura do servidor — vem de channel_service
     CHANNEL_STRUCTURE = CHANNEL_STRUCTURE
