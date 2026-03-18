@@ -14,8 +14,8 @@ from services.channel_service import (
     ANALYST_QUEUE_CHANNEL, ANALISTAS_ADMIN_CHANNEL,
     SOLICITAR_ANALISE_CHANNEL, EXPOSED_CHANNEL_NAME,
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,
-    FATURAMENTO_CHANNEL, HEALTH_CHECK_CHANNEL,    # ← adicionado
+    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
+    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL, HEALTH_CHECK_CHANNEL,    # ← adicionado
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -98,6 +98,10 @@ class ChannelSetupService:
         await self.setup_pix(guild)
         await self.setup_renovacao(guild)
         await self.setup_status_bot(guild)
+        await self.setup_pix_logs(guild)
+        await self.setup_call_logs(guild)
+        await self.setup_command_logs(guild)
+        await self.setup_delete_logs(guild)
         await self.setup_health_check(guild)    # ← adicionado
         logger.info("[ChannelSetup] Todos os painéis postados")
 
@@ -141,6 +145,25 @@ class ChannelSetupService:
         from views.analyst_views import build_exposed_embed, ExposedPanelView
         await self._post_panel(guild, EXPOSED_CHANNEL_NAME,
                                build_exposed_embed(), ExposedPanelView())
+    
+    async def setup_pix_logs(self, guild: discord.Guild):
+        from views.pix_log import build_pix_log_embed
+        await self._post_panel(guild,LOGS_PIX_LOG_CHANNEL,build_pix_log_embed(),None,clear=False)
+    
+    async def setup_call_logs(self, guild: discord.Guild):
+        from views.log_call import build_call_log_embed
+        await self._post_panel(guild,LOGS_CALL_CHANNEL,build_call_log_embed(),None,clear=False)
+
+    async def setup_command_logs(self, guild: discord.Guild):
+        from views.log_comand import build_command_log_embed
+        await self._post_panel(guild,LOGS_COMMAND_CHANNEL,build_command_log_embed(),None,clear=False)
+    
+
+    async def setup_delete_logs(self,guild: discord.Guild):
+        from views.log_delete import build_message_delete_embed
+        await self._post_panel(guild,LOGS_MESSAGE_DELETE_CHANNEL,build_message_delete_embed(),None,clear=False)
+    
+
 
     async def setup_influencers(self, guild: discord.Guild):
         from views.extra_panels import (
@@ -301,7 +324,7 @@ class ChannelSetupService:
                 except Exception:
                     pass
 
-    async def _post_panel(
+    async def oi(
         self,
         guild: discord.Guild,
         channel_name: str,
@@ -313,6 +336,35 @@ class ChannelSetupService:
             logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
             return
         await self._clear_bot_messages(ch)   # ← limpa TODOS, não só o primeiro
+        try:
+            await ch.send(embed=embed, view=view)
+            logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
+        except Exception as e:
+            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
+        # 🔥 NÃO LIMPA logs
+        try:
+            await ch.send(embed=embed)
+            logger.info(f"[ChannelSetup] Painel de log postado: #{channel_name}")
+        except Exception as e:
+            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
+#teste 
+    async def _post_panel(
+        self,
+        guild: discord.Guild,
+        channel_name: str,
+        embed: discord.Embed,
+        view: discord.ui.View | None,
+        clear: bool = True,  # 👈 CONTROLE
+    ):
+        ch = discord.utils.get(guild.text_channels, name=channel_name)
+        if not ch:
+            logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
+            return
+
+        # 👇 só limpa se for painel normal
+        if clear:
+            await self._clear_bot_messages(ch)
+
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")

@@ -11,6 +11,10 @@ import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
+from views.log_delete import MessageDeleteLog
+from views.log_comand import CommandLog
+from views.log_call import CallLog
+
 load_dotenv()
 
 from config.database         import db
@@ -36,6 +40,65 @@ COGS = [
 
 bot          = create_discord_bot()
 _initialized = False
+
+#---------------------------------------------------------------
+#TESTE
+#---------------------------------------------------------------
+@bot.event
+async def on_voice_state_update(member, before, after):
+    logger.info(f"[VOICE] {member} mudou de estado")
+
+@bot.event
+async def on_message_delete(message):
+    logger.info(f"[DELETE] mensagem deletada de {message.author}")
+
+@bot.event
+async def on_message(message):
+    logger.info(f"[MESSAGE] detectada")
+    await bot.process_commands(message)
+
+call_log = CallLog(bot)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+
+    logger.info(f"[VOICE] Evento detectado: {member}")
+
+    # entrou
+    if not before.channel and after.channel:
+        await call_log.on_enter(member, after.channel)
+
+    # saiu
+    elif before.channel and not after.channel:
+        await call_log.on_exit(member)
+
+command_log = CommandLog(bot)
+
+@bot.event
+async def on_command(ctx):
+
+    logger.info(f"[COMMAND] Detectado: {ctx.command}")
+
+    args = " ".join(ctx.message.content.split()[1:])
+
+    await command_log.send_command_log(
+        ctx.author,
+        str(ctx.command),
+        args,
+        ctx.channel
+    )
+
+delete_log = MessageDeleteLog(bot)
+
+@bot.event
+async def on_message_delete(message):
+
+    # ignora bot
+    if message.author.bot:
+        return
+
+    await delete_log.send_delete_log(message)
+
 
 
 # ─────────────────────────────────────────────────────────────

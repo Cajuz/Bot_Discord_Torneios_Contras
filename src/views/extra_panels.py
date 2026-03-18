@@ -6,6 +6,8 @@ import discord
 import os
 from utils.datetime_utils import utcnow
 from utils.logger import logger
+import re
+
 
 THEME  = 0xFFD54F
 THEME2 = 0xFFA726
@@ -195,34 +197,68 @@ class PixPanelView(discord.ui.View):
             await interaction.followup.send("Nenhuma chave PIX cadastrada.", ephemeral=True)
 
 
-class _PixCadastroModal(discord.ui.Modal, title="Cadastrar Chave PIX"):
-    pix_key  = discord.ui.TextInput(
-        label="Chave PIX",
-        placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória",
-        min_length=5, max_length=150)
-    pix_type = discord.ui.TextInput(
-        label="Tipo da chave",
-        placeholder="CPF / CNPJ / Email / Telefone / Aleatória",
-        min_length=3, max_length=20)
+class _PixCadastroModal(discord.ui.Modal, title="Cadastrar Chave PIX (EMAIL)"):
+
+    pix_key = discord.ui.TextInput(
+        label="Chave PIX (EMAIL)",
+        placeholder="email@exemplo.com",
+        min_length=5,
+        max_length=150
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
+
         await interaction.response.defer(ephemeral=True)
+
         from config.database import db
+
+        pix = self.pix_key.value.strip()
+        doc = await db.get_collection("mediator_pix").find_one(
+            {"discord_id": str(interaction.user.id)}
+        )
+        pix_antigo = doc["pix_key"] if doc else None
+
+
+        # ✅ validação de email
+        email_regex = r"^[^@]+@[^@]+\.[^@]+$"
+
+        if not re.match(email_regex, pix):
+            await interaction.followup.send(
+                "❌ Apenas chave PIX do tipo **EMAIL** é permitida.",
+                ephemeral=True
+            )
+            return
+
         await db.get_collection("mediator_pix").update_one(
             {"discord_id": str(interaction.user.id)},
-            {"$set": {
-                "discord_id": str(interaction.user.id),
-                "username":   interaction.user.name,
-                "pix_key":    self.pix_key.value.strip(),
-                "pix_type":   self.pix_type.value.strip(),
-                "updated_at": utcnow(),
-            }},
+            {
+                "$set": {
+                    "discord_id": str(interaction.user.id),
+                    "username": interaction.user.name,
+                    "pix_key": pix,
+                    "pix_type": "EMAIL",  # padrão fixo
+                    "updated_at": utcnow(),
+                }
+            },
             upsert=True
         )
-        await interaction.channel.send(
-            f"{interaction.user.mention} atualizou sua chave PIX.")
-        await interaction.followup.send("Chave PIX atualizada com sucesso!", ephemeral=True)
 
+        from views.pix_log import PixLog
+
+        logger = PixLog(interaction.client)
+        await logger.send_pix_log(
+            interaction,
+            pix_antigo,
+            pix
+        )
+        await interaction.channel.send(
+            f"{interaction.user.mention} atualizou sua chave PIX."
+        )
+
+        await interaction.followup.send(
+            "✅ Chave PIX (EMAIL) atualizada com sucesso!",
+            ephemeral=True
+        )
 
 # ═══════════════════════════════════════════════════════════════
 # 3. #influencers — painel do influencer
