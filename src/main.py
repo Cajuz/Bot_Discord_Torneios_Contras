@@ -92,6 +92,7 @@ delete_log = MessageDeleteLog(bot)
 
 @bot.event
 async def on_message_delete(message):
+    logger.info(f"[DELETE] Detectado: {message.author}")
 
     # ignora bot
     if message.author.bot:
