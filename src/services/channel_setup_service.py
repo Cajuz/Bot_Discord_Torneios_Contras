@@ -15,7 +15,8 @@ from services.channel_service import (
     SOLICITAR_ANALISE_CHANNEL, EXPOSED_CHANNEL_NAME,
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
     SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
-    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL, HEALTH_CHECK_CHANNEL,    # ← adicionado
+    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL,
+    LOGS_TROCA_CARGO_CHANNEL,HEALTH_CHECK_CHANNEL,    # ← adicionado
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -102,6 +103,7 @@ class ChannelSetupService:
         await self.setup_call_logs(guild)
         await self.setup_command_logs(guild)
         await self.setup_delete_logs(guild)
+        await self.setup_troca_cargo_logs(guild)
         await self.setup_health_check(guild)    # ← adicionado
         logger.info("[ChannelSetup] Todos os painéis postados")
 
@@ -149,6 +151,11 @@ class ChannelSetupService:
     async def setup_pix_logs(self, guild: discord.Guild):
         from views.pix_log import build_pix_log_embed
         await self._post_panel(guild,LOGS_PIX_LOG_CHANNEL,build_pix_log_embed(),None,clear=False)
+
+    async def setup_troca_cargo_logs(self, guild: discord.Guild):
+        from views.log_troca_cargo import build_troca_cargo_log_embed
+        await self._post_panel(guild,LOGS_TROCA_CARGO_CHANNEL,build_troca_cargo_log_embed(),None,clear=False)
+
     
     async def setup_call_logs(self, guild: discord.Guild):
         from views.log_call import build_call_log_embed

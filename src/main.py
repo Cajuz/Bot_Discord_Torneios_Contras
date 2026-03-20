@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from views.log_delete import MessageDeleteLog
 from views.log_comand import CommandLog
 from views.log_call import CallLog
+from views.log_troca_cargo import Troca_cargo
+
 
 load_dotenv()
 
@@ -56,6 +58,23 @@ async def on_message_delete(message):
 async def on_message(message):
     logger.info(f"[MESSAGE] detectada")
     await bot.process_commands(message)
+
+@bot.event
+async def on_member_update(before, after):
+    logger.info(f"[TrocaCargo] {before} para {after} detectada")
+
+
+troca_cargo=Troca_cargo(bot)
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if before.roles == after.roles:
+        return
+
+    from views.log_troca_cargo import Troca_cargo
+
+    logger = Troca_cargo(bot)
+    await logger.send_on_troca_cargo(before, after)
+    
 
 call_log = CallLog(bot)
 

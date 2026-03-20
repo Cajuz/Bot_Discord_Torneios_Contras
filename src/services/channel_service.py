@@ -69,6 +69,7 @@ LOGS_PIX_LOG_CHANNEL        = "logs-pix"
 LOGS_CALL_CHANNEL           = "logs-call"
 LOGS_COMMAND_CHANNEL        = "logs-command"
 LOGS_MESSAGE_DELETE_CHANNEL = "logs-message-delete"
+LOGS_TROCA_CARGO_CHANNEL    = "logs-troca-cargo"
 HEALTH_CHECK_CHANNEL        = "health-check"      # ← adicionado
 
 # Aliases legados
@@ -134,6 +135,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
     CATEGORY_LOGS: [
         LOGS_PARTIDAS_CHANNEL, LOGS_MEDIADORES_CHANNEL, LOGS_BOT_CHANNEL_NAME,
         LOGS_COMMAND_CHANNEL, LOGS_MESSAGE_DELETE_CHANNEL, LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,
+        LOGS_TROCA_CARGO_CHANNEL,
     ],
 }
 
@@ -183,6 +185,7 @@ CHANNEL_PERMISSIONS: dict[str, list[str] | None] = {
     LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME],
     LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
     LOGS_MESSAGE_DELETE_CHANNEL:[ADM_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME],
     HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],     # ← adicionado
 
     SOLICITAR_ANALISE_CHANNEL: None,
