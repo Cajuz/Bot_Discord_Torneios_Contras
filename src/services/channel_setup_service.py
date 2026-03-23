@@ -3,6 +3,7 @@
 # ══════════════════════════════════════════════════════════════
 from __future__ import annotations
 import discord
+from views.imagens import get_banner_file
 from utils.logger import logger, log_success
 from services.channel_service import (
     CHANNEL_STRUCTURE, ALL_ROLES,
@@ -270,11 +271,15 @@ class ChannelSetupService:
                             channel_name=ch_config["name"],
                             bet_value=value,
                         )
-                        await ch.send(embed=embed, view=view)
-                    except Exception as e:
-                        logger.warning(
-                            f"[ChannelSetup] Card {ch_config['name']} R${value}: {e}")
+                        file = get_banner_file(ch_config["name"])
 
+                        if file:
+                            embed.set_image(url=f"attachment://{file.filename}")
+                            await ch.send(embed=embed, view=view, file=file)
+                        else:
+                            await ch.send(embed=embed, view=view)
+                    except Exception as e:
+                        logger.error(f"[ChannelSetup] Erro em #{ch_config['name']}: {e}")
                 logger.info(
                     f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
 

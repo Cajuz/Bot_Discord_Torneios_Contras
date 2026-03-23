@@ -127,6 +127,7 @@ class MatchQueueService:
             ic  = len(q_i.players) if q_i else 0
             locked_gel = gel_type if locked else None
             embed = create_match_queue_embed(channel.name, bet_value, nc, ic, locked_gel)
+    
             # ← view sem argumentos — contexto vem do embed
             view  = MatchQueueView(
                 channel_name=channel.name,

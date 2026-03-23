@@ -7,7 +7,7 @@ class CallLog:
 
     def __init__(self, bot):
         self.bot = bot
-        self.calls = {}  # guarda sessões
+        self.calls = {}  
 
     async def on_enter(self, member, channel):
         logger.info(f"[CALL] Entrada detectada | user={member.id}")
@@ -41,7 +41,6 @@ class CallLog:
         logger.info(f"[CALL] Iniciando log | user={member.id}")
         logger.info(f"[CALL] Procurando canal: '{LOGS_CALL_CHANNEL}'")
 
-        # 🔥 BUSCA ROBUSTA (resolve 100% dos casos)
         canal = discord.utils.find(
             lambda c: (
                 isinstance(c, discord.TextChannel) and
@@ -53,7 +52,6 @@ class CallLog:
         if not canal:
             logger.warning("[CALL] Canal de log NÃO encontrado")
 
-            # 🔎 DEBUG AUTOMÁTICO (te ajuda se der erro de novo)
             for ch in member.guild.channels:
                 logger.warning(f"[DEBUG CANAL] '{ch.name}' | {type(ch)}")
 
