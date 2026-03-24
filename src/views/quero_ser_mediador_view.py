@@ -172,10 +172,10 @@ class MediatorConfirmation:
 class PedidoMediadorModal(discord.ui.Modal, title="Solicitação de Mediador"):
 
     obs = discord.ui.TextInput(
-        label="Alguma observação? (Opcional)",
+        label="Alguma observação?",
         style=discord.TextStyle.paragraph,
         placeholder="Digite aqui se tiver algo a dizer...",
-        required=False,
+        required=15,
         max_length=300
     )
 
@@ -251,69 +251,44 @@ class PedidoMediadorValor(discord.ui.View):
 
 class PedidoMediadorAdminView(discord.ui.View):
 
-    def __init__(self, plano: str, user_id: int):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.plano   = plano
-        self.user_id = user_id
+        self.assumido_por = None
 
-    @discord.ui.button(label="Aprovar", style=discord.ButtonStyle.green, custom_id="pedido_med_aprovar")
-    async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = interaction.guild
-        user  = guild.get_member(self.user_id)
-        admin = interaction.user
+    @discord.ui.button(
+        label="Assumir Atendimento",
+        style=discord.ButtonStyle.primary,
+        custom_id="pedido_mediador_assumir"
+    )
+    async def assumir(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if not user:
-            await interaction.response.send_message("❌ Usuário não encontrado.", ephemeral=True)
+        if self.assumido_por:
+            await interaction.response.send_message(
+                f"❌ Já está sendo atendido por <@{self.assumido_por}>.",
+                ephemeral=True
+            )
             return
 
-        try:
-            await user.send(
-                f"🎉 Sua solicitação para ser **Mediador** foi **aprovada**!\n\n"
-                f"👤 Aprovado por: {admin}\n"
-                f"📦 Plano escolhido: **{self.plano}**\n\n"
-                f"💳 Envie o comprovante de pagamento para {admin.mention}."
-            )
-        except discord.Forbidden:
-            pass
-
-        try:
-            await admin.send(
-                f"✅ Você aprovou uma solicitação de mediador.\n\n"
-                f"👤 Usuário: {user} (`{user.id}`)\n"
-                f"📦 Plano: **{self.plano}**"
-            )
-        except discord.Forbidden:
-            pass
+        self.assumido_por = interaction.user.id
 
         embed = interaction.message.embeds[0]
-        embed.color = discord.Color.green()
-        embed.add_field(name="Status", value=f"✅ Aprovado por {admin.mention}", inline=False)
+        embed.color = discord.Color.yellow()
+        embed.add_field(
+            name="👨‍💼 Atendimento",
+            value=f"Assumido por {interaction.user.mention}",
+            inline=False
+        )
 
+        # Desativa botão
         for item in self.children:
             item.disabled = True
 
         await interaction.message.edit(embed=embed, view=self)
+
         await interaction.response.send_message(
-            f"✅ Solicitação de {user.mention} aprovada.", ephemeral=True
+            f"✅ Você assumiu o atendimento de {interaction.message.embeds[0].fields[0].value.split()[0]}",
+            ephemeral=True
         )
-
-    @discord.ui.button(label="Recusar", style=discord.ButtonStyle.red, custom_id="pedido_med_recusar")
-    async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = interaction.guild
-        user  = guild.get_member(self.user_id)
-
-        if user:
-            try:
-                await user.send("❌ Sua solicitação para ser mediador foi recusada.")
-            except discord.Forbidden:
-                pass
-
-        for item in self.children:
-            item.disabled = True
-
-        await interaction.message.edit(view=self)
-        await interaction.response.send_message("❌ Solicitação recusada.", ephemeral=True)
-
 
 # ═══════════════════════════════════════════════════════════════
 # VIEW — Painel público "Quero ser mediador" (persistente)
@@ -332,5 +307,16 @@ class PedidoMediadorView(discord.ui.View):
     )
     async def pedir(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Escolha um plano:", view=PedidoMediadorValor(), ephemeral=True
+            "📲 Clique abaixo para entrar no grupo de mediadores:",view=WhatsAppRedirectView(),ephemeral=True)
+        
+class WhatsAppRedirectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+        self.add_item(
+            discord.ui.Button(
+                label="Entrar no Grupo WhatsApp",
+                url="https://chat.whatsapp.com/DLZkE7UED7R794aGnU5x89",
+                style=discord.ButtonStyle.link
+            )
         )

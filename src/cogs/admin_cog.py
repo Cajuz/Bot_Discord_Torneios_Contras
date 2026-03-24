@@ -240,24 +240,65 @@ class AdminCog(commands.Cog, name="Admin"):
         view  = HealthCheckView(bot=self.bot, start_time=BOT_START_TIME)
         await ctx.reply(embed=embed, view=view)
 
-    @commands.command(name="verpix")
-    async def verpix(self, ctx: commands.Context, member: discord.Member = None):
-        from config.database import db
-        target      = member or ctx.author
-        is_admin    = ctx.author.guild_permissions.administrator
-        is_mediator = bool({r.name for r in ctx.author.roles} & {"Controller", "Mediador", "Mediator"})
-        if not is_admin and not is_mediator:
-            await ctx.reply("Apenas mediadores e administradores podem usar este comando.")
-            return
-        doc = await db.get_collection("mediator_pix").find_one({"discord_id": str(target.id)})
-        if not doc:
-            await ctx.reply(f"{target.mention} não tem chave PIX cadastrada.")
-            return
-        embed = discord.Embed(title="Chave PIX", color=THEME_COLOR)
-        embed.add_field(name="Mediador", value=target.mention,        inline=True)
-        embed.add_field(name="Chave",    value=f"`{doc['pix_key']}`", inline=True)
-        await ctx.reply(embed=embed)
 
+    @commands.command(name="faturamento")
+    async def faturamento(self, ctx: commands.Context, member: discord.Member = None):
+        from services.faturamento_mediador import (FaturamentoMediadorService,FaturamentoView
+        )
+        target = member or ctx.author
+        is_admin = ctx.author.guild_permissions.administrator
+        is_mediator = bool({r.name for r in ctx.author.roles} & {"Controller", "Mediador", "Mediator"})
+        # ❌ ninguém sem permissão usa
+        if not is_admin and not is_mediator:
+            await ctx.reply("❌ Apenas mediadores ou administradores podem usar este comando.")
+            return
+        # ❌ mediador não pode ver de outros
+        if not is_admin and target.id != ctx.author.id:
+            await ctx.reply("❌ Você só pode ver o seu próprio faturamento.")
+            return
+        service = FaturamentoMediadorService()
+        partidas = await service.buscar_partidas_do_banco(str(target.id))
+        if not partidas:
+            await ctx.reply(f"❌ Nenhuma partida encontrada para {target.mention}.")
+            return
+        avatar_url = target.display_avatar.url if target.display_avatar else None
+        view = FaturamentoView(service=service,partidas=partidas,mediador_id=int(target.id),nome_mediador=target.name,avatar_url=avatar_url)
+        embed = await view.gerar_embed(1)
+        await ctx.reply(embed=embed, view=view)
+
+
+
+    @commands.command(name="verpix")
+    @commands.has_permissions(administrator=True)
+    async def verpix(self, ctx: commands.Context, member: discord.Member = None):
+        try:
+            from services.pix_mediador import PixQRCode
+            from config.database import db
+            target = member or ctx.author
+            is_admin = ctx.author.guild_permissions.administrator
+            is_mediator = bool({r.name for r in ctx.author.roles} & {"Controller", "Mediador", "Mediator"})
+            if not is_admin and not is_mediator:
+                await ctx.reply("❌ Apenas mediadores e administradores podem usar este comando.")
+                return
+            if not is_admin and target.id != ctx.author.id:
+                await ctx.reply("❌ Apenas administradores podem ver o PIX de outros usuários.")
+                return
+            collection = db.get_collection("mediator_pix")
+            doc = await collection.find_one({"discord_id": str(target.id)})
+            if not doc:
+                await ctx.reply(f"❌ {target.mention} não tem chave PIX cadastrada.")
+                return
+            pix_key = doc["pix_key"]
+            qr = PixQRCode(pix_key)
+            buffer = qr.generate_qrcode()
+            file = discord.File(buffer, filename="pix.png")
+            embed = discord.Embed(title="💳 Pagamento via PIX", color=THEME_COLOR)
+            embed.add_field(name="Mediador", value=target.mention, inline=True)
+            embed.add_field(name="Chave PIX", value=f"`{pix_key}`", inline=True)
+            embed.set_image(url="attachment://pix.png")
+            await ctx.reply(embed=embed, file=file)
+        except Exception as e:
+            await ctx.send(f"❌ ERRO: {e}")
     # ─────────────────────────────────────────
     # AJUDA — atualizado com novos comandos
     # ─────────────────────────────────────────

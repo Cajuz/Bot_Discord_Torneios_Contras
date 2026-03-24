@@ -1,9 +1,11 @@
+import io
 import discord
+import qrcode
 from typing import Dict, Any
 from bson import ObjectId
-
 from config.database import db
 from utils.datetime_utils import utcnow
+import re
 
 
 class MediatorPix:
@@ -86,14 +88,22 @@ class MediatorPixEmbed:
 
 class MediatorPixModal(discord.ui.Modal, title="Cadastro de Chave PIX"):
     pix_key = discord.ui.TextInput(
-        label="Digite sua chave PIX",
-        placeholder="CPF, Email, Telefone ou Chave Aleatória",
+        label="Digite sua chave PIX (EMAIL)",
+        placeholder="email@exemplo.com",
         required=True,
         max_length=120
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         pix = self.pix_key.value.strip()
+        email_regex = r"^[^@]+@[^@]+\.[^@]+$"
+
+        if not re.match(email_regex, pix):
+            await interaction.response.send_message(
+                "❌ Apenas chave PIX do tipo **EMAIL** é permitida.",
+                ephemeral=True
+            )
+            return
 
         allowed_roles = {"Controller", "Mediador", "Mediator", "Admin"}
         user_role_names = {role.name for role in interaction.user.roles}
@@ -150,3 +160,44 @@ class MediatorPixView(discord.ui.View):
         button: discord.ui.Button
     ):
         await interaction.response.send_modal(MediatorPixModal())
+
+
+class PixQRCode:
+
+    def __init__(self, pix_key: str):
+        self.pix_key = pix_key
+
+    def generate_payload(self) -> str:
+        """
+        Gera o payload PIX usando apenas a chave PIX (email).
+        """
+
+        payload = (
+            "000201"
+            "26360014BR.GOV.BCB.PIX"
+            f"01{len(self.pix_key):02}{self.pix_key}"
+            "52040000"
+            "5303986"
+            "5802BR"
+            "5910PAGAMENTO"
+            "6009SAO PAULO"
+            "62070503***"
+            "6304"
+        )
+
+        return payload
+
+    def generate_qrcode(self):
+        """
+        Gera o QR Code em memória.
+        """
+
+        payload = self.generate_payload()
+
+        qr = qrcode.make(payload)
+
+        buffer = io.BytesIO()
+        qr.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        return buffer

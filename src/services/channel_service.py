@@ -76,29 +76,26 @@ INVITE_CHANNEL_NAME       = "convites"
 # ── Canais — STAFF ────────────────────────────────────────────
 RATE_LIMIT_CHANNEL_NAME     = "rate-limit-logs"
 MEMBROS_BLOQUEADOS_CHANNEL  = "membros-bloqueados"
-HEALTH_CHECK_CHANNEL        = "health-check"
-MEDIADORES_AFKS_CHANNEL     = "mediadores-afks"         # ← NOVO
+LOGS_PARTIDAS_CHANNEL       = "logs-partidas"
+LOGS_MEDIADORES_CHANNEL     = "logs-mediadores"
+LOGS_BOT_CHANNEL_NAME       = "logs-bot"
+LOGS_PIX_LOG_CHANNEL        = "logs-pix"
+LOGS_CALL_CHANNEL           = "logs-call"
+LOGS_COMMAND_CHANNEL        = "logs-command"
+LOGS_MESSAGE_DELETE_CHANNEL = "logs-message-delete"
+LOGS_TROCA_CARGO_CHANNEL    = "logs-troca-cargo"
+HEALTH_CHECK_CHANNEL        = "health-check"      # ← adicionado
 
-# ── Canais — LOGS ─────────────────────────────────────────────
-LOGS_PARTIDAS_CHANNEL     = "logs-partidas"
-# LOGS_MEDIADORES_CHANNEL removido ← conforme solicitado
-LOGS_BOT_CHANNEL_NAME     = "logs-bot"
-LOGS_CALLS_CHANNEL        = "logs-calls"                # ← NOVO
-LOGS_TROCA_PIX_CHANNEL    = "logs-troca-pix"            # ← NOVO
-LOGS_DELETES_CHANNEL      = "logs-deletes"              # ← NOVO
-LOGS_COMANDOS_CHANNEL     = "logs-comandos"             # ← NOVO
-HISTORICO_CARGOS_CHANNEL  = "historico-cargos"          # ← NOVO
-
-# ── Aliases legados ───────────────────────────────────────────
-CATEGORY_ANALYTICS_NAME   = "📊 ANALYTICS"
-EXPOSED_CHANNEL           = EXPOSED_CHANNEL_NAME
-RATE_LIMIT_CHANNEL        = RATE_LIMIT_CHANNEL_NAME
-INVITE_CHANNEL            = INVITE_CHANNEL_NAME
-LOGS_BOT_CHANNEL          = LOGS_BOT_CHANNEL_NAME
-GUIDE_PLAYER_CHANNEL      = GUIA_JOGADOR_CHANNEL
-GUIDE_MEDIATOR_CHANNEL    = GUIA_MEDIADOR_CHANNEL
-GUIDE_SUPPORT_CHANNEL     = GUIA_SUPORTE_CHANNEL
-GUIDE_ANALYST_CHANNEL     = GUIA_ANALISTA_CHANNEL
+# Aliases legados
+CATEGORY_ANALYTICS_NAME = "📊 ANALYTICS"
+EXPOSED_CHANNEL         = EXPOSED_CHANNEL_NAME
+RATE_LIMIT_CHANNEL      = RATE_LIMIT_CHANNEL_NAME
+INVITE_CHANNEL          = INVITE_CHANNEL_NAME
+LOGS_BOT_CHANNEL        = LOGS_BOT_CHANNEL_NAME
+GUIDE_PLAYER_CHANNEL    = GUIA_JOGADOR_CHANNEL
+GUIDE_MEDIATOR_CHANNEL  = GUIA_MEDIADOR_CHANNEL
+GUIDE_SUPPORT_CHANNEL   = GUIA_SUPORTE_CHANNEL
+GUIDE_ANALYST_CHANNEL   = GUIA_ANALISTA_CHANNEL
 
 # ── Categorias ────────────────────────────────────────────────
 CATEGORY_INFORMACOES = "📋 INFORMAÇÕES"
@@ -164,14 +161,9 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         MEDIADORES_AFKS_CHANNEL,                            # ← NOVO
     ],
     CATEGORY_LOGS: [
-        LOGS_PARTIDAS_CHANNEL,
-        # LOGS_MEDIADORES_CHANNEL ← REMOVIDO
-        LOGS_BOT_CHANNEL_NAME,
-        LOGS_CALLS_CHANNEL,                                 # ← NOVO
-        LOGS_TROCA_PIX_CHANNEL,                             # ← NOVO
-        LOGS_DELETES_CHANNEL,                               # ← NOVO
-        LOGS_COMANDOS_CHANNEL,                              # ← NOVO
-        HISTORICO_CARGOS_CHANNEL,                           # ← NOVO
+        LOGS_PARTIDAS_CHANNEL, LOGS_MEDIADORES_CHANNEL, LOGS_BOT_CHANNEL_NAME,
+        LOGS_COMMAND_CHANNEL, LOGS_MESSAGE_DELETE_CHANNEL, LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,
+        LOGS_TROCA_CARGO_CHANNEL,
     ],
 }
 
@@ -227,8 +219,12 @@ CHANNEL_PERMISSIONS: dict[str, list[str] | None] = {
     MEMBROS_BLOQUEADOS_CHANNEL: [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
     LOGS_PARTIDAS_CHANNEL:      [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     LOGS_BOT_CHANNEL_NAME:      [ADM_ROLE_NAME],
-    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],
-}
+    LOGS_PIX_LOG_CHANNEL:       [ADM_ROLE_NAME],
+    LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME],
+    LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
+    LOGS_MESSAGE_DELETE_CHANNEL:[ADM_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME],
+    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],     # ← adicionado
 
 # ── Permissões — canais onde roles VEEM mas NÃO enviam ────────
 # (só ADM_ROLE_NAME e o bot podem postar)

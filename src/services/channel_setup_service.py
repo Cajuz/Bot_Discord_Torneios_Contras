@@ -1,6 +1,7 @@
 # channel_setup_service.py
 from __future__ import annotations
 import discord
+from views.imagens import get_banner_file
 from utils.logger import logger, log_success
 from services.channel_service import (
     CHANNEL_STRUCTURE, ALL_ROLES,
@@ -26,12 +27,9 @@ from services.channel_service import (
     CHAT_ANALISTAS_CHANNEL,
     # Comunidade
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    CHAT_INFLUENCERS_CHANNEL,
-    # Staff / Misc
-    STATUS_BOT_CHANNEL,
-    AVISOS_CHANNEL,
-    MEDIADORES_AFKS_CHANNEL,
-    HEALTH_CHECK_CHANNEL,
+    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
+    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL,
+    LOGS_TROCA_CARGO_CHANNEL,HEALTH_CHECK_CHANNEL,    # ← adicionado
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -134,14 +132,12 @@ class ChannelSetupService:
         await self.setup_pix(guild)
         await self.setup_renovacao(guild)
         await self.setup_status_bot(guild)
-        await self.setup_health_check(guild)
-        # ── Novos painéis ──────────────────────────────────────
-        await self.setup_avisos(guild)
-        await self.setup_painel_suporte(guild)
-        await self.setup_casos_analisar(guild)
-        await self.setup_aprovar_mediadores(guild)
-        await self.setup_historico_exposed(guild)
-        await self.setup_mediadores_afks(guild)
+        await self.setup_pix_logs(guild)
+        await self.setup_call_logs(guild)
+        await self.setup_command_logs(guild)
+        await self.setup_delete_logs(guild)
+        await self.setup_troca_cargo_logs(guild)
+        await self.setup_health_check(guild)    # ← adicionado
         logger.info("[ChannelSetup] Todos os painéis postados")
 
     # ══════════════════════════════════════════════════════════
@@ -190,6 +186,30 @@ class ChannelSetupService:
         from views.analyst_views import build_exposed_embed, ExposedPanelView
         await self._post_panel(guild, EXPOSED_CHANNEL_NAME,
                                build_exposed_embed(), ExposedPanelView())
+    
+    async def setup_pix_logs(self, guild: discord.Guild):
+        from views.pix_log import build_pix_log_embed
+        await self._post_panel(guild,LOGS_PIX_LOG_CHANNEL,build_pix_log_embed(),None,clear=False)
+
+    async def setup_troca_cargo_logs(self, guild: discord.Guild):
+        from views.log_troca_cargo import build_troca_cargo_log_embed
+        await self._post_panel(guild,LOGS_TROCA_CARGO_CHANNEL,build_troca_cargo_log_embed(),None,clear=False)
+
+    
+    async def setup_call_logs(self, guild: discord.Guild):
+        from views.log_call import build_call_log_embed
+        await self._post_panel(guild,LOGS_CALL_CHANNEL,build_call_log_embed(),None,clear=False)
+
+    async def setup_command_logs(self, guild: discord.Guild):
+        from views.log_comand import build_command_log_embed
+        await self._post_panel(guild,LOGS_COMMAND_CHANNEL,build_command_log_embed(),None,clear=False)
+    
+
+    async def setup_delete_logs(self,guild: discord.Guild):
+        from views.log_delete import build_message_delete_embed
+        await self._post_panel(guild,LOGS_MESSAGE_DELETE_CHANNEL,build_message_delete_embed(),None,clear=False)
+    
+
 
     async def setup_influencers(self, guild: discord.Guild):
         from views.extra_panels import (
@@ -395,11 +415,15 @@ class ChannelSetupService:
                             channel_name=ch_config["name"],
                             bet_value=value,
                         )
-                        await ch.send(embed=embed, view=view)
-                    except Exception as e:
-                        logger.warning(
-                            f"[ChannelSetup] Card {ch_config['name']} R${value}: {e}")
+                        file = get_banner_file(ch_config["name"])
 
+                        if file:
+                            embed.set_image(url=f"attachment://{file.filename}")
+                            await ch.send(embed=embed, view=view, file=file)
+                        else:
+                            await ch.send(embed=embed, view=view)
+                    except Exception as e:
+                        logger.error(f"[ChannelSetup] Erro em #{ch_config['name']}: {e}")
                 logger.info(
                     f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
 
@@ -428,7 +452,7 @@ class ChannelSetupService:
                 except Exception:
                     pass
 
-    async def _post_panel(
+    async def oi(
         self,
         guild: discord.Guild,
         channel_name: str,
@@ -440,6 +464,35 @@ class ChannelSetupService:
             logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
             return
         await self._clear_bot_messages(ch)
+        try:
+            await ch.send(embed=embed, view=view)
+            logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
+        except Exception as e:
+            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
+        # 🔥 NÃO LIMPA logs
+        try:
+            await ch.send(embed=embed)
+            logger.info(f"[ChannelSetup] Painel de log postado: #{channel_name}")
+        except Exception as e:
+            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
+#teste 
+    async def _post_panel(
+        self,
+        guild: discord.Guild,
+        channel_name: str,
+        embed: discord.Embed,
+        view: discord.ui.View | None,
+        clear: bool = True,  # 👈 CONTROLE
+    ):
+        ch = discord.utils.get(guild.text_channels, name=channel_name)
+        if not ch:
+            logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
+            return
+
+        # 👇 só limpa se for painel normal
+        if clear:
+            await self._clear_bot_messages(ch)
+
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")

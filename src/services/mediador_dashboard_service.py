@@ -163,7 +163,7 @@ class MediatorDashboardService:
             docs = await collection.find(query).to_list(length=500)
             total = len(docs)
 
-            finalizadas = sum(1 for d in docs if d.get("status") == "aguardando_premio")
+            finalizadas = sum(1 for d in docs if d.get("status") == "finalizado")
             canceladas  = sum(1 for d in docs if d.get("status") == "cancelado")
 
             status_aguardando = {
