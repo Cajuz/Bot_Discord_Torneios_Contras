@@ -1,6 +1,4 @@
-"""
-main.py — Ponto de entrada principal do bot X1 Frifas.
-"""
+# main.py — Ponto de entrada principal do bot X1 Frifas.
 from __future__ import annotations
 import asyncio
 import os
@@ -24,7 +22,8 @@ from config.discord_bot      import create_discord_bot, start_discord_bot, set_b
 from utils.logger             import logger, log_success
 from utils.datetime_utils     import utcnow
 from utils.retry              import with_retry, on_rate_limit
-from services.channel_service import RATE_LIMIT_CHANNEL_NAME, STATUS_BOT_CHANNEL
+from services.channel_service import RATE_LIMIT_CHANNEL_NAME
+# ↑ STATUS_BOT_CHANNEL removido — não era usado neste arquivo (dead import)
 
 BOT_START_TIME = datetime.now(timezone.utc)
 
@@ -205,6 +204,9 @@ async def on_ready():
             MatchQueueView(),
             MatchThreadView(match_id="__persistent__"),
             ConfirmationView(),
+            # ↓ FIX: HealthCheckView para registro persistente não precisa de args;
+            #   bot e start_time são injetados apenas no !healthcheck (admin_cog).
+            #   Se o construtor exigir esses args, adicione defaults opcionais lá.
             HealthCheckView(),
             ExposedPanelView(),
             AnalystCaseView(case_id="__persistent__"),
@@ -346,15 +348,12 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    # Anti-spam: verifica se membro retornou bloqueado
     try:
         from services.anti_spam_service import anti_spam_service
         if anti_spam_service:
             await anti_spam_service.handle_member_join(member)
     except Exception:
         pass
-
-    # Onboarding normal
     svc = getattr(bot, "_onboarding_service", None)
     if svc:
         await svc.handle_new_member(member)
