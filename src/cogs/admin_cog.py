@@ -1,6 +1,4 @@
-"""
-AdminCog — Comandos administrativos.
-"""
+# admin_cog.py — Comandos administrativos.
 import discord
 from discord.ext import commands
 from utils.logger import logger
@@ -17,6 +15,7 @@ class AdminCog(commands.Cog, name="Admin"):
     # ─────────────────────────────────────────
     # SETUP COMPLETO
     # ─────────────────────────────────────────
+
     @commands.command(name="setupcanais")
     @commands.has_permissions(administrator=True)
     async def setupcanais(self, ctx: commands.Context):
@@ -31,8 +30,9 @@ class AdminCog(commands.Cog, name="Admin"):
             await msg.edit(content=f"❌ Erro durante o setup: {e}")
 
     # ─────────────────────────────────────────
-    # SETUP INDIVIDUAIS
+    # SETUP INDIVIDUAIS — existentes
     # ─────────────────────────────────────────
+
     @commands.command(name="setup_faturamento")
     @commands.has_permissions(administrator=True)
     async def setup_faturamento(self, ctx: commands.Context):
@@ -113,8 +113,55 @@ class AdminCog(commands.Cog, name="Admin"):
         await msg.edit(content="✅ Todos os dashboards atualizados.")
 
     # ─────────────────────────────────────────
+    # SETUP INDIVIDUAIS — novos painéis ← NOVO
+    # ─────────────────────────────────────────
+
+    @commands.command(name="setup_avisos")
+    @commands.has_permissions(administrator=True)
+    async def setup_avisos(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_avisos(ctx.guild)
+        await ctx.reply("✅ Painel de avisos postado.")
+
+    @commands.command(name="setup_painel_suporte")
+    @commands.has_permissions(administrator=True)
+    async def setup_painel_suporte(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_painel_suporte(ctx.guild)
+        await ctx.reply("✅ Painel de suporte postado.")
+
+    @commands.command(name="setup_casos_analisar")
+    @commands.has_permissions(administrator=True)
+    async def setup_casos_analisar(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_casos_analisar(ctx.guild)
+        await ctx.reply("✅ Painel de casos em análise postado.")
+
+    @commands.command(name="setup_aprovar_mediadores")
+    @commands.has_permissions(administrator=True)
+    async def setup_aprovar_mediadores(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_aprovar_mediadores(ctx.guild)
+        await ctx.reply("✅ Painel de aprovação de mediadores postado.")
+
+    @commands.command(name="setup_historico_exposed")
+    @commands.has_permissions(administrator=True)
+    async def setup_historico_exposed(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_historico_exposed(ctx.guild)
+        await ctx.reply("✅ Painel de histórico da blacklist postado.")
+
+    @commands.command(name="setup_mediadores_afks")
+    @commands.has_permissions(administrator=True)
+    async def setup_mediadores_afks(self, ctx: commands.Context):
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_mediadores_afks(ctx.guild)
+        await ctx.reply("✅ Painel de mediadores AFK postado.")
+
+    # ─────────────────────────────────────────
     # MODERAÇÃO
     # ─────────────────────────────────────────
+
     @commands.command(name="bloquear")
     @commands.has_permissions(manage_messages=True)
     async def bloquear(self, ctx: commands.Context, member: discord.Member, *, motivo: str = "Bloqueado manualmente"):
@@ -158,6 +205,7 @@ class AdminCog(commands.Cog, name="Admin"):
     # ─────────────────────────────────────────
     # OPERACIONAL
     # ─────────────────────────────────────────
+
     @commands.command(name="dashboard")
     @commands.has_permissions(administrator=True)
     async def dashboard(self, ctx: commands.Context):
@@ -252,39 +300,71 @@ class AdminCog(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ ERRO: {e}")
     # ─────────────────────────────────────────
-    # AJUDA
+    # AJUDA — atualizado com novos comandos
     # ─────────────────────────────────────────
+
     @commands.command(name="help_adm")
     @commands.has_permissions(administrator=True)
     async def help_adm(self, ctx: commands.Context):
         embed = discord.Embed(title="Comandos Admin", color=THEME_COLOR)
-        embed.add_field(name="Setup completo", value="`!setupcanais`", inline=False)
-        embed.add_field(name="Setup individual", value=(
-            "`!setup_guias`  `!setup_suporte`  `!setup_mediador`\n"
-            "`!setup_influencers`  `!setup_pix`  `!setup_renovacao`\n"
-            "`!setup_quero_ser_mediador`  `!setup_partidas`  `!setup_dashboards`\n"
-            "`!setup_faturamento`"
-        ), inline=False)
-        embed.add_field(name="Moderação", value=(
-            "`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`"
-        ), inline=False)
-        embed.add_field(name="Operacional", value=(
-            "`!dashboard`  `!atualizar_dashboards`  `!healthcheck`  `!verpix @m`"
-        ), inline=False)
-        embed.add_field(name="Mediadores → mediator_cog", value=(
-            "`!addmediador @m`  `!removemediador @m`  `!fila`  `/silence @m`"
-        ), inline=False)
-        embed.add_field(name="Analistas → analyst_cog", value=(
-            "`!setup_analise`  `!setup_exposed`  `/blacklist_add`  `/blacklist_remove`"
-        ), inline=False)
-        embed.add_field(name="Suporte → support_cog", value=(
-            "`!criar_canal_suporte @m`"
-        ), inline=False)
+        embed.add_field(
+            name="Setup completo",
+            value="`!setupcanais`",
+            inline=False
+        )
+        embed.add_field(
+            name="Setup individual — painéis base",
+            value=(
+                "`!setup_guias`  `!setup_suporte`  `!setup_mediador`\n"
+                "`!setup_influencers`  `!setup_pix`  `!setup_renovacao`\n"
+                "`!setup_quero_ser_mediador`  `!setup_partidas`\n"
+                "`!setup_dashboards`  `!setup_faturamento`"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="Setup individual — novos painéis",    # ← NOVO
+            value=(
+                "`!setup_avisos`\n"
+                "`!setup_painel_suporte`\n"
+                "`!setup_casos_analisar`\n"
+                "`!setup_aprovar_mediadores`\n"
+                "`!setup_historico_exposed`\n"
+                "`!setup_mediadores_afks`"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="Moderação",
+            value="`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`",
+            inline=False
+        )
+        embed.add_field(
+            name="Operacional",
+            value="`!dashboard`  `!atualizar_dashboards`  `!healthcheck`  `!verpix @m`",
+            inline=False
+        )
+        embed.add_field(
+            name="Mediadores → mediator_cog",
+            value="`!addmediador @m`  `!removemediador @m`  `!fila`  `/silence @m`",
+            inline=False
+        )
+        embed.add_field(
+            name="Analistas → analyst_cog",
+            value="`!setup_analise`  `!setup_exposed`  `/blacklist_add`  `/blacklist_remove`",
+            inline=False
+        )
+        embed.add_field(
+            name="Suporte → support_cog",
+            value="`!criar_canal_suporte @m`",
+            inline=False
+        )
         await ctx.reply(embed=embed)
 
     # ─────────────────────────────────────────
     # ERROR HANDLER
     # ─────────────────────────────────────────
+
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
