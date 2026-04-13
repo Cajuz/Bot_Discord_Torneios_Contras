@@ -43,8 +43,10 @@ _initialized = False
 
 # ─────────────────────────────────────────────────────────────
 # Servidor HTTP — health check + webhook EFI
-# Inicia ANTES do bot.start() para garantir que /health responde
-# durante o healthcheck da plataforma (Railway/Render).
+#
+# IMPORTANTE: O Railway injeta automaticamente a variável PORT e
+# bate o healthcheck NESSA porta. Usamos PORT como prioridade,
+# com fallback para API_PORT (8000).
 # ─────────────────────────────────────────────────────────────
 
 async def _start_http_server():
@@ -80,7 +82,9 @@ async def _start_http_server():
     app.router.add_get("/health",       health)
     app.router.add_post("/webhook/efi", efi_webhook)
 
-    port   = int(os.getenv("API_PORT", "8000"))
+    # Railway injeta PORT automaticamente — DEVE ser usada para o healthcheck
+    # funcionar. API_PORT é fallback para ambientes locais.
+    port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
     runner = web.AppRunner(app)
     await runner.setup()
     site   = web.TCPSite(runner, "0.0.0.0", port)
@@ -474,18 +478,18 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Sobe HTTP primeiro (blocking), depois roda bot em paralelo.
-    # asyncio.gather garante que ambos rodam no mesmo event loop
-    # sem um bloquear o outro.
-    await _start_http_server()          # porta 8000 pronta ANTES do gather
+    # Sobe o servidor HTTP primeiro (blocking await),
+    # garantindo que /health ja responde ANTES do bot.start().
+    # Em seguida, gather roda bot + keep_alive em paralelo.
+    await _start_http_server()
     await asyncio.gather(
-        start_discord_bot(bot),         # bot.start() — bloqueia mas cede ao loop
-        _keep_alive(),                  # loop vazio para manter gather rodando
+        start_discord_bot(bot),
+        _keep_alive(),
     )
 
 
 async def _keep_alive():
-    """Coroutine que fica viva indefinidamente para o gather não encerrar."""
+    """Coroutine auxiliar para manter o gather ativo indefinidamente."""
     while True:
         await asyncio.sleep(3600)
 
