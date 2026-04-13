@@ -13,6 +13,8 @@ Comandos:
 
 Task:
   A cada 6 horas atualiza automaticamente o painel.
+
+Fix: persistência de message_id via DB para sobreviver a reinicializações.
 """
 from __future__ import annotations
 
@@ -22,13 +24,18 @@ from utils.logger import logger
 from utils.datetime_utils import utcnow
 from services.channel_service import CONTROLLER_ROLE_NAME
 
-THEME_COLOR      = 0xFFD54F
-DANGER_COLOR     = 0xE74C3C
-SUCCESS_COLOR    = 0x27AE60
-INFO_COLOR       = 0x3498DB
+THEME_COLOR   = 0xFFD54F
+DANGER_COLOR  = 0xE74C3C
+SUCCESS_COLOR = 0x27AE60
+INFO_COLOR    = 0x3498DB
 
 PAINEL_CONTRATOS_CHANNEL = "painel-contratos"
 ANALYTICS_ADM_CHANNEL    = "analytics-adm"
+
+# Chaves de persistência no banco
+_DB_COLLECTION   = "renewal_dashboard_panels"
+_KEY_PAINEL      = "painel_contratos"
+_KEY_ANALYTICS   = "analytics_adm"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -57,7 +64,6 @@ async def _fetch_contract_stats() -> dict:
     })
     pendentes_app = await col_app.count_documents({"status": "pendente"})
 
-    # Financeiro — renovações pagas
     semana_inicio = now - timedelta(days=7)
     mes_inicio    = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -73,12 +79,11 @@ async def _fetch_contract_stats() -> dict:
     res_semana = await col_ren.aggregate(pipeline_semana).to_list(1)
     res_mes    = await col_ren.aggregate(pipeline_mes).to_list(1)
 
-    receita_semana = res_semana[0]["total"] if res_semana else 0.0
+    receita_semana    = res_semana[0]["total"] if res_semana else 0.0
     renovacoes_semana = res_semana[0]["count"] if res_semana else 0
-    receita_mes    = res_mes[0]["total"] if res_mes else 0.0
-    renovacoes_mes = res_mes[0]["count"] if res_mes else 0
+    receita_mes       = res_mes[0]["total"]    if res_mes    else 0.0
+    renovacoes_mes    = res_mes[0]["count"]    if res_mes    else 0
 
-    # Lista mediadores que vencem nos próximos 7 dias
     proximos_vencer = await col_med.find(
         {"expiration_date": {"$gte": now, "$lte": now + timedelta(days=7)}, "is_active": True},
         {"user_id": 1, "username": 1, "expiration_date": 1},
@@ -98,20 +103,43 @@ async def _fetch_contract_stats() -> dict:
     }
 
 
+async def _load_message_id(guild_id: str, key: str) -> int | None:
+    """Lê message_id persistido no banco."""
+    try:
+        from config.database import db
+        doc = await db.get_collection(_DB_COLLECTION).find_one(
+            {"guild_id": guild_id, "key": key}
+        )
+        return int(doc["message_id"]) if doc and doc.get("message_id") else None
+    except Exception:
+        return None
+
+
+async def _save_message_id(guild_id: str, key: str, message_id: int) -> None:
+    """Persiste message_id no banco para sobreviver a restarts."""
+    try:
+        from config.database import db
+        await db.get_collection(_DB_COLLECTION).update_one(
+            {"guild_id": guild_id, "key": key},
+            {"$set": {"guild_id": guild_id, "key": key,
+                      "message_id": str(message_id), "updated_at": utcnow()}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[RenewalDashboard] save_message_id error: {e}")
+
+
 # ═══════════════════════════════════════════════════════════════
 # Builders de embed
 # ═══════════════════════════════════════════════════════════════
 
 def _build_painel_embed(stats: dict) -> discord.Embed:
-    """Embed resumido para o card fixo #painel-contratos."""
     e = discord.Embed(
         title="📊  Painel de Contratos — Mediadores",
         description="Visão geral financeira e operacional. Atualizado automaticamente a cada 6h.",
         color=THEME_COLOR,
         timestamp=utcnow(),
     )
-
-    # Operacional
     e.add_field(
         name="👥 Mediadores",
         value=(
@@ -129,8 +157,6 @@ def _build_painel_embed(stats: dict) -> discord.Embed:
         ),
         inline=True,
     )
-
-    # Financeiro
     e.add_field(
         name="💰 Receita — Semana",
         value=(
@@ -147,12 +173,10 @@ def _build_painel_embed(stats: dict) -> discord.Embed:
         ),
         inline=True,
     )
-
-    # Próximos vencimentos
     if stats["proximos_vencer"]:
         linhas = []
         for doc in stats["proximos_vencer"][:5]:
-            exp = doc.get("expiration_date")
+            exp     = doc.get("expiration_date")
             exp_str = exp.strftime("%d/%m") if exp else "—"
             nome    = doc.get("username", "—")
             uid     = doc.get("user_id", "")
@@ -162,22 +186,18 @@ def _build_painel_embed(stats: dict) -> discord.Embed:
             value="\n".join(linhas),
             inline=False,
         )
-
     e.set_footer(text="X1 Frifas · Painel de Contratos · Apenas ADM")
     return e
 
 
 def _build_analytics_embed(stats: dict) -> discord.Embed:
-    """Embed detalhado para #analytics-adm."""
     e = discord.Embed(
         title="📈  Analytics — Contratos & Renovações",
         color=INFO_COLOR,
         timestamp=utcnow(),
     )
-
     total_mediadores = stats["ativos"] + stats["inativos"] or 1
     taxa_ativa = (stats["ativos"] / total_mediadores) * 100
-
     e.add_field(
         name="🧮 Base de mediadores",
         value=(
@@ -190,10 +210,11 @@ def _build_analytics_embed(stats: dict) -> discord.Embed:
     e.add_field(
         name="💸 Financeiro semanal",
         value=(
-            f"Renovações pagas: **{stats['renovacoes_semana']}**\n"
-            f"Receita: **R$ {stats['receita_semana']:.2f}**\n"
-            f"Ticket médio: **R$ {(stats['receita_semana'] / stats['renovacoes_semana']):.2f}**"
-            if stats['renovacoes_semana'] else
+            (
+                f"Renovações pagas: **{stats['renovacoes_semana']}**\n"
+                f"Receita: **R$ {stats['receita_semana']:.2f}**\n"
+                f"Ticket médio: **R$ {stats['receita_semana'] / stats['renovacoes_semana']:.2f}**"
+            ) if stats['renovacoes_semana'] else
             "Renovações pagas: **0**\nReceita: **R$ 0,00**"
         ),
         inline=True,
@@ -201,10 +222,11 @@ def _build_analytics_embed(stats: dict) -> discord.Embed:
     e.add_field(
         name="📅 Financeiro mensal",
         value=(
-            f"Renovações pagas: **{stats['renovacoes_mes']}**\n"
-            f"Receita: **R$ {stats['receita_mes']:.2f}**\n"
-            f"Ticket médio: **R$ {(stats['receita_mes'] / stats['renovacoes_mes']):.2f}**"
-            if stats['renovacoes_mes'] else
+            (
+                f"Renovações pagas: **{stats['renovacoes_mes']}**\n"
+                f"Receita: **R$ {stats['receita_mes']:.2f}**\n"
+                f"Ticket médio: **R$ {stats['receita_mes'] / stats['renovacoes_mes']:.2f}**"
+            ) if stats['renovacoes_mes'] else
             "Renovações pagas: **0**\nReceita: **R$ 0,00**"
         ),
         inline=True,
@@ -218,7 +240,6 @@ def _build_analytics_embed(stats: dict) -> discord.Embed:
         ),
         inline=False,
     )
-
     if stats["proximos_vencer"]:
         linhas = []
         for doc in stats["proximos_vencer"]:
@@ -232,7 +253,6 @@ def _build_analytics_embed(stats: dict) -> discord.Embed:
             value="\n".join(linhas),
             inline=False,
         )
-
     e.set_footer(text="X1 Frifas · Analytics · Apenas ADM")
     return e
 
@@ -287,13 +307,13 @@ class ContractPanelView(discord.ui.View):
             timestamp=utcnow(),
         )
         for doc in docs:
-            nome  = doc.get("nome_completo", "—")
-            cpf   = doc.get("cpf", "—")
-            data  = doc.get("submitted_at")
+            nome     = doc.get("nome_completo", "—")
+            documento = doc.get("documento", "—")
+            data     = doc.get("submitted_at")
             data_str = data.strftime("%d/%m/%Y %H:%M") if data else "—"
             embed.add_field(
                 name=nome,
-                value=f"CPF: ||{cpf}|| | Enviado: `{data_str}`",
+                value=f"Documento: ||{documento}|| | Enviado: `{data_str}`",
                 inline=False,
             )
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -307,8 +327,6 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._painel_message_id:    int | None = None
-        self._analytics_message_id: int | None = None
         if not self.auto_refresh.is_running():
             self.auto_refresh.start()
 
@@ -330,24 +348,24 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
             logger.error(f"[RenewalDashboard] fetch stats error: {e}")
             return
 
-        # Painel de contratos
         ch_painel = discord.utils.get(guild.text_channels, name=PAINEL_CONTRATOS_CHANNEL)
         if ch_painel:
             await self._upsert_message(
                 ch_painel,
                 embed=_build_painel_embed(stats),
                 view=ContractPanelView(),
-                attr="_painel_message_id",
+                guild_id=str(guild.id),
+                db_key=_KEY_PAINEL,
             )
 
-        # Analytics ADM
         ch_analytics = discord.utils.get(guild.text_channels, name=ANALYTICS_ADM_CHANNEL)
         if ch_analytics:
             await self._upsert_message(
                 ch_analytics,
                 embed=_build_analytics_embed(stats),
                 view=None,
-                attr="_analytics_message_id",
+                guild_id=str(guild.id),
+                db_key=_KEY_ANALYTICS,
             )
 
     async def _upsert_message(
@@ -355,22 +373,44 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
         channel: discord.TextChannel,
         embed: discord.Embed,
         view: discord.ui.View | None,
-        attr: str,
+        guild_id: str,
+        db_key: str,
     ):
-        """Edita msg existente ou posta nova."""
-        msg_id = getattr(self, attr, None)
+        """
+        Edita a mensagem existente (ID persistido no DB) ou posta nova.
+        Sempre persiste o message_id para sobreviver a reinicializações.
+        """
+        # 1. Tenta carregar ID do banco
+        msg_id = await _load_message_id(guild_id, db_key)
+
         if msg_id:
             try:
                 msg = await channel.fetch_message(msg_id)
-                await msg.edit(embed=embed, view=view)
+                kwargs = {"embed": embed}
+                if view:
+                    kwargs["view"] = view
+                await msg.edit(**kwargs)
                 return
             except (discord.NotFound, discord.HTTPException):
+                # Mensagem sumiu — busca no histórico antes de postar nova
                 pass
+
+        # 2. Fallback: varre histórico procurando msg do bot com embed
+        async for hist_msg in channel.history(limit=20):
+            if hist_msg.author == channel.guild.me and hist_msg.embeds:
+                kwargs = {"embed": embed}
+                if view:
+                    kwargs["view"] = view
+                await hist_msg.edit(**kwargs)
+                await _save_message_id(guild_id, db_key, hist_msg.id)
+                return
+
+        # 3. Nenhuma mensagem existente — posta nova
         kwargs = {"embed": embed}
         if view:
             kwargs["view"] = view
-        msg = await channel.send(**kwargs)
-        setattr(self, attr, msg.id)
+        new_msg = await channel.send(**kwargs)
+        await _save_message_id(guild_id, db_key, new_msg.id)
 
     # ── Comandos ────────────────────────────────────────────
     @commands.command(name="setup_painel_contratos")
@@ -385,14 +425,14 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
     @commands.has_permissions(administrator=True)
     async def atualizar_contratos(self, ctx: commands.Context):
         """Força atualização manual imediata."""
-        await ctx.reply("⏳ Atualizando...")
+        msg = await ctx.reply("⏳ Atualizando...")
         await self._update_panels(ctx.guild)
-        await ctx.reply("✅ Painéis atualizados.")
+        await msg.edit(content="✅ Painéis atualizados.")
 
     @commands.command(name="resumo_financeiro")
     @commands.has_permissions(administrator=True)
     async def resumo_financeiro(self, ctx: commands.Context):
-        """Envia resumo financeiro diretamente no chat (ephemeral-style)."""
+        """Envia resumo financeiro diretamente no chat."""
         stats = await _fetch_contract_stats()
         await ctx.reply(embed=_build_analytics_embed(stats))
 

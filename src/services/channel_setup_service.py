@@ -27,13 +27,19 @@ from services.channel_service import (
     CHAT_ANALISTAS_CHANNEL,
     # Comunidade
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
-    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL,
-    LOGS_TROCA_CARGO_CHANNEL,HEALTH_CHECK_CHANNEL,    # ← adicionado
+    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL, LOGS_COMMAND_CHANNEL,
+    FATURAMENTO_CHANNEL, LOGS_PIX_LOG_CHANNEL, LOGS_CALL_CHANNEL,
+    LOGS_MESSAGE_DELETE_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
+    HEALTH_CHECK_CHANNEL,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
 
+# Constantes de canais novos (podem não existir em channel_service ainda)
+AVISOS_CHANNEL             = "avisos"
+MEDIADORES_AFKS_CHANNEL    = "mediadores-afks"
+CADASTRO_MEDIADOR_CHANNEL  = "cadastro-mediador"
+BLACKLIST_CHANNEL          = "blacklist"
 
 THEME = 0xFFD54F
 
@@ -120,10 +126,11 @@ class ChannelSetupService:
             logger.info(f"[ChannelSetup] Guia postado: #{ch_name}")
 
     # ══════════════════════════════════════════════════════════
-    # PAINÉIS — ORQUESTRADOR
+    # PAINÉIS — ORQUESTRADOR (CORRIGIDO: inclui todos os novos)
     # ══════════════════════════════════════════════════════════
 
     async def setup_all_panels(self, guild: discord.Guild):
+        # Painéis base
         await self.setup_suporte(guild)
         await self.setup_mediador(guild)
         await self.setup_analise(guild)
@@ -137,17 +144,23 @@ class ChannelSetupService:
         await self.setup_command_logs(guild)
         await self.setup_delete_logs(guild)
         await self.setup_troca_cargo_logs(guild)
-        await self.setup_health_check(guild)    # ← adicionado
+        await self.setup_health_check(guild)
+        # Painéis novos — anteriormente faltavam no setup_all
+        await self.setup_avisos(guild)
+        await self.setup_aprovar_mediadores(guild)
+        await self.setup_historico_exposed(guild)
+        await self.setup_mediadores_afks(guild)
+        await self.setup_cadastro_mediador(guild)
+        await self.setup_blacklist(guild)
         logger.info("[ChannelSetup] Todos os painéis postados")
 
     # ══════════════════════════════════════════════════════════
-    # PAINÉIS EXISTENTES (atualizados)
+    # PAINÉIS BASE
     # ══════════════════════════════════════════════════════════
 
     async def setup_suporte(self, guild: discord.Guild):
         from views.ticket_view import TicketPanelView, build_support_embed
         from views.staff_panels import build_suporte_admin_embed, SuporteAdminView
-        # canal renomeado: solicitar-suporte (era chat-suporte)
         await self._post_panel(guild, SOLICITAR_SUPORTE_CHANNEL,
                                build_support_embed(), TicketPanelView())
         await self._post_panel(guild, SUPORTE_ADMIN_CHANNEL,
@@ -176,7 +189,6 @@ class ChannelSetupService:
         )
         await self._post_panel(guild, SOLICITAR_ANALISE_CHANNEL,
                                build_analise_panel_embed(), AnalisePanelView())
-        # canal renomeado: painel-analista (era fila-analistas)
         await self._post_panel(guild, PAINEL_ANALISTA_CHANNEL,
                                build_analista_pessoal_embed(), AnalistaPessoalView())
         await self._post_panel(guild, ANALISTAS_ADMIN_CHANNEL,
@@ -186,30 +198,26 @@ class ChannelSetupService:
         from views.analyst_views import build_exposed_embed, ExposedPanelView
         await self._post_panel(guild, EXPOSED_CHANNEL_NAME,
                                build_exposed_embed(), ExposedPanelView())
-    
+
     async def setup_pix_logs(self, guild: discord.Guild):
         from views.pix_log import build_pix_log_embed
-        await self._post_panel(guild,LOGS_PIX_LOG_CHANNEL,build_pix_log_embed(),None,clear=False)
+        await self._post_panel(guild, LOGS_PIX_LOG_CHANNEL, build_pix_log_embed(), None, clear=False)
 
     async def setup_troca_cargo_logs(self, guild: discord.Guild):
         from views.log_troca_cargo import build_troca_cargo_log_embed
-        await self._post_panel(guild,LOGS_TROCA_CARGO_CHANNEL,build_troca_cargo_log_embed(),None,clear=False)
+        await self._post_panel(guild, LOGS_TROCA_CARGO_CHANNEL, build_troca_cargo_log_embed(), None, clear=False)
 
-    
     async def setup_call_logs(self, guild: discord.Guild):
         from views.log_call import build_call_log_embed
-        await self._post_panel(guild,LOGS_CALL_CHANNEL,build_call_log_embed(),None,clear=False)
+        await self._post_panel(guild, LOGS_CALL_CHANNEL, build_call_log_embed(), None, clear=False)
 
     async def setup_command_logs(self, guild: discord.Guild):
         from views.log_comand import build_command_log_embed
-        await self._post_panel(guild,LOGS_COMMAND_CHANNEL,build_command_log_embed(),None,clear=False)
-    
+        await self._post_panel(guild, LOGS_COMMAND_CHANNEL, build_command_log_embed(), None, clear=False)
 
-    async def setup_delete_logs(self,guild: discord.Guild):
+    async def setup_delete_logs(self, guild: discord.Guild):
         from views.log_delete import build_message_delete_embed
-        await self._post_panel(guild,LOGS_MESSAGE_DELETE_CHANNEL,build_message_delete_embed(),None,clear=False)
-    
-
+        await self._post_panel(guild, LOGS_MESSAGE_DELETE_CHANNEL, build_message_delete_embed(), None, clear=False)
 
     async def setup_influencers(self, guild: discord.Guild):
         from views.extra_panels import (
@@ -323,31 +331,6 @@ class ChannelSetupService:
         embed.set_footer(text="Fique atento às novidades!")
         await self._post_panel(guild, AVISOS_CHANNEL, embed, None)
 
-    async def setup_painel_suporte(self, guild: discord.Guild):
-        embed = discord.Embed(
-            title="🎫 Painel de Suporte",
-            description=(
-                "Acompanhe o status dos atendimentos e informações da equipe de suporte.\n\n"
-                f"Para abrir um chamado, acesse `#{SOLICITAR_SUPORTE_CHANNEL}`."
-            ),
-            color=0x5865F2,
-        )
-        embed.set_footer(text="Apenas leitura — atualizado automaticamente pelo bot.")
-        await self._post_panel(guild, PAINEL_SUPORTE_CHANNEL, embed, None)
-
-    async def setup_casos_analisar(self, guild: discord.Guild):
-        embed = discord.Embed(
-            title="🔍 Casos em Análise",
-            description=(
-                "Os cards de pedidos de análise aparecem automaticamente aqui.\n\n"
-                "**Analistas:** clique em **Assumir** no card para iniciar a investigação.\n\n"
-                "Apenas o bot posta neste canal."
-            ),
-            color=0xE74C3C,
-        )
-        embed.set_footer(text="Apenas leitura — cards gerados automaticamente.")
-        await self._post_panel(guild, CASOS_ANALISAR_CHANNEL, embed, None)
-
     async def setup_aprovar_mediadores(self, guild: discord.Guild):
         embed = discord.Embed(
             title="⚡ Aprovação de Mediadores",
@@ -387,6 +370,39 @@ class ChannelSetupService:
         )
         embed.set_footer(text="Apenas leitura — atualizado automaticamente.")
         await self._post_panel(guild, MEDIADORES_AFKS_CHANNEL, embed, None)
+
+    async def setup_cadastro_mediador(self, guild: discord.Guild):
+        """Posta o card fixo de cadastro de mediador com formulário modal."""
+        from views.mediator_register_view import MediatorRegisterView
+        embed = discord.Embed(
+            title="📋  Cadastro de Mediador — X1 Frifas",
+            description=(
+                "Preencha o formulário abaixo para cadastrar um novo mediador.\n\n"
+                "**Requisitos**\n"
+                "— Aprovação prévia pelo processo externo divulgado no servidor\n"
+                "— Comprovante de pagamento da licença (link obrigatório)\n"
+                "— Dados pessoais válidos (nome completo, CPF/RG, telefone, data de nascimento)\n\n"
+                "Clique em **Cadastrar Mediador** para abrir o formulário."
+            ),
+            color=0xFFD54F,
+        )
+        embed.set_footer(text="X1 Frifas · Apenas ADM/Suporte")
+        await self._post_panel(guild, CADASTRO_MEDIADOR_CHANNEL, embed, MediatorRegisterView())
+
+    async def setup_blacklist(self, guild: discord.Guild):
+        """Posta o painel de verificação de blacklist com botões interativos."""
+        from views.blacklist_view import BlacklistCheckView
+        embed = discord.Embed(
+            title="🚫  Verificação de Blacklist — X1 Frifas",
+            description=(
+                "Verifique se um membro está na blacklist do servidor.\n\n"
+                "🔍 **Verificar Minha Situação** — consulta o seu próprio status\n"
+                "🔎 **Buscar por Discord ID** — consulta qualquer usuário pelo ID"
+            ),
+            color=0x992D22,
+        )
+        embed.set_footer(text="X1 Frifas · Blacklist · Consulta disponível para todos")
+        await self._post_panel(guild, BLACKLIST_CHANNEL, embed, BlacklistCheckView())
 
     # ══════════════════════════════════════════════════════════
     # MATCH CARDS
@@ -431,9 +447,7 @@ class ChannelSetupService:
     # HELPERS
     # ══════════════════════════════════════════════════════════
 
-    async def _clear_bot_messages(
-        self, channel: discord.TextChannel, limit: int = 10
-    ):
+    async def _clear_bot_messages(self, channel: discord.TextChannel, limit: int = 10):
         to_delete = []
         async for msg in channel.history(limit=limit):
             if msg.author == channel.guild.me and (msg.embeds or msg.components):
@@ -452,47 +466,20 @@ class ChannelSetupService:
                 except Exception:
                     pass
 
-    async def oi(
-        self,
-        guild: discord.Guild,
-        channel_name: str,
-        embed: discord.Embed,
-        view: discord.ui.View | None,
-    ):
-        ch = discord.utils.get(guild.text_channels, name=channel_name)
-        if not ch:
-            logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
-            return
-        await self._clear_bot_messages(ch)
-        try:
-            await ch.send(embed=embed, view=view)
-            logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
-        except Exception as e:
-            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
-        # 🔥 NÃO LIMPA logs
-        try:
-            await ch.send(embed=embed)
-            logger.info(f"[ChannelSetup] Painel de log postado: #{channel_name}")
-        except Exception as e:
-            logger.error(f"[ChannelSetup] Erro em #{channel_name}: {e}")
-#teste 
     async def _post_panel(
         self,
         guild: discord.Guild,
         channel_name: str,
         embed: discord.Embed,
         view: discord.ui.View | None,
-        clear: bool = True,  # 👈 CONTROLE
+        clear: bool = True,
     ):
         ch = discord.utils.get(guild.text_channels, name=channel_name)
         if not ch:
             logger.warning(f"[ChannelSetup] Canal não encontrado: #{channel_name}")
             return
-
-        # 👇 só limpa se for painel normal
         if clear:
             await self._clear_bot_messages(ch)
-
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")

@@ -30,7 +30,7 @@ class AdminCog(commands.Cog, name="Admin"):
             await msg.edit(content=f"❌ Erro durante o setup: {e}")
 
     # ─────────────────────────────────────────
-    # SETUP INDIVIDUAIS — existentes
+    # SETUP INDIVIDUAIS — painéis base
     # ─────────────────────────────────────────
 
     @commands.command(name="setup_faturamento")
@@ -123,20 +123,6 @@ class AdminCog(commands.Cog, name="Admin"):
         await channel_setup_service.setup_avisos(ctx.guild)
         await ctx.reply("✅ Painel de avisos postado.")
 
-    @commands.command(name="setup_painel_suporte")
-    @commands.has_permissions(administrator=True)
-    async def setup_painel_suporte(self, ctx: commands.Context):
-        from services.channel_setup_service import channel_setup_service
-        await channel_setup_service.setup_painel_suporte(ctx.guild)
-        await ctx.reply("✅ Painel de suporte postado.")
-
-    @commands.command(name="setup_casos_analisar")
-    @commands.has_permissions(administrator=True)
-    async def setup_casos_analisar(self, ctx: commands.Context):
-        from services.channel_setup_service import channel_setup_service
-        await channel_setup_service.setup_casos_analisar(ctx.guild)
-        await ctx.reply("✅ Painel de casos em análise postado.")
-
     @commands.command(name="setup_aprovar_mediadores")
     @commands.has_permissions(administrator=True)
     async def setup_aprovar_mediadores(self, ctx: commands.Context):
@@ -158,41 +144,37 @@ class AdminCog(commands.Cog, name="Admin"):
         await channel_setup_service.setup_mediadores_afks(ctx.guild)
         await ctx.reply("✅ Painel de mediadores AFK postado.")
 
-    # ─────────────────────────────────────────
-    # SETUP — Cadastro de Mediador ← NOVO
-    # ─────────────────────────────────────────
-
     @commands.command(name="setup_cadastro_mediador")
     @commands.has_permissions(administrator=True)
     async def setup_cadastro_mediador(self, ctx: commands.Context):
         """Posta o card fixo de cadastro de mediador com formulário modal."""
-        from views.mediator_register_view import MediatorRegisterView
-        from services.channel_service import CADASTRO_MEDIADOR_CHANNEL
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_cadastro_mediador(ctx.guild)
+        await ctx.reply("✅ Card de cadastro de mediador postado.")
 
-        ch = discord.utils.get(ctx.guild.text_channels, name=CADASTRO_MEDIADOR_CHANNEL)
-        if not ch:
-            await ctx.reply(
-                f"❌ Canal `#{CADASTRO_MEDIADOR_CHANNEL}` não encontrado. "
-                "Execute `!setupcanais` primeiro."
-            )
+    @commands.command(name="setup_blacklist")
+    @commands.has_permissions(administrator=True)
+    async def setup_blacklist(self, ctx: commands.Context):
+        """Posta o painel de verificação de blacklist."""
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_blacklist(ctx.guild)
+        await ctx.reply("✅ Painel de blacklist postado.")
+
+    # ─────────────────────────────────────────
+    # CONTRATOS (delegado ao renewal_dashboard_cog)
+    # ─────────────────────────────────────────
+
+    @commands.command(name="setup_painel_contratos")
+    @commands.has_permissions(administrator=True)
+    async def setup_painel_contratos(self, ctx: commands.Context):
+        """Posta/atualiza os painéis de contratos. Delega ao RenewalDashboardCog."""
+        cog = self.bot.cogs.get("PainelContratos")
+        if not cog:
+            await ctx.reply("❌ Cog PainelContratos não carregado.")
             return
-
-        embed = discord.Embed(
-            title="📋  Cadastro de Mediador — X1 Frifas",
-            description=(
-                "Preencha o formulário abaixo para se cadastrar como mediador.\n\n"
-                "**Requisitos**\n"
-                "— Aprovação prévia pelo processo externo divulgado no servidor\n"
-                "— Comprovante de pagamento da licença\n"
-                "— Dados pessoais válidos (CPF, PIX, telefone)\n\n"
-                "Clique em **Cadastrar** para abrir o formulário."
-            ),
-            color=0xFFD54F,
-        )
-        embed.set_footer(text="X1 Frifas · Apenas candidatos aprovados externamente")
-
-        await ch.send(embed=embed, view=MediatorRegisterView())
-        await ctx.reply(f"✅ Card de cadastro de mediador postado em {ch.mention}.")
+        msg = await ctx.reply("⏳ Gerando painéis de contratos...")
+        await cog._update_panels(ctx.guild)
+        await msg.edit(content="✅ Painéis de contratos atualizados.")
 
     # ─────────────────────────────────────────
     # MODERAÇÃO
@@ -241,31 +223,6 @@ class AdminCog(commands.Cog, name="Admin"):
     # ─────────────────────────────────────────
     # OPERACIONAL
     # ─────────────────────────────────────────
-
-    @commands.command(name="dashboard")
-    @commands.has_permissions(administrator=True)
-    async def dashboard(self, ctx: commands.Context):
-        await ctx.reply("⏳ Atualizando dashboard de partidas...")
-        try:
-            from services.mediador_dashboard_service import mediator_dashboard_service
-            channel = await mediator_dashboard_service.resolve_dashboard_channel(ctx.guild)
-            if not channel:
-                await ctx.reply("Canal não encontrado. Use `!setupcanais` primeiro.")
-                return
-            await mediator_dashboard_service.update_dashboard_for_channel(channel)
-            await ctx.reply(f"✅ Dashboard atualizado em {channel.mention}.")
-        except Exception as e:
-            logger.error(f"[dashboard] {e}")
-            await ctx.reply("❌ Erro ao atualizar dashboard.")
-
-    @commands.command(name="atualizar_dashboards")
-    @commands.has_permissions(administrator=True)
-    async def atualizar_dashboards(self, ctx: commands.Context):
-        from services.channel_setup_service import channel_setup_service
-        msg = await ctx.reply("⏳ Atualizando todos os dashboards...")
-        channel_setup_service.bot = self.bot
-        await channel_setup_service.setup_dashboards(ctx.guild)
-        await msg.edit(content="✅ Todos os dashboards atualizados.")
 
     @commands.command(name="healthcheck")
     @commands.has_permissions(administrator=True)
@@ -355,10 +312,15 @@ class AdminCog(commands.Cog, name="Admin"):
         embed.add_field(
             name="Setup individual — novos painéis",
             value=(
-                "`!setup_avisos`  `!setup_painel_suporte`  `!setup_casos_analisar`\n"
-                "`!setup_aprovar_mediadores`  `!setup_historico_exposed`\n"
-                "`!setup_mediadores_afks`  `!setup_cadastro_mediador`"
+                "`!setup_avisos`  `!setup_aprovar_mediadores`\n"
+                "`!setup_historico_exposed`  `!setup_mediadores_afks`\n"
+                "`!setup_cadastro_mediador`  `!setup_blacklist`"
             ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Contratos / Finance",
+            value="`!setup_painel_contratos`  `!resumo_financeiro`",
             inline=False,
         )
         embed.add_field(
@@ -368,7 +330,7 @@ class AdminCog(commands.Cog, name="Admin"):
         )
         embed.add_field(
             name="Operacional",
-            value="`!dashboard`  `!atualizar_dashboards`  `!healthcheck`  `!verpix @m`",
+            value="`!healthcheck`  `!verpix @m`  `!faturamento [@m]`",
             inline=False,
         )
         embed.add_field(
