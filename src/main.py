@@ -14,7 +14,6 @@ from views.log_comand import CommandLog
 from views.log_call import CallLog
 from views.log_troca_cargo import Troca_cargo
 
-
 load_dotenv()
 
 from config.database         import db
@@ -22,8 +21,7 @@ from config.discord_bot      import create_discord_bot, start_discord_bot, set_b
 from utils.logger             import logger, log_success
 from utils.datetime_utils     import utcnow
 from utils.retry              import with_retry, on_rate_limit
-from services.channel_service import RATE_LIMIT_CHANNEL_NAME
-# ↑ STATUS_BOT_CHANNEL removido — não era usado neste arquivo (dead import)
+from services.channel_service import RATE_LIMIT_CHANNEL_NAME, ADM_ROLE_NAME, PROTECTED_ROLES
 
 BOT_START_TIME = datetime.now(timezone.utc)
 
@@ -41,84 +39,6 @@ COGS = [
 
 bot          = create_discord_bot()
 _initialized = False
-
-#---------------------------------------------------------------
-#TESTE
-#---------------------------------------------------------------
-@bot.event
-async def on_voice_state_update(member, before, after):
-    logger.info(f"[VOICE] {member} mudou de estado")
-
-@bot.event
-async def on_message_delete(message):
-    logger.info(f"[DELETE] mensagem deletada de {message.author}")
-
-@bot.event
-async def on_message(message):
-    logger.info(f"[MESSAGE] detectada")
-    await bot.process_commands(message)
-
-@bot.event
-async def on_member_update(before, after):
-    logger.info(f"[TrocaCargo] {before} para {after} detectada")
-
-
-troca_cargo=Troca_cargo(bot)
-@bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-    if before.roles == after.roles:
-        return
-
-    from views.log_troca_cargo import Troca_cargo
-
-    logger = Troca_cargo(bot)
-    await logger.send_on_troca_cargo(before, after)
-    
-
-call_log = CallLog(bot)
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-
-    logger.info(f"[VOICE] Evento detectado: {member}")
-
-    # entrou
-    if not before.channel and after.channel:
-        await call_log.on_enter(member, after.channel)
-
-    # saiu
-    elif before.channel and not after.channel:
-        await call_log.on_exit(member)
-
-command_log = CommandLog(bot)
-
-@bot.event
-async def on_command(ctx):
-
-    logger.info(f"[COMMAND] Detectado: {ctx.command}")
-
-    args = " ".join(ctx.message.content.split()[1:])
-
-    await command_log.send_command_log(
-        ctx.author,
-        str(ctx.command),
-        args,
-        ctx.channel
-    )
-
-delete_log = MessageDeleteLog(bot)
-
-@bot.event
-async def on_message_delete(message):
-    logger.info(f"[DELETE] Detectado: {message.author}")
-
-    # ignora bot
-    if message.author.bot:
-        return
-
-    await delete_log.send_delete_log(message)
-
-
 
 # ─────────────────────────────────────────────────────────────
 # Rate limit monitor
@@ -154,7 +74,7 @@ async def on_ready():
 
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
 
-    # ── Carrega cogs ──────────────────────────────────────────
+    # ── Carrega cogs ────────────────────────────────────────────
     for cog in COGS:
         try:
             await bot.load_extension(cog)
@@ -162,14 +82,14 @@ async def on_ready():
         except Exception as e:
             logger.error(f"[Cog] ❌ {cog}: {e}")
 
-    # ── Sincroniza slash commands ─────────────────────────────
+    # ── Sincroniza slash commands ───────────────────────────────
     try:
         synced = await bot.tree.sync()
         logger.info(f"[SlashCommands] {len(synced)} comandos sincronizados")
     except Exception as e:
         logger.error(f"[SlashCommands] Erro: {e}")
 
-    # ── Persistent views ──────────────────────────────────────
+    # ── Persistent views ──────────────────────────────────────────
     try:
         from views.ticket_view             import TicketPanelView, TicketCardView, SupportCardView
         from views.mediator_panel_view     import MediatorPanelView
@@ -204,9 +124,6 @@ async def on_ready():
             MatchQueueView(),
             MatchThreadView(match_id="__persistent__"),
             ConfirmationView(),
-            # ↓ FIX: HealthCheckView para registro persistente não precisa de args;
-            #   bot e start_time são injetados apenas no !healthcheck (admin_cog).
-            #   Se o construtor exigir esses args, adicione defaults opcionais lá.
             HealthCheckView(),
             ExposedPanelView(),
             AnalystCaseView(case_id="__persistent__"),
@@ -234,7 +151,7 @@ async def on_ready():
     except Exception as e:
         logger.error(f"[views] Erro ao importar views: {e}", exc_info=True)
 
-    # ── Invite tracker + rate limit monitor ───────────────────
+    # ── Invite tracker + rate limit monitor ───────────────────────
     from services.invite_tracker_service     import invite_tracker_service
     from services.rate_limit_monitor_service import rate_limit_monitor
     invite_tracker_service.bot = bot
@@ -244,11 +161,11 @@ async def on_ready():
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
-    # ── Onboarding ────────────────────────────────────────────
+    # ── Onboarding ────────────────────────────────────────────────
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
 
-    # ── Anti-spam ─────────────────────────────────────────────
+    # ── Anti-spam ─────────────────────────────────────────────────
     try:
         from services.anti_spam_service import init_anti_spam_service
         init_anti_spam_service(bot)
@@ -256,24 +173,24 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AntiSpam] {e}")
 
-    # ── Fila de mediadores ────────────────────────────────────
+    # ── Fila de mediadores ──────────────────────────────────────────
     from services.mediator_queue import mediator_queue
     await mediator_queue.initialize()
 
-    # ── Dashboard de mediador ─────────────────────────────────
+    # ── Dashboard de mediador ─────────────────────────────────────
     from services.mediador_dashboard_service import mediator_dashboard_service
     mediator_dashboard_service.start_task(bot)
 
-    # ── Card service ──────────────────────────────────────────
+    # ── Card service ──────────────────────────────────────────────
     from services.card_service import card_service
     card_service.bot = bot
 
-    # ── Analytics ─────────────────────────────────────────────
+    # ── Analytics ─────────────────────────────────────────────────
     from services.analytics_service import analytics_service
     analytics_service.start_task(bot)
     logger.info("[Analytics] Dashboards inicializados (atualização a cada hora)")
 
-    # ── AFK service ───────────────────────────────────────────
+    # ── AFK service ───────────────────────────────────────────────
     from services.afk_service import afk_service
     afk_service.bot = bot
     if not afk_service.check_queue_afk.is_running():
@@ -283,7 +200,7 @@ async def on_ready():
     bot._afk_service = afk_service
     logger.info("[AFK] Serviço inicializado (fila + partida)")
 
-    # ── Thread reuse ──────────────────────────────────────────
+    # ── Thread reuse ──────────────────────────────────────────────
     try:
         from services.thread_reuse_service import init_thread_reuse_service
         init_thread_reuse_service(bot)
@@ -291,7 +208,7 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[ThreadReuse] {e}")
 
-    # ── Thread log ────────────────────────────────────────────
+    # ── Thread log ────────────────────────────────────────────────
     try:
         from services.thread_log_service import init_thread_log_service
         init_thread_log_service(bot)
@@ -299,7 +216,7 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[ThreadLog] {e}")
 
-    # ── Health check ──────────────────────────────────────────
+    # ── Health check ──────────────────────────────────────────────
     try:
         from services.health_check_service import (
             init_health_check_service, set_bot_start_time
@@ -310,7 +227,7 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[HealthCheck] {e}")
 
-    # ── Analise fila ──────────────────────────────────────────
+    # ── Analise fila ─────────────────────────────────────────────
     try:
         from services.analise_fila import analise_fila_service
         analise_fila_service.bot = bot
@@ -318,7 +235,7 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AnaliseFila] {e}")
 
-    # ── Restaura membros bloqueados por spam ──────────────────
+    # ── Restaura membros bloqueados por spam ──────────────────────
     try:
         from services.anti_spam_service import anti_spam_service
         if anti_spam_service:
@@ -328,14 +245,14 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AntiSpam] restore_blocked_members: {e}")
 
-    # ── Sincroniza mediadores por cargo ───────────────────────
+    # ── Sincroniza mediadores por cargo ───────────────────────────
     for guild in bot.guilds:
         try:
             await mediator_queue.sync_mediators_by_role(guild, role_name="Controller")
         except Exception as e:
             logger.warning(f"[on_ready] Sync mediadores: {e}")
 
-    # ── Status rotativo ───────────────────────────────────────
+    # ── Status rotativo ─────────────────────────────────────────────
     if not set_status.is_running():
         set_status.start()
 
@@ -357,6 +274,131 @@ async def on_member_join(member: discord.Member):
     svc = getattr(bot, "_onboarding_service", None)
     if svc:
         await svc.handle_new_member(member)
+
+
+# Instâncias de log (criadas uma vez, fora dos handlers)
+_troca_cargo_log = Troca_cargo(bot)
+_call_log        = CallLog(bot)
+_command_log     = CommandLog(bot)
+_delete_log      = MessageDeleteLog(bot)
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """
+    1. Loga troca de cargo.
+    2. Anti-self-role: se um usuário (sem permissão) se adicionou um cargo
+       protegido, o bot remove imediatamente e notifica via DM + log.
+    """
+    if before.roles == after.roles:
+        return
+
+    # ─ Log de troca de cargo ──────────────────────────────────
+    try:
+        await _troca_cargo_log.send_on_troca_cargo(before, after)
+    except Exception as e:
+        logger.warning(f"[TrocaCargo] Erro no log: {e}")
+
+    # ─ Anti-self-role ──────────────────────────────────────
+    # Verifica se o próprio membro se atribuiu um cargo (audit log)
+    # Para não bloquear a execução, verificamos apenas os cargos adicionados.
+    added_roles   = set(after.roles)  - set(before.roles)
+    removed_roles = set(before.roles) - set(after.roles)
+
+    # Cargos protegidos que foram adicionados nesta atualização
+    illegal_adds = {r for r in added_roles if r.name in PROTECTED_ROLES}
+    if not illegal_adds:
+        return
+
+    # Se quem atualizou foi o bot ou o ADM, não reverter
+    try:
+        guild = after.guild
+        adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
+        is_adm = adm_role and adm_role in after.roles
+
+        # Verifica audit log para saber se a ação foi do próprio membro
+        async for entry in guild.audit_logs(
+            limit=5,
+            action=discord.AuditLogAction.member_role_update,
+        ):
+            if entry.target.id != after.id:
+                continue
+            # Se a ação foi executada pelo bot ou por um ADM, não reverter
+            if entry.user.id == bot.user.id:
+                return
+            executor_roles = {r.name for r in entry.user.roles}
+            if ADM_ROLE_NAME in executor_roles:
+                return
+            # Ação foi de usuário sem permissão — reverter
+            break
+
+        # Remove os cargos ilegais
+        for role in illegal_adds:
+            try:
+                await after.remove_roles(role, reason="[Anti-self-role] Cargo protegido removido")
+                logger.warning(
+                    f"[AntiSelfRole] {after} ({after.id}) tentou se auto-atribuir '{role.name}'. Removido."
+                )
+            except Exception as e:
+                logger.error(f"[AntiSelfRole] Falha ao remover '{role.name}' de {after}: {e}")
+
+        # Notifica o membro via DM
+        role_names = ", ".join(f"**{r.name}**" for r in illegal_adds)
+        try:
+            await after.send(
+                f"⚠️ Olá {after.display_name},\n"
+                f"O(s) cargo(s) {role_names} são gerenciados exclusivamente pela administração "
+                f"e foram removidos automaticamente.\n"
+                f"Se você acredita que isso é um erro, entre em contato com a equipe."
+            )
+        except discord.Forbidden:
+            pass
+
+        # Log no canal de trocas de cargo
+        from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
+        log_ch = discord.utils.get(guild.text_channels, name=LOGS_TROCA_CARGO_CHANNEL)
+        if log_ch:
+            embed = discord.Embed(
+                title="⚠️ Tentativa de Auto-Atribuição de Cargo",
+                color=0xE74C3C,
+                timestamp=utcnow(),
+            )
+            embed.add_field(name="Membro",   value=f"{after.mention} (`{after.id}`)", inline=True)
+            embed.add_field(name="Cargo(s)", value=role_names,                        inline=True)
+            embed.set_footer(text="Bot removeu automaticamente")
+            try:
+                await log_ch.send(embed=embed)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.error(f"[AntiSelfRole] Erro geral: {e}")
+
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    logger.info(f"[VOICE] Evento detectado: {member}")
+    if not before.channel and after.channel:
+        await _call_log.on_enter(member, after.channel)
+    elif before.channel and not after.channel:
+        await _call_log.on_exit(member)
+
+
+@bot.event
+async def on_command(ctx):
+    logger.info(f"[COMMAND] Detectado: {ctx.command}")
+    args = " ".join(ctx.message.content.split()[1:])
+    await _command_log.send_command_log(
+        ctx.author, str(ctx.command), args, ctx.channel
+    )
+
+
+@bot.event
+async def on_message_delete(message: discord.Message):
+    logger.info(f"[DELETE] Detectado: {message.author}")
+    if message.author.bot:
+        return
+    await _delete_log.send_delete_log(message)
 
 
 @bot.event
