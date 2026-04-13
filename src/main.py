@@ -112,6 +112,9 @@ async def on_ready():
             AnalistaPessoalView, AnalistaAdminView,
             SuporteAdminView,
         )
+        from views.blacklist_view          import BlacklistCheckView
+        from views.mediator_register_view  import MediatorRegisterView
+        from cogs.renewal_dashboard_cog    import ContractPanelView
         from services.faturamento_mediador import RelatorioGeralView
         from services.match_queue_service  import ConfirmationView
 
@@ -140,6 +143,10 @@ async def on_ready():
             AnalistaPessoalView(),
             AnalistaAdminView(),
             SuporteAdminView(),
+            # fix: views com botões que faltavam — botões mortos após restart
+            BlacklistCheckView(),
+            MediatorRegisterView(),
+            ContractPanelView(),
         ]
 
         for view in persistent_views:
@@ -178,9 +185,12 @@ async def on_ready():
     from services.mediator_queue import mediator_queue
     await mediator_queue.initialize()
 
-    # ── Dashboard de mediador ─────────────────────────────────────
-    from services.mediador_dashboard_service import mediator_dashboard_service
-    mediator_dashboard_service.start_task(bot)
+    # ── mediador_dashboard_service — DESATIVADO (conflito com analytics_service)
+    # Ambos postavam em #dashboard-partidas; o antigo limpava o canal com purge()
+    # apagando os embeds do analytics_service. Substituído integralmente pelo
+    # analytics_service que usa upsert sem apagar o histórico do canal.
+    # from services.mediador_dashboard_service import mediator_dashboard_service
+    # mediator_dashboard_service.start_task(bot)
 
     # ── Card service ──────────────────────────────────────────────
     from services.card_service import card_service
