@@ -7,6 +7,8 @@ from services.channel_service import (
     CHANNEL_STRUCTURE, ALL_ROLES,
     GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL,
     GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,
+    # Informações
+    AVISOS_CHANNEL, BLACKLIST_CHANNEL,
     # Suporte
     SOLICITAR_SUPORTE_CHANNEL, SUPPORT_CHANNEL_NAME,
     CHAMADOS_CHANNEL_NAME, CHAT_SUPORTE_STAFF_CHANNEL,
@@ -17,6 +19,7 @@ from services.channel_service import (
     RENOVACAO_CHANNEL, FATURAMENTO_CHANNEL,
     APROVAR_MEDIADORES_CHANNEL,
     HISTORICO_CHANNEL,
+    CADASTRO_MEDIADOR_CHANNEL,
     # Analistas
     SOLICITAR_ANALISE_CHANNEL,
     CASOS_ANALISAR_CHANNEL,
@@ -31,15 +34,10 @@ from services.channel_service import (
     FATURAMENTO_CHANNEL, LOGS_PIX_LOG_CHANNEL, LOGS_CALL_CHANNEL,
     LOGS_MESSAGE_DELETE_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
     HEALTH_CHECK_CHANNEL,
+    MEDIADORES_AFKS_CHANNEL,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
-
-# Constantes de canais novos (podem não existir em channel_service ainda)
-AVISOS_CHANNEL             = "avisos"
-MEDIADORES_AFKS_CHANNEL    = "mediadores-afks"
-CADASTRO_MEDIADOR_CHANNEL  = "cadastro-mediador"
-BLACKLIST_CHANNEL          = "blacklist"
 
 THEME = 0xFFD54F
 
@@ -126,7 +124,7 @@ class ChannelSetupService:
             logger.info(f"[ChannelSetup] Guia postado: #{ch_name}")
 
     # ══════════════════════════════════════════════════════════
-    # PAINÉIS — ORQUESTRADOR (CORRIGIDO: inclui todos os novos)
+    # PAINÉIS — ORQUESTRADOR
     # ══════════════════════════════════════════════════════════
 
     async def setup_all_panels(self, guild: discord.Guild):
@@ -145,7 +143,7 @@ class ChannelSetupService:
         await self.setup_delete_logs(guild)
         await self.setup_troca_cargo_logs(guild)
         await self.setup_health_check(guild)
-        # Painéis novos — anteriormente faltavam no setup_all
+        # Painéis novos
         await self.setup_avisos(guild)
         await self.setup_aprovar_mediadores(guild)
         await self.setup_historico_exposed(guild)
