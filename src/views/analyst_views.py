@@ -7,14 +7,19 @@ import discord
 from utils.datetime_utils import utcnow
 from utils.logger import logger
 from services.channel_service import (
-    CASOS_ANALISAR_CHANNEL,       # ← NOVO: cards vão para cá
+    CASOS_ANALISAR_CHANNEL,
     EXPOSED_CHANNEL_NAME,
-    HISTORICO_EXPOSED_CHANNEL,    # ← NOVO: logs de blacklist
-    # ANALYST_QUEUE_CHANNEL mantido só se houver outro uso externo
+    HISTORICO_EXPOSED_CHANNEL,
+    ADM_ROLE_NAME,
+    ANALYST_ROLE_NAME,
 )
 
-THEME  = 0xFFD54F
-DANGER = 0xE74C3C
+# ─── Paleta ──────────────────────────────────────────────────
+THEME    = 0xFFD54F   # amarelo  — painel analista / caso neutro
+DANGER   = 0xE74C3C   # vermelho — blacklist / confirmado
+SUCCESS  = 0x2ECC71   # verde    — remoção da blacklist
+ORANGE   = 0xFFA726   # laranja  — em análise
+GRAY     = 0x95A5A6   # cinza    — inconclusivo / inválido
 
 _case_locks: dict[str, asyncio.Lock] = {}
 
@@ -26,9 +31,10 @@ def _get_case_lock(case_id: str) -> asyncio.Lock:
 
 
 def _has_analyst_role(user: discord.Member) -> bool:
+    """Verifica se o membro tem cargo de Analista ou ADM."""
     if user.guild_permissions.administrator:
         return True
-    return bool({r.name for r in user.roles} & {"Analyst", "Analista", "Admin"})
+    return bool({r.name for r in user.roles} & {ANALYST_ROLE_NAME, ADM_ROLE_NAME})
 
 
 # ─────────────────────────────────────────────────────────────
@@ -37,29 +43,28 @@ def _has_analyst_role(user: discord.Member) -> bool:
 
 async def _log_blacklist_change(
     guild: discord.Guild,
-    action: str,           # "adicionado" | "removido"
+    action: str,
     player_id: str,
     reason: str,
     actor: discord.Member,
     case_id: str | None = None,
 ):
-    """Posta log automático no canal #historico-exposed."""
     historico_ch = discord.utils.get(guild.text_channels, name=HISTORICO_EXPOSED_CHANNEL)
     if not historico_ch:
         return
-    is_add  = action == "adicionado"
-    color   = DANGER if is_add else 0x2ECC71
-    emoji   = "✅" if is_add else "❌"
-    embed   = discord.Embed(
+    is_add = action == "adicionado"
+    color  = DANGER if is_add else SUCCESS
+    emoji  = "🚫" if is_add else "✅"
+    embed  = discord.Embed(
         title=f"{emoji} Blacklist — Jogador {action.capitalize()}",
         color=color,
     )
-    embed.add_field(name="ID Discord", value=f"`{player_id}`",      inline=True)
-    embed.add_field(name="Por",        value=actor.mention,         inline=True)
+    embed.add_field(name="ID Discord", value=f"`{player_id}`", inline=True)
+    embed.add_field(name="Por",        value=actor.mention,    inline=True)
     if case_id:
-        embed.add_field(name="Caso",   value=f"`{case_id}`",        inline=True)
-    embed.add_field(name="Motivo",     value=reason or "—",         inline=False)
-    embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
+        embed.add_field(name="Caso",   value=f"`{case_id}`",   inline=True)
+    embed.add_field(name="Motivo",     value=reason or "—",    inline=False)
+    embed.set_footer(text=f"🕐 {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
     await historico_ch.send(embed=embed)
 
 
@@ -70,40 +75,37 @@ async def _log_blacklist_change(
 def build_case_embed(doc: dict) -> discord.Embed:
     status_colors = {
         "aguardando_analise": THEME,
-        "em_analise":         0xFFA726,
+        "em_analise":         ORANGE,
         "confirmado":         DANGER,
-        "inconclusivo":       0x95A5A6,
-        "invalido":           0x7F8C8D,
+        "inconclusivo":       GRAY,
+        "invalido":           GRAY,
     }
     status_labels = {
-        "aguardando_analise": "Aguardando",
-        "em_analise":         "Em análise",
-        "confirmado":         "Confirmado — Blacklist",
-        "inconclusivo":       "Inconclusivo",
-        "invalido":           "Inválido",
+        "aguardando_analise": "⏳ Aguardando",
+        "em_analise":         "🔍 Em análise",
+        "confirmado":         "🚫 Confirmado — Blacklist",
+        "inconclusivo":       "❓ Inconclusivo",
+        "invalido":           "✖ Inválido",
     }
     status = doc.get("status", "aguardando_analise")
     embed  = discord.Embed(
-        title=f"Caso {doc.get('case_id', '—')}",
-        description=f"**Motivo:** {doc.get('motivo', '—')}",
-        color=status_colors.get(status, THEME)
+        title=f"🗂️ Caso {doc.get('case_id', '—')}",
+        description=f"**Motivo da denúncia:** {doc.get('motivo', '—')}",
+        color=status_colors.get(status, THEME),
     )
-    embed.add_field(name="Denunciante", value=f"<@{doc.get('reporter_id', '?')}>",  inline=True)
-    embed.add_field(name="Acusado",
-                    value=f"<@{doc['accused_id']}>" if doc.get("accused_id") else "—",
-                    inline=True)
-    embed.add_field(name="Partida",  value=f"`{doc.get('match_id', '—')}`",         inline=True)
-    embed.add_field(name="Status",   value=status_labels.get(status, status),       inline=True)
+    embed.add_field(name="Denunciante", value=f"<@{doc.get('reporter_id', '?')}>",                    inline=True)
+    embed.add_field(name="Acusado",     value=f"<@{doc['accused_id']}>" if doc.get("accused_id") else "—", inline=True)
+    embed.add_field(name="Partida",     value=f"`{doc.get('match_id', '—')}`",                        inline=True)
+    embed.add_field(name="Status",      value=status_labels.get(status, status),                      inline=True)
     if doc.get("analyst_id"):
-        embed.add_field(name="Analista", value=f"<@{doc['analyst_id']}>",           inline=True)
+        embed.add_field(name="Analista", value=f"<@{doc['analyst_id']}>",                             inline=True)
     if doc.get("evidencia_url"):
-        embed.add_field(name="Evidência",
-                        value=f"[Ver evidência]({doc['evidencia_url']})",            inline=False)
+        embed.add_field(name="Evidência", value=f"[Ver evidência]({doc['evidencia_url']})",           inline=False)
     if doc.get("decision_reason"):
-        embed.add_field(name="Decisão", value=doc["decision_reason"],               inline=False)
+        embed.add_field(name="Decisão",   value=doc["decision_reason"],                              inline=False)
     created = doc.get("created_at")
-    if created:
-        embed.set_footer(text=f"Aberto em {created.strftime('%d/%m/%Y %H:%M')} UTC")
+    footer  = f"🕐 Aberto em {created.strftime('%d/%m/%Y %H:%M')} UTC" if created else "Caso de análise"
+    embed.set_footer(text=footer)
     return embed
 
 
@@ -123,9 +125,10 @@ class AnalystCaseView(discord.ui.View):
         try:
             if interaction.message and interaction.message.embeds:
                 title = interaction.message.embeds[0].title or ""
-                parts = title.split(" ", 1)
-                if len(parts) == 2:
-                    return parts[1].strip()
+                # título: "🗂️ Caso CASE-XXXX"
+                parts = title.split(" ", 2)
+                if len(parts) == 3:
+                    return parts[2].strip()
         except Exception:
             pass
         return self.case_id
@@ -135,11 +138,9 @@ class AnalystCaseView(discord.ui.View):
     async def assumir(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
             await interaction.response.send_message(
-                "Apenas analistas podem assumir casos.", ephemeral=True)
+                "Apenas **Analistas** podem assumir casos.", ephemeral=True)
             return
-
         case_id = self._get_case_id(interaction)
-
         async with _get_case_lock(case_id):
             from config.database import db
             doc = await db.get_collection("analysis_cases").find_one({"case_id": case_id})
@@ -162,9 +163,7 @@ class AnalystCaseView(discord.ui.View):
             doc["status"]       = "em_analise"
             doc["analyst_id"]   = str(interaction.user.id)
             doc["analyst_name"] = interaction.user.name
-
         _case_locks.pop(case_id, None)
-
         new_embed = build_case_embed(doc)
         new_view  = AnalystDecisionView(case_id=case_id)
         await interaction.response.edit_message(embed=new_embed, view=new_view)
@@ -177,7 +176,7 @@ class AnalystCaseView(discord.ui.View):
         doc = await db.get_collection("analysis_cases").find_one({"case_id": case_id})
         url = doc.get("evidencia_url") if doc else None
         if url:
-            await interaction.response.send_message(f"Evidência: {url}", ephemeral=True)
+            await interaction.response.send_message(f"🔗 Evidência: {url}", ephemeral=True)
         else:
             await interaction.response.send_message("Nenhuma evidência anexada.", ephemeral=True)
 
@@ -198,14 +197,14 @@ class AnalystDecisionView(discord.ui.View):
         try:
             if interaction.message and interaction.message.embeds:
                 title = interaction.message.embeds[0].title or ""
-                parts = title.split(" ", 1)
-                if len(parts) == 2:
-                    return parts[1].strip()
+                parts = title.split(" ", 2)
+                if len(parts) == 3:
+                    return parts[2].strip()
         except Exception:
             pass
         return self.case_id
 
-    @discord.ui.button(label="Confirmar Hack → Blacklist", style=discord.ButtonStyle.danger,
+    @discord.ui.button(label="Confirmar → Blacklist", style=discord.ButtonStyle.danger,
                        emoji="🚫", custom_id="btn_confirmar_hack", row=0)
     async def confirmar(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
@@ -244,7 +243,7 @@ class _DecisionModal(discord.ui.Modal):
         label="Motivo / Justificativa",
         style=discord.TextStyle.paragraph,
         placeholder="Descreva o motivo da decisão...",
-        min_length=10, max_length=500
+        min_length=10, max_length=500,
     )
 
     def __init__(self, case_id: str, decisao: str, title: str):
@@ -268,7 +267,6 @@ class _DecisionModal(discord.ui.Modal):
                 return
 
         motivo = self.motivo.value
-
         await db.get_collection("analysis_cases").update_one(
             {"case_id": self.case_id},
             {"$set": {
@@ -285,8 +283,7 @@ class _DecisionModal(discord.ui.Modal):
             accused = (doc.get("accused_id") or "").strip()
             if not accused:
                 accused = doc.get("reporter_id", "")
-                logger.warning(
-                    f"[Analyst] Caso {self.case_id} sem accused_id — usando reporter como fallback")
+                logger.warning(f"[Analyst] Caso {self.case_id} sem accused_id — usando reporter como fallback")
 
             await db.get_collection("blacklist").update_one(
                 {"discord_id": accused},
@@ -298,23 +295,22 @@ class _DecisionModal(discord.ui.Modal):
                     "added_by_name": interaction.user.name,
                     "added_at":      utcnow(),
                 }},
-                upsert=True
+                upsert=True,
             )
 
-            # Posta no #exposed (painel de gestão)
-            exposed = discord.utils.get(
-                interaction.guild.text_channels, name=EXPOSED_CHANNEL_NAME)
+            exposed = discord.utils.get(interaction.guild.text_channels, name=EXPOSED_CHANNEL_NAME)
             if exposed:
                 bl_embed = discord.Embed(
-                    title="Jogador adicionado à Blacklist", color=DANGER)
-                bl_embed.add_field(name="ID",       value=f"`{accused}`",           inline=True)
-                bl_embed.add_field(name="Caso",     value=f"`{self.case_id}`",      inline=True)
-                bl_embed.add_field(name="Motivo",   value=motivo,                   inline=False)
-                bl_embed.add_field(name="Analista", value=interaction.user.mention, inline=True)
-                bl_embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
+                    title="🚫 Jogador adicionado à Blacklist",
+                    color=DANGER,
+                )
+                bl_embed.add_field(name="ID Discord", value=f"`{accused}`",           inline=True)
+                bl_embed.add_field(name="Caso",       value=f"`{self.case_id}`",      inline=True)
+                bl_embed.add_field(name="Analista",   value=interaction.user.mention, inline=True)
+                bl_embed.add_field(name="Motivo",     value=motivo,                   inline=False)
+                bl_embed.set_footer(text=f"🕐 {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
                 await exposed.send(embed=bl_embed)
 
-            # ← NOVO: loga no #historico-exposed
             await _log_blacklist_change(
                 guild=interaction.guild,
                 action="adicionado",
@@ -328,15 +324,17 @@ class _DecisionModal(discord.ui.Modal):
         try:
             reporter = await interaction.client.fetch_user(int(doc["reporter_id"]))
             dm_map = {
-                "confirmado":   "Suspeito confirmado — adicionado à blacklist.",
-                "inconclusivo": "Análise inconclusiva — caso arquivado.",
-                "invalido":     "Denúncia considerada inválida — caso encerrado.",
+                "confirmado":   "✅ Suspeito confirmado — adicionado à blacklist.",
+                "inconclusivo": "❓ Análise inconclusiva — caso arquivado.",
+                "invalido":     "✖ Denúncia considerada inválida — caso encerrado.",
             }
             dm_embed = discord.Embed(
-                title=f"Resultado — {self.case_id}",
+                title=f"📋 Resultado — {self.case_id}",
                 description=dm_map.get(self.decisao, self.decisao),
-                color=THEME)
+                color=THEME,
+            )
             dm_embed.add_field(name="Motivo", value=motivo, inline=False)
+            dm_embed.set_footer(text="X1 Frifas — Sistema de Análise")
             await reporter.send(embed=dm_embed)
         except Exception:
             pass
@@ -347,22 +345,22 @@ class _DecisionModal(discord.ui.Modal):
 
 
 # ─────────────────────────────────────────────────────────────
-# Painel fixo no #exposed
+# Painel fixo no #exposed  (Blacklist)
 # ─────────────────────────────────────────────────────────────
 
 def build_exposed_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Painel — Blacklist",
+        title="🚫 Painel — Blacklist",
         description=(
             "Gerencie a lista de jogadores banidos por comportamento suspeito.\n\n"
-            "**Adicionar** — abre modal para inserir ID e motivo\n"
+            "**Adicionar** — insere jogador com ID e motivo\n"
             "**Buscar** — verifica se um jogador está na lista\n"
-            "**Listar** — exibe os últimos 20 adicionados\n"
+            "**Listar** — exibe os últimos 20 registros\n"
             "**Remover** — remove jogador da blacklist"
         ),
-        color=DANGER
+        color=DANGER,
     )
-    embed.set_footer(text="Acesso restrito — Analyst e Admin")
+    embed.set_footer(text="🔒 Acesso restrito — Analista e ADM")
     return embed
 
 
@@ -375,7 +373,7 @@ class ExposedPanelView(discord.ui.View):
                        emoji="🚫", custom_id="exposed_add", row=0)
     async def add_blacklist(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
-            await interaction.response.send_message("Apenas analistas e admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **Analistas** e **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_BlacklistAddModal())
 
@@ -383,7 +381,7 @@ class ExposedPanelView(discord.ui.View):
                        emoji="🔍", custom_id="exposed_search", row=0)
     async def search_blacklist(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
-            await interaction.response.send_message("Apenas analistas e admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **Analistas** e **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_BlacklistSearchModal())
 
@@ -391,33 +389,33 @@ class ExposedPanelView(discord.ui.View):
                        emoji="📋", custom_id="exposed_list", row=0)
     async def list_blacklist(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
-            await interaction.response.send_message("Apenas analistas e admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **Analistas** e **ADM**.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         from config.database import db
-        docs = await db.get_collection("blacklist").find({}).sort(
-            "added_at", -1).limit(20).to_list(20)
+        docs = await db.get_collection("blacklist").find({}).sort("added_at", -1).limit(20).to_list(20)
         if not docs:
             await interaction.followup.send("Blacklist vazia.", ephemeral=True)
             return
-        embed = discord.Embed(title="Blacklist — Últimos 20", color=DANGER)
+        embed = discord.Embed(title="🚫 Blacklist — Últimos 20", color=DANGER)
         for doc in docs:
             ts     = doc.get("added_at")
             ts_str = ts.strftime("%d/%m/%Y") if ts else "—"
             embed.add_field(
                 name=f"`{doc['discord_id']}`",
                 value=(
-                    f"Motivo: {doc.get('reason','—')} | "
+                    f"Motivo: {doc.get('reason','—')[:60]}\n"
                     f"Por: {doc.get('added_by_name','—')} | {ts_str}"
                 ),
-                inline=False)
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Remover da Blacklist", style=discord.ButtonStyle.secondary,
                        emoji="✅", custom_id="exposed_remove", row=1)
     async def remove_blacklist(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _has_analyst_role(interaction.user):
-            await interaction.response.send_message("Apenas analistas e admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **Analistas** e **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_BlacklistRemoveModal())
 
@@ -436,13 +434,11 @@ class _BlacklistAddModal(discord.ui.Modal, title="Adicionar à Blacklist"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         from config.database import db
-
         pid = self.player_id.value.strip()
         if not pid.isdigit():
             await interaction.followup.send(
                 "ID inválido. O ID Discord deve conter apenas números.", ephemeral=True)
             return
-
         await db.get_collection("blacklist").update_one(
             {"discord_id": pid},
             {"$set": {
@@ -452,19 +448,17 @@ class _BlacklistAddModal(discord.ui.Modal, title="Adicionar à Blacklist"):
                 "added_by_name": interaction.user.name,
                 "added_at":      utcnow(),
             }},
-            upsert=True
+            upsert=True,
         )
-
-        # Confirmação no canal #exposed
         embed = discord.Embed(
-            title="Blacklist — Jogador Adicionado",
-            description=f"ID: `{pid}`\nMotivo: {self.motivo.value}",
-            color=DANGER)
-        embed.add_field(name="Analista", value=interaction.user.mention, inline=True)
-        embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
+            title="🚫 Blacklist — Jogador Adicionado",
+            color=DANGER,
+        )
+        embed.add_field(name="ID Discord", value=f"`{pid}`",           inline=True)
+        embed.add_field(name="Analista",   value=interaction.user.mention, inline=True)
+        embed.add_field(name="Motivo",     value=self.motivo.value,    inline=False)
+        embed.set_footer(text=f"🕐 {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         await interaction.channel.send(embed=embed)
-
-        # ← NOVO: loga no #historico-exposed
         await _log_blacklist_change(
             guild=interaction.guild,
             action="adicionado",
@@ -472,8 +466,7 @@ class _BlacklistAddModal(discord.ui.Modal, title="Adicionar à Blacklist"):
             reason=self.motivo.value,
             actor=interaction.user,
         )
-
-        await interaction.followup.send("Adicionado com sucesso.", ephemeral=True)
+        await interaction.followup.send("✅ Adicionado com sucesso.", ephemeral=True)
 
 
 class _BlacklistSearchModal(discord.ui.Modal, title="Buscar na Blacklist"):
@@ -485,25 +478,23 @@ class _BlacklistSearchModal(discord.ui.Modal, title="Buscar na Blacklist"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         from config.database import db
-
         pid = self.player_id.value.strip()
         if not pid.isdigit():
             await interaction.followup.send(
                 "ID inválido. O ID Discord deve conter apenas números.", ephemeral=True)
             return
-
         doc = await db.get_collection("blacklist").find_one({"discord_id": pid})
         if not doc:
             await interaction.followup.send(
-                f"Jogador `{pid}` não está na blacklist.", ephemeral=True)
+                f"Jogador `{pid}` **não está** na blacklist.", ephemeral=True)
             return
-        embed = discord.Embed(title="Blacklist — Encontrado", color=DANGER)
-        embed.add_field(name="ID",       value=f"`{pid}`",                      inline=True)
-        embed.add_field(name="Motivo",   value=doc.get("reason", "—"),          inline=False)
-        embed.add_field(name="Analista", value=doc.get("added_by_name", "—"),   inline=True)
+        embed = discord.Embed(title="🔍 Blacklist — Encontrado", color=DANGER)
+        embed.add_field(name="ID Discord",  value=f"`{pid}`",                     inline=True)
+        embed.add_field(name="Analista",    value=doc.get("added_by_name", "—"),  inline=True)
+        embed.add_field(name="Motivo",      value=doc.get("reason", "—"),         inline=False)
         ts = doc.get("added_at")
         if ts:
-            embed.add_field(name="Adicionado", value=ts.strftime("%d/%m/%Y"),   inline=True)
+            embed.add_field(name="Adicionado", value=ts.strftime("%d/%m/%Y"),    inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -516,22 +507,22 @@ class _BlacklistRemoveModal(discord.ui.Modal, title="Remover da Blacklist"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         from config.database import db
-
         pid = self.player_id.value.strip()
         if not pid.isdigit():
             await interaction.followup.send(
                 "ID inválido. O ID Discord deve conter apenas números.", ephemeral=True)
             return
-
-        # Busca antes de deletar para guardar o motivo no log
-        doc = await db.get_collection("blacklist").find_one({"discord_id": pid})
-
+        doc    = await db.get_collection("blacklist").find_one({"discord_id": pid})
         result = await db.get_collection("blacklist").delete_one({"discord_id": pid})
         if result.deleted_count:
-            await interaction.channel.send(
-                f"Jogador `{pid}` removido da blacklist por {interaction.user.mention}.")
-
-            # ← NOVO: loga no #historico-exposed
+            embed = discord.Embed(
+                title="✅ Blacklist — Jogador Removido",
+                color=SUCCESS,
+            )
+            embed.add_field(name="ID Discord", value=f"`{pid}`",              inline=True)
+            embed.add_field(name="Por",        value=interaction.user.mention, inline=True)
+            embed.set_footer(text=f"🕐 {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
+            await interaction.channel.send(embed=embed)
             await _log_blacklist_change(
                 guild=interaction.guild,
                 action="removido",
@@ -539,8 +530,7 @@ class _BlacklistRemoveModal(discord.ui.Modal, title="Remover da Blacklist"):
                 reason=doc.get("reason", "—") if doc else "—",
                 actor=interaction.user,
             )
-
-            await interaction.followup.send("Removido com sucesso.", ephemeral=True)
+            await interaction.followup.send("✅ Removido com sucesso.", ephemeral=True)
         else:
             await interaction.followup.send(
                 f"Jogador `{pid}` não encontrado na blacklist.", ephemeral=True)
@@ -552,22 +542,25 @@ class _BlacklistRemoveModal(discord.ui.Modal, title="Remover da Blacklist"):
 
 def build_analise_panel_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Solicitação de Análise de Partida",
+        title="🔎 Solicitação de Análise de Partida",
         description=(
             "Suspeita que um jogador usou hacks na sua partida?\n\n"
             "Clique em **Solicitar Análise** e preencha as informações. "
-            "Nossa equipe irá investigar e você receberá o resultado por DM.\n\n"
+            "Nossa equipe irá investigar e você receberá o resultado por **DM**.\n\n"
             "**O que você vai precisar informar:**\n"
             "• ID da partida suspeita\n"
             "• ID Discord do jogador acusado\n"
             "• Descrição do comportamento suspeito\n"
-            "• Link de evidência (opcional mas recomendado)"
+            "• Link de evidência *(opcional, mas recomendado)*"
         ),
-        color=THEME
+        color=THEME,
     )
-    embed.add_field(name="Tempo de resposta",
-                    value="Nossa equipe analisa em até 48h.", inline=False)
-    embed.set_footer(text="Denúncias falsas podem resultar em punição.")
+    embed.add_field(
+        name="⏱️ Tempo de resposta",
+        value="Nossa equipe analisa em até **48 horas**.",
+        inline=False,
+    )
+    embed.set_footer(text="⚠️ Denúncias falsas podem resultar em punição — X1 Frifas")
     return embed
 
 
@@ -599,7 +592,7 @@ class AnalisePanelView(discord.ui.View):
             "inconclusivo":       "❓ Inconclusivo",
             "invalido":           "✖ Inválido",
         }
-        embed = discord.Embed(title="Seus casos", color=THEME)
+        embed = discord.Embed(title="📋 Seus casos", color=THEME)
         for doc in docs:
             status = status_labels.get(doc.get("status", ""), doc.get("status", "—"))
             embed.add_field(
@@ -609,7 +602,9 @@ class AnalisePanelView(discord.ui.View):
                     f"**Status:** {status}\n"
                     f"**Motivo:** {doc.get('motivo','—')[:60]}"
                 ),
-                inline=False)
+                inline=False,
+            )
+        embed.set_footer(text="X1 Frifas — Sistema de Análise")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -635,16 +630,14 @@ class _SolicitarAnaliseModal(discord.ui.Modal, title="Solicitar Análise de Part
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         from config.database import db
-
         accused = self.accused_id.value.strip()
         if not accused.isdigit():
             await interaction.followup.send(
                 "ID do acusado inválido. Deve conter apenas números.", ephemeral=True)
             return
-
         caso_ativo = await db.get_collection("analysis_cases").find_one({
             "reporter_id": str(interaction.user.id),
-            "status": {"$in": ["aguardando_analise", "em_analise"]}
+            "status": {"$in": ["aguardando_analise", "em_analise"]},
         })
         if caso_ativo:
             await interaction.followup.send(
@@ -652,13 +645,11 @@ class _SolicitarAnaliseModal(discord.ui.Modal, title="Solicitar Análise de Part
                 "Aguarde a análise antes de abrir outro.",
                 ephemeral=True)
             return
-
         case_id = (
             f"CASE-{self.match_id.value[:8].upper()}"
             f"-{str(interaction.user.id)[-4:]}"
             f"-{int(time.time())}"
         )
-
         doc = {
             "case_id":         case_id,
             "reporter_id":     str(interaction.user.id),
@@ -674,21 +665,19 @@ class _SolicitarAnaliseModal(discord.ui.Modal, title="Solicitar Análise de Part
             "closed_at":       None,
         }
         await db.get_collection("analysis_cases").insert_one(doc)
-
-        # ← ATUALIZADO: card vai para #casos-analisar (era #fila-analistas)
-        casos_ch = discord.utils.get(
-            interaction.guild.text_channels, name=CASOS_ANALISAR_CHANNEL)
+        casos_ch = discord.utils.get(interaction.guild.text_channels, name=CASOS_ANALISAR_CHANNEL)
         if casos_ch:
             await casos_ch.send(
                 embed=build_case_embed(doc),
                 view=AnalystCaseView(case_id=case_id))
-
         await interaction.followup.send(
             embed=discord.Embed(
-                title="Solicitação enviada",
+                title="✅ Solicitação enviada",
                 description=(
                     f"Caso `{case_id}` criado com sucesso.\n"
-                    "Nossa equipe irá analisar e você receberá o resultado por DM."
+                    "Nossa equipe irá analisar e você receberá o resultado por **DM**."
                 ),
-                color=THEME),
-            ephemeral=True)
+                color=THEME,
+            ),
+            ephemeral=True,
+        )

@@ -4,13 +4,21 @@ extra_panels.py — Painéis fixos para canais adicionais.
 from __future__ import annotations
 import discord
 import os
+import re
 from utils.datetime_utils import utcnow
 from utils.logger import logger
-import re
+from services.channel_service import CONTROLLER_ROLE_NAME, ADM_ROLE_NAME
+
+THEME  = 0xFFD54F   # amarelo  — mediador / renovação
+THEME2 = 0xFFA726   # laranja  — admin / influencer
+SUCCESS = 0x2ECC71  # verde    — confirmações
 
 
-THEME  = 0xFFD54F
-THEME2 = 0xFFA726
+def _is_mediator(interaction: discord.Interaction) -> bool:
+    """Controller ou ADM podem interagir com painéis de mediador."""
+    if interaction.user.guild_permissions.administrator:
+        return True
+    return bool({r.name for r in interaction.user.roles} & {CONTROLLER_ROLE_NAME, ADM_ROLE_NAME})
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -19,7 +27,7 @@ THEME2 = 0xFFA726
 
 def build_renovacao_panel_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Renovação de Licença — Mediador",
+        title="🔄 Renovação de Licença — Mediador",
         description=(
             "Gerencie sua licença de mediador aqui.\n\n"
             "**Como funciona:**\n"
@@ -32,14 +40,18 @@ def build_renovacao_panel_embed() -> discord.Embed:
             "• 1 dia antes do vencimento\n"
             "• No dia do vencimento"
         ),
-        color=THEME
+        color=THEME,
     )
-    embed.add_field(name="Planos disponíveis", value=(
-        "`7 dias`  — R$ 10,00\n"
-        "`15 dias` — R$ 18,00\n"
-        "`30 dias` — R$ 25,00"
-    ), inline=False)
-    embed.set_footer(text="Pagamento via PIX — QR Code enviado por DM")
+    embed.add_field(
+        name="💳 Planos disponíveis",
+        value=(
+            "`7 dias`  — R$ 10,00\n"
+            "`15 dias` — R$ 18,00\n"
+            "`30 dias` — R$ 25,00"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Pagamento via PIX — QR Code enviado por DM | X1 Frifas")
     return embed
 
 
@@ -51,11 +63,9 @@ class RenovacaoPanelView(discord.ui.View):
     @discord.ui.button(label="Renovar Licença", style=discord.ButtonStyle.success,
                        emoji="🔄", custom_id="renovacao_panel_renovar")
     async def renovar(self, interaction: discord.Interaction, _: discord.ui.Button):
-        roles = {r.name for r in interaction.user.roles}
-        if not bool(roles & {"Controller", "Mediador", "Mediator"}) and \
-           not interaction.user.guild_permissions.administrator:
+        if not _is_mediator(interaction):
             await interaction.response.send_message(
-                "Apenas mediadores podem renovar a licença.", ephemeral=True)
+                "Apenas **mediadores** (Controller) podem renovar a licença.", ephemeral=True)
             return
         await interaction.response.send_modal(_RenovacaoPlanoModal())
 
@@ -66,9 +76,10 @@ class RenovacaoPanelView(discord.ui.View):
         from config.database import db
         doc = await db.get_collection("mediators").find_one({"user_id": interaction.user.id})
         if not doc:
-            await interaction.followup.send("Você não está cadastrado como mediador.", ephemeral=True)
+            await interaction.followup.send(
+                "Você não está cadastrado como mediador.", ephemeral=True)
             return
-        embed = discord.Embed(title="Sua Licença", color=THEME)
+        embed = discord.Embed(title="📋 Sua Licença", color=THEME)
         exp   = doc.get("expiration_date")
         if exp:
             delta  = (exp - utcnow()).days
@@ -80,7 +91,9 @@ class RenovacaoPanelView(discord.ui.View):
             embed.description = "Sem data de vencimento cadastrada."
         last = doc.get("last_renewal_at")
         if last:
-            embed.add_field(name="Última renovação", value=last.strftime("%d/%m/%Y"), inline=True)
+            embed.add_field(
+                name="Última renovação", value=last.strftime("%d/%m/%Y"), inline=True)
+        embed.set_footer(text="X1 Frifas — Licença de Mediador")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -88,8 +101,7 @@ class _RenovacaoPlanoModal(discord.ui.Modal, title="Escolha seu plano de renova�
     plano = discord.ui.TextInput(
         label="Plano (7, 15 ou 30 dias)",
         placeholder="Digite 7, 15 ou 30",
-        min_length=1,
-        max_length=2,
+        min_length=1, max_length=2,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -101,7 +113,6 @@ class _RenovacaoPlanoModal(discord.ui.Modal, title="Escolha seu plano de renova�
             await interaction.response.send_message(
                 "Plano inválido. Digite 7, 15 ou 30.", ephemeral=True)
             return
-
         await interaction.response.defer(ephemeral=True)
         from services.efi_pay_service import efi_pay_service
         price  = float(os.getenv(f"RENEWAL_PRICE_{dias}D", "25.00"))
@@ -114,14 +125,12 @@ class _RenovacaoPlanoModal(discord.ui.Modal, title="Escolha seu plano de renova�
             await interaction.followup.send(
                 "Erro ao gerar cobrança. Tente novamente.", ephemeral=True)
             return
-
-        # Usa _send_charge_dm — evita import circular com renewal_cog
         from cogs.renewal_cog import _send_charge_dm
         sent = await _send_charge_dm(
             interaction.user, charge, dias, price, interaction.client)
         if sent:
             await interaction.followup.send(
-                "Cobrança gerada e enviada para sua **DM**. "
+                "✅ Cobrança gerada e enviada para sua **DM**. "
                 "Você tem **10 minutos** para pagar antes de expirar.",
                 ephemeral=True)
         else:
@@ -132,20 +141,21 @@ class _RenovacaoPlanoModal(discord.ui.Modal, title="Escolha seu plano de renova�
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2. #pix-mediadores
+# 2. #cadastra-pix
 # ═══════════════════════════════════════════════════════════════
 
 def build_pix_panel_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Chave PIX — Mediadores",
+        title="💳 Chave PIX — Mediadores",
         description=(
             "Cadastre ou atualize sua chave PIX para receber os pagamentos das partidas.\n\n"
-            "**Chaves aceitas:** CPF, CNPJ, e-mail, telefone ou chave aleatória\n\n"
+            "**Tipo aceito:** E-mail\n"
+            "Exemplo: `seuemail@gmail.com`\n\n"
             "Sua chave fica visível apenas para mediadores e administradores."
         ),
-        color=THEME
+        color=THEME,
     )
-    embed.set_footer(text="Mantenha sua chave sempre atualizada")
+    embed.set_footer(text="Mantenha sua chave sempre atualizada | X1 Frifas")
     return embed
 
 
@@ -157,11 +167,9 @@ class PixPanelView(discord.ui.View):
     @discord.ui.button(label="Cadastrar / Atualizar PIX", style=discord.ButtonStyle.success,
                        emoji="💳", custom_id="pix_panel_cadastrar")
     async def cadastrar_pix(self, interaction: discord.Interaction, _: discord.ui.Button):
-        roles = {r.name for r in interaction.user.roles}
-        if not bool(roles & {"Controller", "Mediador", "Mediator"}) and \
-           not interaction.user.guild_permissions.administrator:
+        if not _is_mediator(interaction):
             await interaction.response.send_message(
-                "Apenas mediadores podem cadastrar chave PIX.", ephemeral=True)
+                "Apenas **mediadores** (Controller) podem cadastrar chave PIX.", ephemeral=True)
             return
         await interaction.response.send_modal(_PixCadastroModal())
 
@@ -176,12 +184,14 @@ class PixPanelView(discord.ui.View):
             await interaction.followup.send(
                 "Você não tem chave PIX cadastrada.", ephemeral=True)
             return
-        embed = discord.Embed(title="Sua Chave PIX", color=THEME)
-        embed.add_field(name="Chave", value=f"`{doc['pix_key']}`",     inline=False)
-        embed.add_field(name="Tipo",  value=doc.get("pix_type", "—"), inline=True)
+        embed = discord.Embed(title="💳 Sua Chave PIX", color=THEME)
+        embed.add_field(name="Chave",    value=f"`{doc['pix_key']}`",     inline=False)
+        embed.add_field(name="Tipo",     value=doc.get("pix_type", "—"),  inline=True)
         updated = doc.get("updated_at")
         if updated:
-            embed.add_field(name="Atualizado", value=updated.strftime("%d/%m/%Y"), inline=True)
+            embed.add_field(
+                name="Atualizado", value=updated.strftime("%d/%m/%Y"), inline=True)
+        embed.set_footer(text="X1 Frifas — Chave PIX")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Remover minha chave", style=discord.ButtonStyle.danger,
@@ -192,73 +202,56 @@ class PixPanelView(discord.ui.View):
         result = await db.get_collection("mediator_pix").delete_one(
             {"discord_id": str(interaction.user.id)})
         if result.deleted_count:
-            await interaction.followup.send("Chave PIX removida.", ephemeral=True)
+            await interaction.followup.send("✅ Chave PIX removida.", ephemeral=True)
         else:
             await interaction.followup.send("Nenhuma chave PIX cadastrada.", ephemeral=True)
 
 
-class _PixCadastroModal(discord.ui.Modal, title="Cadastrar Chave PIX (EMAIL)"):
-
+class _PixCadastroModal(discord.ui.Modal, title="Cadastrar Chave PIX"):
     pix_key = discord.ui.TextInput(
-        label="Chave PIX (EMAIL)",
-        placeholder="email@exemplo.com",
-        min_length=5,
-        max_length=150
+        label="Chave PIX (e-mail)",
+        placeholder="seuemail@gmail.com",
+        min_length=5, max_length=150,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-
         await interaction.response.defer(ephemeral=True)
-
         from config.database import db
-
         pix = self.pix_key.value.strip()
-        doc = await db.get_collection("mediator_pix").find_one(
-            {"discord_id": str(interaction.user.id)}
-        )
-        pix_antigo = doc["pix_key"] if doc else None
-
-
-        # ✅ validação de email
-        email_regex = r"^[^@]+@[^@]+\.[^@]+$"
-
-        if not re.match(email_regex, pix):
+        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", pix):
             await interaction.followup.send(
-                "❌ Apenas chave PIX do tipo **EMAIL** é permitida.",
-                ephemeral=True
-            )
+                "❌ Apenas chave PIX do tipo **e-mail** é aceita. Ex: `seuemail@gmail.com`",
+                ephemeral=True)
             return
-
+        doc = await db.get_collection("mediator_pix").find_one(
+            {"discord_id": str(interaction.user.id)})
+        pix_antigo = doc["pix_key"] if doc else None
         await db.get_collection("mediator_pix").update_one(
             {"discord_id": str(interaction.user.id)},
-            {
-                "$set": {
-                    "discord_id": str(interaction.user.id),
-                    "username": interaction.user.name,
-                    "pix_key": pix,
-                    "pix_type": "EMAIL",  # padrão fixo
-                    "updated_at": utcnow(),
-                }
-            },
-            upsert=True
+            {"$set": {
+                "discord_id": str(interaction.user.id),
+                "username":   interaction.user.name,
+                "pix_key":    pix,
+                "pix_type":   "EMAIL",
+                "updated_at": utcnow(),
+            }},
+            upsert=True,
         )
-
         from views.pix_log import PixLog
-
-        logger = PixLog(interaction.client)
-        await logger.send_pix_log(
-            interaction,
-            pix_antigo,
-            pix
+        pix_logger = PixLog(interaction.client)
+        await pix_logger.send_pix_log(interaction, pix_antigo, pix)
+        embed = discord.Embed(
+            title="💳 PIX Atualizado",
+            description=f"Chave PIX cadastrada com sucesso.\n`{pix}`",
+            color=SUCCESS,
         )
+        embed.set_footer(text=f"🕐 {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         await interaction.channel.send(
-            f"{interaction.user.mention} atualizou sua chave PIX."
+            content=f"{interaction.user.mention} atualizou sua chave PIX.",
+            embed=embed,
         )
+        await interaction.followup.send("✅ Chave PIX (e-mail) cadastrada com sucesso!", ephemeral=True)
 
-        await interaction.followup.send(
-            "✅ Chave PIX (EMAIL) atualizada com sucesso!",
-            ephemeral=True
-        )
 
 # ═══════════════════════════════════════════════════════════════
 # 3. #influencers — painel do influencer
@@ -266,15 +259,15 @@ class _PixCadastroModal(discord.ui.Modal, title="Cadastrar Chave PIX (EMAIL)"):
 
 def build_influencer_member_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Painel do Influencer",
+        title="🏆 Painel do Influencer",
         description=(
             "Acompanhe seus resultados como parceiro.\n\n"
             "• **Meus Stats** — membros que você trouxe e comissão acumulada\n"
             "• **Meu Faturamento** — detalhamento da sua comissão"
         ),
-        color=THEME
+        color=THEME,
     )
-    embed.set_footer(text="Seus dados são atualizados em tempo real")
+    embed.set_footer(text="Seus dados são atualizados em tempo real | X1 Frifas")
     return embed
 
 
@@ -295,7 +288,7 @@ class InfluencerMemberView(discord.ui.View):
                 "Você não está cadastrado como influencer.", ephemeral=True)
             return
         inf   = stats["influencer"]
-        embed = discord.Embed(title="Seus Stats", color=THEME)
+        embed = discord.Embed(title="📊 Seus Stats", color=THEME)
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
         embed.add_field(name="Link de convite",  value=f"`{inf.get('invite_code','—')}`",              inline=True)
         embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",          inline=True)
@@ -312,26 +305,29 @@ class InfluencerMemberView(discord.ui.View):
         stats = await influencer_service.get_stats(
             str(interaction.user.id), str(interaction.guild_id))
         if not stats:
-            await interaction.followup.send("Você não está cadastrado como influencer.", ephemeral=True)
+            await interaction.followup.send(
+                "Você não está cadastrado como influencer.", ephemeral=True)
             return
         inf   = stats["influencer"]
-        embed = discord.Embed(title="Faturamento Acumulado", color=THEME)
-        embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",               inline=True)
-        embed.add_field(name="Comissão/membro",  value=f"R$ {inf.get('commission_per_member', 2):.2f}",     inline=True)
-        embed.add_field(name="Total acumulado",  value=f"**R$ {stats['commission_due']:.2f}**",             inline=False)
+        embed = discord.Embed(title="💰 Faturamento Acumulado", color=THEME)
+        embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",           inline=True)
+        embed.add_field(name="Comissão/membro",  value=f"R$ {inf.get('commission_per_member', 2):.2f}", inline=True)
+        embed.add_field(name="Total acumulado",  value=f"**R$ {stats['commission_due']:.2f}**",         inline=False)
         created = inf.get("created_at")
         if created:
-            embed.set_footer(text=f"Parceiro desde {created.strftime('%d/%m/%Y')}")
+            embed.set_footer(text=f"Parceiro desde {created.strftime('%d/%m/%Y')} | X1 Frifas")
+        else:
+            embed.set_footer(text="X1 Frifas")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4. #influencers-admin — painel admin
+# 4. #influencers-controle — painel admin
 # ═══════════════════════════════════════════════════════════════
 
 def build_influencer_admin_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Painel Admin — Influencers",
+        title="⚙️ Painel ADM — Influencers",
         description=(
             "Gerencie todos os influencers parceiros.\n\n"
             "• **Ranking Geral** — top por membros trazidos\n"
@@ -339,9 +335,9 @@ def build_influencer_admin_embed() -> discord.Embed:
             "• **Buscar Influencer** — stats completos de um parceiro\n"
             "• **Adicionar / Remover** — cadastro de influencers"
         ),
-        color=THEME2
+        color=THEME2,
     )
-    embed.set_footer(text="Canal restrito — apenas Administradores")
+    embed.set_footer(text="🔒 Canal restrito — apenas ADM | X1 Frifas")
     return embed
 
 
@@ -357,12 +353,12 @@ class InfluencerAdminView(discord.ui.View):
                        emoji="🏆", custom_id="inf_admin_ranking", row=0)
     async def ranking(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not self._check_admin(interaction):
-            await interaction.response.send_message("Apenas admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **ADM**.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         from services.influencer_service import influencer_service
         rows  = await influencer_service.get_ranking(str(interaction.guild_id), limit=10)
-        embed = discord.Embed(title="Ranking de Influencers", color=THEME2)
+        embed = discord.Embed(title="🏆 Ranking de Influencers", color=THEME2)
         if not rows:
             embed.description = "Nenhum influencer cadastrado."
         else:
@@ -380,24 +376,25 @@ class InfluencerAdminView(discord.ui.View):
                        emoji="📈", custom_id="inf_admin_status", row=0)
     async def status_geral(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not self._check_admin(interaction):
-            await interaction.response.send_message("Apenas admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **ADM**.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         from config.database import db
         from services.influencer_service import influencer_service
-        total_inf = await db.get_collection("influencers").count_documents({"is_active": True})
-        rows      = await influencer_service.get_ranking(str(interaction.guild_id), limit=100)
+        total_inf     = await db.get_collection("influencers").count_documents({"is_active": True})
+        rows          = await influencer_service.get_ranking(str(interaction.guild_id), limit=100)
         total_comm    = sum(r["commission"] for r in rows)
         total_members = sum(r["total_members"] for r in rows)
         top = rows[0] if rows else None
-        embed = discord.Embed(title="Status Geral — Influencers", color=THEME2)
-        embed.add_field(name="Influencers ativos",    value=f"`{total_inf}`",     inline=True)
-        embed.add_field(name="Membros trazidos",      value=f"`{total_members}`", inline=True)
+        embed = discord.Embed(title="📈 Status Geral — Influencers", color=THEME2)
+        embed.add_field(name="Influencers ativos",    value=f"`{total_inf}`",       inline=True)
+        embed.add_field(name="Membros trazidos",      value=f"`{total_members}`",   inline=True)
         embed.add_field(name="Comissão total devida", value=f"R$ {total_comm:.2f}", inline=True)
         if top:
-            embed.add_field(name="Melhor influencer",
-                            value=f"**{top['username']}** — `{top['total_members']}` membros",
-                            inline=False)
+            embed.add_field(
+                name="Melhor influencer",
+                value=f"**{top['username']}** — `{top['total_members']}` membros",
+                inline=False)
         embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -405,7 +402,7 @@ class InfluencerAdminView(discord.ui.View):
                        emoji="🔍", custom_id="inf_admin_buscar", row=0)
     async def buscar(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not self._check_admin(interaction):
-            await interaction.response.send_message("Apenas admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_BuscarInfluencerModal())
 
@@ -413,7 +410,7 @@ class InfluencerAdminView(discord.ui.View):
                        emoji="➕", custom_id="inf_admin_add", row=1)
     async def adicionar(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not self._check_admin(interaction):
-            await interaction.response.send_message("Apenas admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_AdicionarInfluencerModal())
 
@@ -421,7 +418,7 @@ class InfluencerAdminView(discord.ui.View):
                        emoji="➖", custom_id="inf_admin_remove", row=1)
     async def remover(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not self._check_admin(interaction):
-            await interaction.response.send_message("Apenas admins.", ephemeral=True)
+            await interaction.response.send_message("Apenas **ADM**.", ephemeral=True)
             return
         await interaction.response.send_modal(_RemoverInfluencerModal())
 
@@ -442,7 +439,7 @@ class _BuscarInfluencerModal(discord.ui.Modal, title="Stats de Influencer"):
         inf    = stats["influencer"]
         member = interaction.guild.get_member(int(self.membro_id.value.strip()))
         name   = member.display_name if member else inf.get("username", "?")
-        embed  = discord.Embed(title=f"Stats Completos — {name}", color=THEME2)
+        embed  = discord.Embed(title=f"📊 Stats — {name}", color=THEME2)
         if member:
             embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="Invite",           value=f"`{inf.get('invite_code','—')}`",              inline=True)
@@ -453,7 +450,7 @@ class _BuscarInfluencerModal(discord.ui.Modal, title="Stats de Influencer"):
         embed.add_field(name="Comissão total",   value=f"**R$ {stats['commission_due']:.2f}**",        inline=True)
         created = inf.get("created_at")
         if created:
-            embed.set_footer(text=f"Parceiro desde {created.strftime('%d/%m/%Y')}")
+            embed.set_footer(text=f"Parceiro desde {created.strftime('%d/%m/%Y')} | X1 Frifas")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
