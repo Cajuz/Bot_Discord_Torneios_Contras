@@ -1,324 +1,305 @@
 """
 mediator_register_view.py
 
-Painel de cadastro de mediador (processo externo).
-O usuário preenche dados pessoais e envia comprovante de pagamento.
-Apenas ADM aprova. Não existe “virar mediador pelo bot” — esse fluxo
-é divulgado externamente e o formulário só faz o cadastro no sistema.
+Card fixo postado em #cadastro-mediador.
+Fluxo:
+  1. Usuário clica em "Cadastrar" → modal com dados pessoais + link do comprovante
+  2. Submissão gera embed resumo em #aprovar-mediadores (canal privado ADM)
+  3. ADM clica Aprovar → cargo Controller atribuído + DM de boas-vindas
+             ou Reprovar → DM de feedback
 """
 from __future__ import annotations
+
 import discord
 from utils.datetime_utils import utcnow
 from utils.logger import logger
-from services.channel_service import (
-    APROVAR_MEDIADORES_CHANNEL,
-    ADM_ROLE_NAME,
-)
 
-THEME_COLOR  = 0xFFD54F   # amarelo  — padrão mediadores
-SUCCESS_COLOR = 0x2ECC71   # verde
-DANGER_COLOR  = 0xE74C3C   # vermelho
+THEME_COLOR  = 0xFFD54F   # dourado padrão X1 Frifas
+APROVAR_CHANNEL = "aprovar-mediadores"
+CONTROLLER_ROLE = "Controller"
 
 
-# ── Embed do painel público ───────────────────────────────────────
-
-def build_mediator_register_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="⚡ Cadastro de Mediador",
-        description=(
-            "Seja bem-vindo ao processo de cadastro de mediadores do **X1 Frifas**!\n\n"
-            "Para se tornar um mediador, você deve ter passado pelo processo externo "
-            "de seleção divulgado no servidor.\n\n"
-            "**O que você vai informar no formulário:**\n"
-            "• Nome completo\n"
-            "• CPF\n"
-            "• Chave Pix\n"
-            "• Telefone (WhatsApp)\n"
-            "• Link do comprovante de pagamento da taxa de inscrição"
-        ),
-        color=THEME_COLOR,
-    )
-    embed.add_field(
-        name="⚠️ Importante",
-        value=(
-            "• Seus dados serão usados exclusivamente para gestão interna.\n"
-            "• O cadastro será analisado pela equipe ADM.\n"
-            "• Comprovante falso resulta em ban permanente."
-        ),
-        inline=False,
-    )
-    embed.set_footer(text="X1 Frifas — Equipe de Mediadores")
-    return embed
-
-
-# ── View pública ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# View persistente — card fixo
+# ═══════════════════════════════════════════════════════════════
 
 class MediatorRegisterView(discord.ui.View):
+    """Postado em #cadastro-mediador. Persiste entre reinicializações."""
 
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Enviar Cadastro",
-        style=discord.ButtonStyle.success,
-        emoji="📝",
-        custom_id="btn_mediator_register",
+        label="📋 Cadastrar como Mediador",
+        style=discord.ButtonStyle.primary,
+        custom_id="mediator_register:open_form",
     )
-    async def btn_cadastrar(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        # Verifica se já tem cadastro pendente
-        from config.database import db
-        existing = await db.get_collection("mediator_applications").find_one({
-            "discord_id": str(interaction.user.id),
-            "status":     {"$in": ["pendente", "aprovado"]},
-        })
-        if existing:
-            status = existing["status"]
-            await interaction.response.send_message(
-                f"Você já possui um cadastro com status **{status}**.\n"
-                "Aguarde a análise da equipe.",
-                ephemeral=True,
-            )
-            return
+    async def open_form(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_modal(_MediatorRegisterModal())
 
 
-# ── Modal com dados pessoais + comprovante ────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# Modal — dados pessoais
+# ═══════════════════════════════════════════════════════════════
 
-class _MediatorRegisterModal(discord.ui.Modal, title="Cadastro de Mediador"):
-    nome = discord.ui.TextInput(
+class _MediatorRegisterModal(discord.ui.Modal, title="Cadastro de Mediador — X1 Frifas"):
+
+    nome_completo = discord.ui.TextInput(
         label="Nome completo",
         placeholder="Ex: João da Silva",
-        min_length=5, max_length=100,
+        min_length=3,
+        max_length=100,
     )
     cpf = discord.ui.TextInput(
-        label="CPF",
-        placeholder="Somente números: 12345678901",
-        min_length=11, max_length=14,
-    )
-    pix = discord.ui.TextInput(
-        label="Chave Pix",
-        placeholder="CPF, e-mail, telefone ou chave aleatória",
-        min_length=5, max_length=150,
+        label="CPF (somente números)",
+        placeholder="Ex: 12345678900",
+        min_length=11,
+        max_length=14,
     )
     telefone = discord.ui.TextInput(
-        label="Telefone (WhatsApp)",
-        placeholder="Ex: 11999999999",
-        min_length=10, max_length=15,
+        label="Telefone / WhatsApp",
+        placeholder="Ex: 11999998888",
+        min_length=10,
+        max_length=15,
     )
-    comprovante = discord.ui.TextInput(
+    chave_pix = discord.ui.TextInput(
+        label="Chave PIX",
+        placeholder="CPF, e-mail, telefone ou chave aleatória",
+        min_length=5,
+        max_length=100,
+    )
+    comprovante_url = discord.ui.TextInput(
         label="Link do comprovante de pagamento",
-        placeholder="https://... (drive, imgur, etc.)",
-        min_length=10, max_length=300,
+        placeholder="Cole aqui o link do comprovante (Google Drive, Imgur, etc.)",
+        min_length=5,
+        max_length=300,
+        style=discord.TextStyle.paragraph,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        from config.database import db
 
-        doc = {
-            "discord_id":    str(interaction.user.id),
-            "discord_name":  interaction.user.name,
-            "nome":          self.nome.value.strip(),
-            "cpf":           self.cpf.value.strip(),
-            "pix":           self.pix.value.strip(),
-            "telefone":      self.telefone.value.strip(),
-            "comprovante":   self.comprovante.value.strip(),
-            "status":        "pendente",
-            "submitted_at":  utcnow(),
-            "reviewed_by":   None,
-            "reviewed_at":   None,
-        }
+        guild  = interaction.guild
+        author = interaction.user
 
-        await db.get_collection("mediator_applications").insert_one(doc)
-
-        # Notifica canal de aprovação
-        guild    = interaction.guild
-        aprova_ch = discord.utils.get(guild.text_channels, name=APROVAR_MEDIADORES_CHANNEL)
-        if aprova_ch:
-            embed = discord.Embed(
-                title="📎 Novo Cadastro de Mediador",
-                color=THEME_COLOR,
+        # Salva no banco
+        try:
+            from config.database import db
+            await db.get_collection("mediator_applications").update_one(
+                {"user_id": str(author.id)},
+                {
+                    "$set": {
+                        "user_id":        str(author.id),
+                        "username":       str(author),
+                        "nome_completo":  self.nome_completo.value.strip(),
+                        "cpf":            self.cpf.value.strip(),
+                        "telefone":       self.telefone.value.strip(),
+                        "chave_pix":      self.chave_pix.value.strip(),
+                        "comprovante":    self.comprovante_url.value.strip(),
+                        "status":         "pendente",
+                        "submitted_at":   utcnow(),
+                    }
+                },
+                upsert=True,
             )
-            embed.add_field(name="Discord",     value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
-            embed.add_field(name="Nome",         value=self.nome.value,         inline=True)
-            embed.add_field(name="CPF",          value=f"||{self.cpf.value}||", inline=True)
-            embed.add_field(name="Pix",          value=self.pix.value,          inline=True)
-            embed.add_field(name="Telefone",     value=self.telefone.value,     inline=True)
-            embed.add_field(name="Comprovante",  value=f"[Ver comprovante]({self.comprovante.value})", inline=False)
-            embed.set_footer(text=f"🕐 Enviado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
-            await aprova_ch.send(
-                embed=embed,
-                view=_MediatorApprovalView(applicant_id=str(interaction.user.id)),
+        except Exception as e:
+            logger.error(f"[MediatorRegister] DB error: {e}")
+
+        # Embed para revisão do ADM
+        review_embed = discord.Embed(
+            title="🆕  Nova Candidatura — Mediador",
+            description=f"<@{author.id}> enviou sua candidatura para mediador.",
+            color=THEME_COLOR,
+            timestamp=utcnow(),
+        )
+        review_embed.add_field(name="Discord",         value=str(author),                    inline=True)
+        review_embed.add_field(name="ID",              value=str(author.id),                 inline=True)
+        review_embed.add_field(name="Nome completo",   value=self.nome_completo.value.strip(), inline=False)
+        review_embed.add_field(name="CPF",             value=f"||{self.cpf.value.strip()}||", inline=True)
+        review_embed.add_field(name="Telefone",        value=self.telefone.value.strip(),      inline=True)
+        review_embed.add_field(name="Chave PIX",       value=self.chave_pix.value.strip(),     inline=False)
+        review_embed.add_field(
+            name="Comprovante",
+            value=f"[Ver comprovante]({self.comprovante_url.value.strip()})",
+            inline=False,
+        )
+        review_embed.set_thumbnail(url=author.display_avatar.url)
+        review_embed.set_footer(text="Use os botões abaixo para Aprovar ou Reprovar")
+
+        # Envia no canal de aprovação
+        ch = discord.utils.get(guild.text_channels, name=APROVAR_CHANNEL)
+        if ch:
+            await ch.send(
+                embed=review_embed,
+                view=_MediatorApprovalView(applicant_id=author.id),
             )
+        else:
+            logger.warning(f"[MediatorRegister] Canal #{APROVAR_CHANNEL} não encontrado.")
 
         await interaction.followup.send(
             embed=discord.Embed(
-                title="✅ Cadastro enviado!",
+                title="Candidatura enviada!",
                 description=(
-                    "Seus dados foram enviados para análise da equipe.\n"
-                    "Você será notificado por **DM** com o resultado."
+                    "Seus dados foram enviados para análise.\n"
+                    "Você receberá uma mensagem direta com o resultado em breve."
                 ),
-                color=SUCCESS_COLOR,
+                color=0x27AE60,
             ),
             ephemeral=True,
         )
 
 
-# ── View de aprovação (ADM) ───────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# View de aprovação — canal #aprovar-mediadores
+# ═══════════════════════════════════════════════════════════════
 
 class _MediatorApprovalView(discord.ui.View):
 
-    def __init__(self, applicant_id: str = ""):
+    def __init__(self, applicant_id: int):
         super().__init__(timeout=None)
         self.applicant_id = applicant_id
 
-    def _get_applicant_id(self, interaction: discord.Interaction) -> str:
-        if self.applicant_id:
-            return self.applicant_id
-        # Tenta parsear do embed
-        try:
-            embed = interaction.message.embeds[0]
-            for field in embed.fields:
-                if field.name == "Discord":
-                    # valor: "<@12345> (`12345`)"
-                    val = field.value or ""
-                    if "(`" in val:
-                        return val.split("(`")[1].split("`)")[0]
-        except Exception:
-            pass
-        return ""
-
     @discord.ui.button(
-        label="Aprovar",
+        label="✅ Aprovar",
         style=discord.ButtonStyle.success,
-        emoji="✅",
-        custom_id="btn_approve_mediator",
+        custom_id="mediator_register:approve",
     )
-    async def btn_aprovar(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        adm_role = discord.utils.get(interaction.guild.roles, name=ADM_ROLE_NAME)
-        if not adm_role or adm_role not in interaction.user.roles:
-            await interaction.response.send_message("Apenas **ADM** pode aprovar.", ephemeral=True)
-            return
-
-        applicant_id = self._get_applicant_id(interaction)
-        if not applicant_id:
-            await interaction.response.send_message("Não foi possível identificar o candidato.", ephemeral=True)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
             return
 
         await interaction.response.defer()
-        from config.database import db
-        from services.channel_service import CONTROLLER_ROLE_NAME
+        guild  = interaction.guild
+        member = guild.get_member(self.applicant_id)
 
-        await db.get_collection("mediator_applications").update_one(
-            {"discord_id": applicant_id, "status": "pendente"},
-            {"$set": {
-                "status":      "aprovado",
-                "reviewed_by": str(interaction.user.id),
-                "reviewed_at": utcnow(),
-            }},
-        )
+        # Atribuir cargo
+        role = discord.utils.get(guild.roles, name=CONTROLLER_ROLE)
+        if member and role:
+            try:
+                await member.add_roles(role, reason=f"Aprovado por {interaction.user}")
+            except discord.Forbidden:
+                pass
 
-        # Atribui cargo Controller
+        # Atualiza banco
         try:
-            member       = await interaction.guild.fetch_member(int(applicant_id))
-            controller_r = discord.utils.get(interaction.guild.roles, name=CONTROLLER_ROLE_NAME)
-            if member and controller_r:
-                await member.add_roles(controller_r, reason="Cadastro de mediador aprovado")
-                try:
-                    await member.send(
-                        embed=discord.Embed(
-                            title="✅ Cadastro Aprovado!",
-                            description=(
-                                "Seu cadastro como **Mediador** foi aprovado!\n"
-                                "Você recebeu o cargo **Controller** e já pode entrar na fila de mediação."
-                            ),
-                            color=SUCCESS_COLOR,
-                        )
-                    )
-                except discord.Forbidden:
-                    pass
+            from config.database import db
+            await db.get_collection("mediator_applications").update_one(
+                {"user_id": str(self.applicant_id)},
+                {"$set": {"status": "aprovado", "approved_by": str(interaction.user), "approved_at": utcnow()}},
+            )
+            # Cria/atualiza registro em mediators
+            from datetime import timedelta
+            await db.get_collection("mediators").update_one(
+                {"user_id": self.applicant_id},
+                {
+                    "$set": {
+                        "user_id":         self.applicant_id,
+                        "username":        str(member) if member else str(self.applicant_id),
+                        "is_active":       True,
+                        "in_queue":        False,
+                        "expiration_date": utcnow() + timedelta(days=30),
+                        "updated_at":      utcnow(),
+                    }
+                },
+                upsert=True,
+            )
         except Exception as e:
-            logger.error(f"[MediatorRegister] Erro ao atribuir cargo: {e}")
+            logger.error(f"[MediatorApproval] DB error: {e}")
 
-        # Atualiza embed
-        embed = interaction.message.embeds[0]
-        embed.color = SUCCESS_COLOR
-        embed.set_footer(text=f"✅ Aprovado por {interaction.user.name} — {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
-        await interaction.message.edit(embed=embed, view=discord.ui.View())
-        await interaction.followup.send(
-            f"✅ Candidato <@{applicant_id}> aprovado e cargo atribuído.",
-            ephemeral=True,
+        # DM para o candidato
+        if member:
+            try:
+                await member.send(embed=discord.Embed(
+                    title="🎉 Candidatura Aprovada!",
+                    description=(
+                        f"Parabéns! Você foi aprovado como mediador no **X1 Frifas**.\n"
+                        f"O cargo **{CONTROLLER_ROLE}** foi atribuído à sua conta.\n\n"
+                        "Boas-vindas à equipe!"
+                    ),
+                    color=0x27AE60,
+                ))
+            except discord.Forbidden:
+                pass
+
+        # Edita mensagem de revisão
+        for b in self.children:
+            b.disabled = True
+        await interaction.message.edit(
+            embed=interaction.message.embeds[0].set_footer(
+                text=f"✅ Aprovado por {interaction.user} em {utcnow().strftime('%d/%m/%Y %H:%M UTC')}"
+            ),
+            view=self,
         )
 
     @discord.ui.button(
-        label="Reprovar",
+        label="❌ Reprovar",
         style=discord.ButtonStyle.danger,
-        emoji="❌",
-        custom_id="btn_reject_mediator",
+        custom_id="mediator_register:reject",
     )
-    async def btn_reprovar(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        adm_role = discord.utils.get(interaction.guild.roles, name=ADM_ROLE_NAME)
-        if not adm_role or adm_role not in interaction.user.roles:
-            await interaction.response.send_message("Apenas **ADM** pode reprovar.", ephemeral=True)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
             return
-        applicant_id = self._get_applicant_id(interaction)
-        await interaction.response.send_modal(
-            _MediatorRejectModal(applicant_id=applicant_id))
+
+        await interaction.response.send_modal(_RejectReasonModal(self.applicant_id, self))
 
 
-class _MediatorRejectModal(discord.ui.Modal, title="Reprovar Cadastro"):
+class _RejectReasonModal(discord.ui.Modal, title="Motivo da Reprovação"):
+
     motivo = discord.ui.TextInput(
-        label="Motivo da reprovação",
+        label="Motivo",
+        placeholder="Descreva brevemente o motivo da reprovação",
         style=discord.TextStyle.paragraph,
-        placeholder="Informe o motivo...",
-        min_length=5, max_length=300,
+        min_length=5,
+        max_length=300,
     )
 
-    def __init__(self, applicant_id: str):
+    def __init__(self, applicant_id: int, approval_view: _MediatorApprovalView):
         super().__init__()
-        self.applicant_id = applicant_id
+        self.applicant_id  = applicant_id
+        self.approval_view = approval_view
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        from config.database import db
 
-        await db.get_collection("mediator_applications").update_one(
-            {"discord_id": self.applicant_id, "status": "pendente"},
-            {"$set": {
-                "status":      "reprovado",
-                "reviewed_by": str(interaction.user.id),
-                "reviewed_at": utcnow(),
-                "reject_reason": self.motivo.value,
-            }},
-        )
         try:
-            member = await interaction.guild.fetch_member(int(self.applicant_id))
-            await member.send(
-                embed=discord.Embed(
-                    title="❌ Cadastro Reprovado",
-                    description=(
-                        f"Seu cadastro como Mediador foi **reprovado**.\n"
-                        f"**Motivo:** {self.motivo.value}\n\n"
-                        "Em caso de dúvidas, entre em contato com a equipe."
-                    ),
-                    color=DANGER_COLOR,
-                )
+            from config.database import db
+            await db.get_collection("mediator_applications").update_one(
+                {"user_id": str(self.applicant_id)},
+                {
+                    "$set": {
+                        "status":      "reprovado",
+                        "rejected_by": str(interaction.user),
+                        "reject_reason": self.motivo.value.strip(),
+                        "rejected_at": utcnow(),
+                    }
+                },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[MediatorReject] DB error: {e}")
 
-        embed = interaction.message.embeds[0]
-        embed.color = DANGER_COLOR
-        embed.add_field(name="Motivo da reprovação", value=self.motivo.value, inline=False)
-        embed.set_footer(text=f"❌ Reprovado por {interaction.user.name} — {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
-        await interaction.message.edit(embed=embed, view=discord.ui.View())
-        await interaction.followup.send(
-            f"❌ Cadastro de <@{self.applicant_id}> reprovado.",
-            ephemeral=True,
+        member = interaction.guild.get_member(self.applicant_id)
+        if member:
+            try:
+                await member.send(embed=discord.Embed(
+                    title="Candidatura Reprovada",
+                    description=(
+                        f"Infelizmente sua candidatura para mediador no **X1 Frifas** "
+                        f"não foi aprovada.\n\n"
+                        f"**Motivo:** {self.motivo.value.strip()}\n\n"
+                        "Em caso de dúvidas, entre em contato com a administração."
+                    ),
+                    color=0xE74C3C,
+                ))
+            except discord.Forbidden:
+                pass
+
+        for b in self.approval_view.children:
+            b.disabled = True
+        await interaction.message.edit(
+            embed=interaction.message.embeds[0].set_footer(
+                text=f"❌ Reprovado por {interaction.user} em {utcnow().strftime('%d/%m/%Y %H:%M UTC')}"
+            ),
+            view=self.approval_view,
         )
