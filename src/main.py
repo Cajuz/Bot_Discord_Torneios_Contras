@@ -143,7 +143,6 @@ async def on_ready():
             AnalistaPessoalView(),
             AnalistaAdminView(),
             SuporteAdminView(),
-            # fix: views com botões que faltavam — botões mortos após restart
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
@@ -184,13 +183,6 @@ async def on_ready():
     # ── Fila de mediadores ──────────────────────────────────────────
     from services.mediator_queue import mediator_queue
     await mediator_queue.initialize()
-
-    # ── mediador_dashboard_service — DESATIVADO (conflito com analytics_service)
-    # Ambos postavam em #dashboard-partidas; o antigo limpava o canal com purge()
-    # apagando os embeds do analytics_service. Substituído integralmente pelo
-    # analytics_service que usa upsert sem apagar o histórico do canal.
-    # from services.mediador_dashboard_service import mediator_dashboard_service
-    # mediator_dashboard_service.start_task(bot)
 
     # ── Card service ──────────────────────────────────────────────
     from services.card_service import card_service
@@ -311,39 +303,28 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         logger.warning(f"[TrocaCargo] Erro no log: {e}")
 
     # ─ Anti-self-role ──────────────────────────────────────
-    # Verifica se o próprio membro se atribuiu um cargo (audit log)
-    # Para não bloquear a execução, verificamos apenas os cargos adicionados.
-    added_roles   = set(after.roles)  - set(before.roles)
-    removed_roles = set(before.roles) - set(after.roles)
-
-    # Cargos protegidos que foram adicionados nesta atualização
+    added_roles = set(after.roles) - set(before.roles)
     illegal_adds = {r for r in added_roles if r.name in PROTECTED_ROLES}
     if not illegal_adds:
         return
 
-    # Se quem atualizou foi o bot ou o ADM, não reverter
     try:
-        guild = after.guild
+        guild    = after.guild
         adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
-        is_adm = adm_role and adm_role in after.roles
 
-        # Verifica audit log para saber se a ação foi do próprio membro
         async for entry in guild.audit_logs(
             limit=5,
             action=discord.AuditLogAction.member_role_update,
         ):
             if entry.target.id != after.id:
                 continue
-            # Se a ação foi executada pelo bot ou por um ADM, não reverter
             if entry.user.id == bot.user.id:
                 return
             executor_roles = {r.name for r in entry.user.roles}
             if ADM_ROLE_NAME in executor_roles:
                 return
-            # Ação foi de usuário sem permissão — reverter
             break
 
-        # Remove os cargos ilegais
         for role in illegal_adds:
             try:
                 await after.remove_roles(role, reason="[Anti-self-role] Cargo protegido removido")
@@ -353,7 +334,6 @@ async def on_member_update(before: discord.Member, after: discord.Member):
             except Exception as e:
                 logger.error(f"[AntiSelfRole] Falha ao remover '{role.name}' de {after}: {e}")
 
-        # Notifica o membro via DM
         role_names = ", ".join(f"**{r.name}**" for r in illegal_adds)
         try:
             await after.send(
@@ -365,7 +345,6 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         except discord.Forbidden:
             pass
 
-        # Log no canal de trocas de cargo
         from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
         log_ch = discord.utils.get(guild.text_channels, name=LOGS_TROCA_CARGO_CHANNEL)
         if log_ch:
@@ -476,14 +455,25 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Webhook server (pagamentos EFI)
+# Servidor HTTP — health check + webhook EFI
+# Sobe SEMPRE para que o healthcheck da plataforma (Railway/Render)
+# receba 200 em GET /health mesmo sem WEBHOOK_BASE_URL configurado.
 # ─────────────────────────────────────────────────────────────
 
-async def _start_webhook_server():
+async def _start_http_server():
+    """Inicia o servidor aiohttp.
+    - GET /health   → 200 ok  (healthcheck da plataforma)
+    - POST /webhook/efi → processa pagamento EFI (só ativo se WEBHOOK_BASE_URL definido)
+    """
     try:
         from aiohttp import web
 
+        async def health(request: web.Request) -> web.Response:
+            return web.Response(text="ok", status=200)
+
         async def efi_webhook(request: web.Request) -> web.Response:
+            if not os.getenv("WEBHOOK_BASE_URL", ""):
+                return web.Response(status=404)
             try:
                 data   = await request.json()
                 txid   = data.get("txid") or data.get("txId", "")
@@ -505,14 +495,17 @@ async def _start_webhook_server():
             return web.Response(status=200)
 
         app = web.Application()
-        app.router.add_post("/webhook/efi", efi_webhook)
-        app.router.add_get("/health", lambda r: web.Response(text="ok"))
+        app.router.add_get("/health",        health)
+        app.router.add_post("/webhook/efi",  efi_webhook)
+
+        port   = int(os.getenv("API_PORT", "8000"))
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("API_PORT", "8000")))
+        site   = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
+        logger.info(f"[HTTP] Servidor iniciado na porta {port} (GET /health ativo)")
     except Exception as e:
-        logger.error(f"[Webhook] Falha ao iniciar servidor HTTP: {e}")
+        logger.error(f"[HTTP] Falha ao iniciar servidor HTTP: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -525,9 +518,8 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    if os.getenv("WEBHOOK_BASE_URL", ""):
-        asyncio.create_task(_start_webhook_server())
-        logger.info("[Webhook] Servidor HTTP iniciado na porta 8000")
+    # HTTP sempre sobe — healthcheck e webhook
+    asyncio.create_task(_start_http_server())
 
     await start_discord_bot(bot)
 
