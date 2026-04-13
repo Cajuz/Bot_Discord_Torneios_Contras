@@ -7,9 +7,12 @@ Canais:
   #painel-contratos   — embed fixo com resumo financeiro + botões de ação
   #analytics-adm      — dashboard detalhado (atualizado pelo task diário)
 
-Comandos:
-  !setup_painel_contratos   — posta/atualiza o card fixo
-  !atualizar_contratos      — força atualização manual
+Comandos (neste cog):
+  !resumo_financeiro  — envia resumo financeiro direto no chat
+
+Comandos delegados (admin_cog.py):
+  !setup_painel_contratos  — chama self._update_panels()
+  !atualizar_contratos     — idem (alias de força manual)
 
 Task:
   A cada 6 horas atualiza automaticamente o painel.
@@ -307,10 +310,10 @@ class ContractPanelView(discord.ui.View):
             timestamp=utcnow(),
         )
         for doc in docs:
-            nome     = doc.get("nome_completo", "—")
+            nome      = doc.get("nome_completo", "—")
             documento = doc.get("documento", "—")
-            data     = doc.get("submitted_at")
-            data_str = data.strftime("%d/%m/%Y %H:%M") if data else "—"
+            data      = doc.get("submitted_at")
+            data_str  = data.strftime("%d/%m/%Y %H:%M") if data else "—"
             embed.add_field(
                 name=nome,
                 value=f"Documento: ||{documento}|| | Enviado: `{data_str}`",
@@ -340,7 +343,7 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
     async def before_auto_refresh(self):
         await self.bot.wait_until_ready()
 
-    # ── Helpers internos ──────────────────────────────────────
+    # ── Método público — chamado pelo admin_cog ───────────────
     async def _update_panels(self, guild: discord.Guild):
         try:
             stats = await _fetch_contract_stats()
@@ -380,7 +383,6 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
         Edita a mensagem existente (ID persistido no DB) ou posta nova.
         Sempre persiste o message_id para sobreviver a reinicializações.
         """
-        # 1. Tenta carregar ID do banco
         msg_id = await _load_message_id(guild_id, db_key)
 
         if msg_id:
@@ -392,10 +394,9 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
                 await msg.edit(**kwargs)
                 return
             except (discord.NotFound, discord.HTTPException):
-                # Mensagem sumiu — busca no histórico antes de postar nova
                 pass
 
-        # 2. Fallback: varre histórico procurando msg do bot com embed
+        # Fallback: varre histórico procurando msg do bot com embed
         async for hist_msg in channel.history(limit=20):
             if hist_msg.author == channel.guild.me and hist_msg.embeds:
                 kwargs = {"embed": embed}
@@ -405,34 +406,18 @@ class RenewalDashboardCog(commands.Cog, name="PainelContratos"):
                 await _save_message_id(guild_id, db_key, hist_msg.id)
                 return
 
-        # 3. Nenhuma mensagem existente — posta nova
+        # Nenhuma mensagem existente — posta nova
         kwargs = {"embed": embed}
         if view:
             kwargs["view"] = view
         new_msg = await channel.send(**kwargs)
         await _save_message_id(guild_id, db_key, new_msg.id)
 
-    # ── Comandos ────────────────────────────────────────────
-    @commands.command(name="setup_painel_contratos")
-    @commands.has_permissions(administrator=True)
-    async def setup_painel_contratos(self, ctx: commands.Context):
-        """Posta o painel de contratos e o analytics. Só ADM."""
-        msg = await ctx.reply("⏳ Gerando painéis de contratos...")
-        await self._update_panels(ctx.guild)
-        await msg.edit(content="✅ Painéis de contratos atualizados.")
-
-    @commands.command(name="atualizar_contratos")
-    @commands.has_permissions(administrator=True)
-    async def atualizar_contratos(self, ctx: commands.Context):
-        """Força atualização manual imediata."""
-        msg = await ctx.reply("⏳ Atualizando...")
-        await self._update_panels(ctx.guild)
-        await msg.edit(content="✅ Painéis atualizados.")
-
+    # ── Comando exclusivo deste cog ───────────────────────────
     @commands.command(name="resumo_financeiro")
     @commands.has_permissions(administrator=True)
     async def resumo_financeiro(self, ctx: commands.Context):
-        """Envia resumo financeiro diretamente no chat."""
+        """Envia resumo financeiro direto no chat (sem editar o painel fixo)."""
         stats = await _fetch_contract_stats()
         await ctx.reply(embed=_build_analytics_embed(stats))
 
