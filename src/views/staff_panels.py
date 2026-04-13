@@ -3,7 +3,7 @@ from __future__ import annotations
 import discord
 from utils.datetime_utils import utcnow
 from utils.logger import logger
-from services.channel_service import (   # ← NOVO bloco de imports
+from services.channel_service import (
     CASOS_ANALISAR_CHANNEL,
     PAINEL_ANALISTA_CHANNEL,
     SOLICITAR_SUPORTE_CHANNEL,
@@ -81,13 +81,11 @@ class MediadorPessoalView(discord.ui.View):
                 guild_id=interaction.guild.id
             )
         result = await mediator_queue.add_to_queue(interaction.user.id)
-        if result:
-            await interaction.response.send_message(
-                "Você entrou na fila de mediadores.", ephemeral=True)
-        else:
-            await interaction.response.send_message(
-                "Você já está na fila ou não está ativo.", ephemeral=True)
-        await self._refresh(interaction)
+        msg = "Você entrou na fila de mediadores." if result else "Você já está na fila ou não está ativo."
+
+        # Atualiza o embed do painel ANTES de responder à interaction
+        await self._refresh_message(interaction.message)
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @discord.ui.button(label="Sair da Fila", style=discord.ButtonStyle.danger,
                        emoji="⏸️", custom_id="med_leave_queue", row=0)
@@ -97,9 +95,11 @@ class MediadorPessoalView(discord.ui.View):
             return
         from services.mediator_queue import mediator_queue
         await mediator_queue.remove_from_queue(interaction.user.id)
+
+        # Atualiza o embed do painel ANTES de responder à interaction
+        await self._refresh_message(interaction.message)
         await interaction.response.send_message(
             "Você saiu da fila de mediadores.", ephemeral=True)
-        await self._refresh(interaction)
 
     @discord.ui.button(label="Meus Stats", style=discord.ButtonStyle.secondary,
                        emoji="📊", custom_id="med_stats", row=1)
@@ -177,14 +177,17 @@ class MediadorPessoalView(discord.ui.View):
             embed.add_field(name="Fila", value="Nenhum mediador ativo.", inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    async def _refresh(self, interaction: discord.Interaction):
-        from services.mediator_queue import mediator_queue
-        info  = await mediator_queue.get_queue_info()
-        embed = build_mediador_pessoal_embed(info)
+    async def _refresh_message(self, message: discord.Message | None):
+        """Atualiza o embed do painel diretamente na mensagem (sem usar interaction.response)."""
+        if not message:
+            return
         try:
-            await interaction.message.edit(embed=embed)
-        except Exception:
-            pass
+            from services.mediator_queue import mediator_queue
+            info  = await mediator_queue.get_queue_info()
+            embed = build_mediador_pessoal_embed(info)
+            await message.edit(embed=embed)
+        except Exception as e:
+            logger.warning(f"[MediadorPessoalView] _refresh_message erro: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -374,7 +377,7 @@ class _RemoverMediadorModal(discord.ui.Modal, title="Remover Mediador"):
 
 
 # ═══════════════════════════════════════════════════════════════
-# ANALISTA — Painel pessoal (#painel-analista) ← RENOMEADO
+# ANALISTA — Painel pessoal (#painel-analista)
 # ═══════════════════════════════════════════════════════════════
 
 def build_analista_pessoal_embed() -> discord.Embed:
@@ -382,7 +385,6 @@ def build_analista_pessoal_embed() -> discord.Embed:
         title="Painel do Analista",
         description=(
             "Acompanhe seus casos e histórico de análises.\n\n"
-            # ← ATUALIZADO: referencia os canais com nomes novos
             f"• **Meus Casos Ativos** — casos que você está analisando\n"
             f"• **Meu Histórico** — todas as decisões que tomou\n"
             f"• **Fila de Casos** — contagem em `#{CASOS_ANALISAR_CHANNEL}`\n\n"
@@ -467,7 +469,6 @@ class AnalistaPessoalView(discord.ui.View):
         embed = discord.Embed(title="Status da Fila de Análises", color=THEME)
         embed.add_field(name="Aguardando análise", value=f"`{aguardando}`", inline=True)
         embed.add_field(name="Em análise",         value=f"`{em_analise}`", inline=True)
-        # ← ATUALIZADO: indica onde os cards aparecem
         embed.add_field(
             name="Ver cards",
             value=f"Acesse `#{CASOS_ANALISAR_CHANNEL}` para assumir casos.",
@@ -488,7 +489,6 @@ def build_analista_admin_embed() -> discord.Embed:
             "• **Visão Geral** — todos os casos por status\n"
             "• **Stats por Analista** — desempenho individual\n"
             "• **Buscar Caso** — detalhes de um caso específico\n\n"
-            # ← ATUALIZADO: referencia os canais com nomes novos
             f"📥 Cards de análise em `#{CASOS_ANALISAR_CHANNEL}`\n"
             f"📋 Histórico de blacklist em `#{HISTORICO_EXPOSED_CHANNEL}`"
         ),
@@ -597,7 +597,6 @@ def build_suporte_pessoal_embed() -> discord.Embed:
         title="Central de Suporte",
         description=(
             "Precisa de ajuda? Estamos aqui.\n\n"
-            # ← ATUALIZADO: referencia o canal renomeado
             f"• Abra seu ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`\n\n"
             "Nossa equipe responderá o mais breve possível."
         ),
@@ -617,7 +616,6 @@ def build_suporte_admin_embed() -> discord.Embed:
             "• **Buscar Ticket** — detalhes de um ticket específico\n"
             "• **Forçar Fechar** — encerrar ticket administrativamente\n"
             "• **Tickets Abertos** — lista todos os tickets em aberto\n\n"
-            # ← ATUALIZADO: referencia canais com nomes novos
             f"💬 Chat interno da equipe: `#{CHAT_SUPORTE_STAFF_CHANNEL}`"
         ),
         color=THEME2

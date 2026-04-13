@@ -13,8 +13,6 @@ MEMBER_ROLE_NAME      = "Membro"
 SPAM_BLOCK_ROLE_NAME  = "Bloqueado"
 VER_TOPICOS_ROLE_NAME = "Ver Tópicos"
 
-# Cargos gerenciados EXCLUSIVAMENTE pelo bot/ADM.
-# Nenhum usuário pode se auto-atribuir ou remover estes cargos.
 PROTECTED_ROLES = {
     CONTROLLER_ROLE_NAME,
     ANALYST_ROLE_NAME,
@@ -34,7 +32,6 @@ ALL_ROLES = [
     INFLUENCER_ROLE_NAME,
     SPAM_BLOCK_ROLE_NAME,
 ]
-# Nota: ADM_ROLE_NAME não está em ALL_ROLES — cargo gerenciado manualmente no Discord.
 
 # ── Canais — INFORMAÇÕES ──────────────────────────────────────
 REGRAS_CHANNEL            = "🗒️regras"
@@ -48,7 +45,7 @@ BLACKLIST_CHANNEL         = "blacklist"
 
 # ── Canais — SUPORTE ──────────────────────────────────────────
 SOLICITAR_SUPORTE_CHANNEL  = "solicitar-suporte"
-SUPPORT_CHANNEL_NAME       = SOLICITAR_SUPORTE_CHANNEL   # alias retrocompat
+SUPPORT_CHANNEL_NAME       = SOLICITAR_SUPORTE_CHANNEL
 CHAT_SUPORTE_STAFF_CHANNEL = "chat-suporte"
 PAINEL_SUPORTE_CHANNEL     = "painel-suporte"
 CHAMADOS_CHANNEL_NAME      = "chamados-suporte"
@@ -69,7 +66,7 @@ CADASTRO_MEDIADOR_CHANNEL  = "cadastro-mediador"
 SOLICITAR_ANALISE_CHANNEL  = "solicitar-analise"
 CASOS_ANALISAR_CHANNEL     = "casos-analisar"
 PAINEL_ANALISTA_CHANNEL    = "painel-analista"
-ANALYST_QUEUE_CHANNEL      = PAINEL_ANALISTA_CHANNEL     # alias retrocompat
+ANALYST_QUEUE_CHANNEL      = PAINEL_ANALISTA_CHANNEL
 CHAT_ANALISTAS_CHANNEL     = "chat-analistas"
 ANALISTAS_ADMIN_CHANNEL    = "analistas-controle"
 EXPOSED_CHANNEL_NAME       = "exposed"
@@ -102,6 +99,7 @@ LOGS_MESSAGE_DELETE_CHANNEL  = "logs-message-delete"
 LOGS_TROCA_CARGO_CHANNEL     = "logs-troca-cargo"
 HEALTH_CHECK_CHANNEL         = "health-check"
 MEDIADORES_AFKS_CHANNEL      = "mediadores-afks"
+ALERTAS_ADM_CHANNEL          = "alertas-adm"   # <-- NOVO
 
 # ── Aliases legados ───────────────────────────────────────────
 CATEGORY_ANALYTICS_NAME      = "📊 ANALYTICS"
@@ -139,7 +137,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL, AVISOS_CHANNEL,
         GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL,
         GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,
-        BLACKLIST_CHANNEL,                          # <-- NOVO
+        BLACKLIST_CHANNEL,
     ],
     CATEGORY_MEDIACAO: [
         MEDIADOR_PANEL_CHANNEL, MEDIADORES_ADMIN_CHANNEL,
@@ -147,7 +145,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         SOLICITACOES_CHANNEL, MEDIADOR_PIX_CHANNEL,
         RENOVACAO_CHANNEL, FATURAMENTO_CHANNEL,
         HISTORICO_CHANNEL,
-        CADASTRO_MEDIADOR_CHANNEL,                  # <-- NOVO
+        CADASTRO_MEDIADOR_CHANNEL,
     ],
     CATEGORY_MOBILE:   ["1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob"],
     CATEGORY_EMULADOR: ["1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu"],
@@ -188,68 +186,52 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         LOGS_PARTIDAS_CHANNEL, LOGS_MEDIADORES_CHANNEL, LOGS_BOT_CHANNEL_NAME,
         LOGS_COMMAND_CHANNEL, LOGS_MESSAGE_DELETE_CHANNEL, LOGS_PIX_LOG_CHANNEL,
         LOGS_CALL_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
+        ALERTAS_ADM_CHANNEL,   # <-- NOVO: alertas críticos para ADM
     ],
 }
 
 # ── Canais apenas-leitura para Membro ─────────────────────────
-# Membro VÊ mas NÃO envia mensagens; apenas bot/ADM postam.
 READ_ONLY_CHANNELS = {
     REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL,
     RESULTADOS_CHANNEL, RANKING_CHANNEL, STATUS_BOT_CHANNEL,
 }
 
 # ── Canais de interação por botão ─────────────────────────────
-# Membro pode VER e INTERAGIR com componentes (botões/modais),
-# mas NÃO pode enviar mensagens de texto. Apenas bot/ADM postam.
 INTERACTION_ONLY_CHANNELS = {
-    # Canais de partida (membro entra via botão de fila)
     "1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob",
     "1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu",
     "4x4-misto", "3x3-misto", "2x2-misto",
-    # Canais de ação
     SOLICITAR_SUPORTE_CHANNEL,
     MEDIADOR_PIX_CHANNEL,
     SOLICITAR_ANALISE_CHANNEL,
-    BLACKLIST_CHANNEL,         # <-- NOVO: membro interage via botão, não digita
-    CADASTRO_MEDIADOR_CHANNEL, # <-- NOVO: membro preenche modal de cadastro
+    BLACKLIST_CHANNEL,
+    CADASTRO_MEDIADOR_CHANNEL,
 }
 
 # ── Canais view-only (só bot/ADM postam; roles indicadas só leem) ─
 CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
-    # Informações — guias (só bot/adm posta, cargo correto lê)
-    GUIA_JOGADOR_CHANNEL:       [],   # todos os membros leem
+    GUIA_JOGADOR_CHANNEL:       [],
     GUIA_MEDIADOR_CHANNEL:      [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     GUIA_SUPORTE_CHANNEL:       [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     GUIA_ANALISTA_CHANNEL:      [ANALYST_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    AVISOS_CHANNEL:             [],   # todos os membros leem
-    BLACKLIST_CHANNEL:          [],   # todos os membros veem e interagem via botão
-
-    # Analistas
+    AVISOS_CHANNEL:             [],
+    BLACKLIST_CHANNEL:          [],
     CASOS_ANALISAR_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
     PAINEL_ANALISTA_CHANNEL:    [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
     HISTORICO_EXPOSED_CHANNEL:  [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
     APROVAR_MEDIADORES_CHANNEL: [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Suporte
     PAINEL_SUPORTE_CHANNEL:     [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Mediação
     HISTORICO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     FATURAMENTO_CHANNEL:        [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    CADASTRO_MEDIADOR_CHANNEL:  [],   # qualquer pessoa interessada vê e preenche modal
-
-    # Analytics (view-only para os cargos abaixo)
+    CADASTRO_MEDIADOR_CHANNEL:  [],
     DASHBOARD_CHANNEL_NAME:     [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     DASHBOARD_MEDIADORES:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     DASHBOARD_SUPORTE:          [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     DASHBOARD_INFLUENCERS:      [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
-    RESULTADOS_CHANNEL:         [],   # todos os membros leem
-    RANKING_CHANNEL:            [],   # todos os membros leem
-
-    # Staff
+    RESULTADOS_CHANNEL:         [],
+    RANKING_CHANNEL:            [],
     MEDIADORES_AFKS_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Logs (bot/adm postam, cargos abaixo só leem)
+    ALERTAS_ADM_CHANNEL:        [ADM_ROLE_NAME],   # <-- NOVO: só ADM vê
     LOGS_CALLS_CHANNEL:         [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
     LOGS_TROCA_PIX_CHANNEL:     [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
     LOGS_DELETES_CHANNEL:       [ADM_ROLE_NAME],
@@ -270,28 +252,19 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
 
 # ── Canais onde roles podem enviar mensagens ──────────────────
 CHANNEL_PERMISSIONS: dict[str, list[str]] = {
-    # Suporte
     CHAMADOS_CHANNEL_NAME:      [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     SUPORTE_ADMIN_CHANNEL:      [ADM_ROLE_NAME],
     CHAT_SUPORTE_STAFF_CHANNEL: [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Mediação
     MEDIADOR_PANEL_CHANNEL:     [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     MEDIADORES_ADMIN_CHANNEL:   [ADM_ROLE_NAME],
     RENOVACAO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     SOLICITACOES_CHANNEL:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Analistas
     ANALISTAS_ADMIN_CHANNEL:    [ADM_ROLE_NAME],
     EXPOSED_CHANNEL_NAME:       [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
     CHAT_ANALISTAS_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Comunidade
     INFLUENCERS_CHANNEL:        [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
     INFLUENCERS_ADMIN_CHANNEL:  [ADM_ROLE_NAME],
     CHAT_INFLUENCERS_CHANNEL:   [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
-
-    # Boas-vindas / avisos — só bot/ADM postam (view-only via CHANNEL_VIEW_ONLY)
     BOAS_VINDAS_CHANNEL:        [],
     REGRAS_CHANNEL:             [],
     STATUS_BOT_CHANNEL:         [ADM_ROLE_NAME],
@@ -308,7 +281,6 @@ class PermissionService:
         member_role = roles.get(MEMBER_ROLE_NAME)
         overwrites  = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
 
-        # ── 1. Canais de interação por botão (partidas, suporte, pix, blacklist) ──
         if channel_name in INTERACTION_ONLY_CHANNELS:
             target = member_role or guild.default_role
             overwrites[target] = discord.PermissionOverwrite(
@@ -319,7 +291,6 @@ class PermissionService:
             if member_role:
                 overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
 
-        # ── 2. Canais read-only simples ────────────────────────────────
         elif channel_name in READ_ONLY_CHANNELS:
             target = member_role or guild.default_role
             overwrites[target] = discord.PermissionOverwrite(
@@ -327,11 +298,9 @@ class PermissionService:
             if member_role:
                 overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
 
-        # ── 3. Canais view-only por role ───────────────────────────────
         elif channel_name in CHANNEL_VIEW_ONLY:
             viewers = CHANNEL_VIEW_ONLY[channel_name]
             if not viewers:
-                # Lista vazia → todos os membros veem, não enviam
                 target = member_role or guild.default_role
                 overwrites[target] = discord.PermissionOverwrite(
                     read_messages=True, send_messages=False)
@@ -344,18 +313,15 @@ class PermissionService:
                         overwrites[role] = discord.PermissionOverwrite(
                             read_messages=True, send_messages=False)
 
-        # ── 4. Canais com roles que podem enviar ───────────────────────
         else:
             perms = CHANNEL_PERMISSIONS.get(channel_name)
             if perms is None:
-                # Canal não mapeado → só membro vê, não envia
                 target = member_role or guild.default_role
                 overwrites[target] = discord.PermissionOverwrite(
                     read_messages=True, send_messages=False)
                 if member_role:
                     overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
             elif perms == []:
-                # Lista vazia → só bot/ADM pode postar
                 if member_role:
                     overwrites[member_role] = discord.PermissionOverwrite(
                         read_messages=True, send_messages=False)
@@ -366,7 +332,6 @@ class PermissionService:
                         overwrites[role] = discord.PermissionOverwrite(
                             read_messages=True, send_messages=True)
 
-        # ── Bot e ADM sempre com permissão total ───────────────────────
         overwrites[guild.me] = discord.PermissionOverwrite(
             read_messages=True, send_messages=True, manage_messages=True)
         adm_role = roles.get(ADM_ROLE_NAME) or discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
