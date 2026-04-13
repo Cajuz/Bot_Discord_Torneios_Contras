@@ -3,14 +3,15 @@ builder          = "DOCKERFILE"
 dockerfilePath   = "Dockerfile"
 
 [deploy]
-startCommand         = "python src/main.py"
-restartPolicyType    = "ON_FAILURE"
+startCommand            = "python src/main.py"
+restartPolicyType       = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-healthcheckPath      = "/health"
-healthcheckTimeout   = 30
+healthcheckPath         = "/health"
+healthcheckTimeout      = 30
+port                    = 8000
 
 # Variáveis obrigatórias — configure no painel Railway > Variables:
-# DISCORD_TOKEN       = token do bot
-# MONGO_URI           = mongodb+srv://...
-# WEBHOOK_BASE_URL    = https://<seu-domínio>.railway.app  (opcional, para EFI)
-# API_PORT            = 8000
+# DISCORD_TOKEN    = token do bot
+# MONGO_URI        = mongodb+srv://...
+# API_PORT         = 8000
+# WEBHOOK_BASE_URL = https://<seu-domínio>.railway.app  (opcional, para EFI)

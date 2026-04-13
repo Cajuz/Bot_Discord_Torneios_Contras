@@ -1,4 +1,4 @@
-# ── Build stage ────────────────────────────────────────────────
+# ── Build stage ──────────────────────────────────────────────
 FROM python:3.11-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
@@ -13,12 +13,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir qrcode[pil]
 
-# ── Runtime stage ───────────────────────────────────────────────
+# ── Runtime stage ─────────────────────────────────────────────
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app/src
+    PYTHONPATH=/app/src \
+    API_PORT=8000
 
 WORKDIR /app
 
@@ -32,6 +33,9 @@ COPY assets/ ./assets/
 
 # Diretório de logs persistente
 RUN mkdir -p /app/logs
+
+# Porta HTTP (health check + webhook EFI)
+EXPOSE 8000
 
 # Usuário não-root para segurança
 RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
