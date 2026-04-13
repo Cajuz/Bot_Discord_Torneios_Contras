@@ -35,6 +35,7 @@ COGS = [
     "cogs.influencer_cog",
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
+    "cogs.renewal_dashboard_cog",  # Painel de contratos e analytics ADM
 ]
 
 bot          = create_discord_bot()
