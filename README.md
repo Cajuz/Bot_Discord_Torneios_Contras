@@ -1,385 +1,507 @@
-# X1 Frifas — Discord Bot
+<div align="center">
 
-Bot de gestão de partidas de Free Fire com apostas, mediação, suporte, análise de denúncias, renovação de licença via PIX, sistema de convites, influencers e reutilização de tópicos.
+# 🎮 X1 Frifas — Discord Bot
+
+**Bot completo de gestão de partidas mediadas para Free Fire**
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![discord.py](https://img.shields.io/badge/discord.py-2.4.0-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discordpy.readthedocs.io/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://cloud.mongodb.com/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white)](https://railway.app/)
+
+</div>
 
 ---
 
-## Visão geral
+## 📋 Sumário
 
-O X1 Frifas é um bot modular para servidores Discord focados em organização de partidas mediadas.  
-Ele centraliza o fluxo de filas, criação de partidas, confirmação de pagamento, definição de vencedor, entrega de prêmio, suporte ao usuário, análise de denúncias e operação administrativa.
+- [Visão Geral](#-visão-geral)
+- [Funcionalidades](#-funcionalidades)
+- [Requisitos](#-requisitos)
+- [Instalação Local (sem Docker)](#-instalação-local-sem-docker)
+- [Instalação com Docker](#-instalação-com-docker)
+- [Deploy em Cloud (Railway)](#-deploy-em-cloud-railway)
+- [Deploy em VPS (systemd)](#-deploy-em-vps-systemd)
+- [Variáveis de Ambiente](#-variáveis-de-ambiente)
+- [Estrutura do Projeto](#-estrutura-do-projeto)
+- [Primeiro Setup do Servidor](#-primeiro-setup-do-servidor)
+- [Perfis de Usuário](#-perfis-de-usuário)
+- [Links Úteis](#-links-úteis)
 
 ---
 
-## Estrutura
+## 🎯 Visão Geral
+
+O **X1 Frifas Bot** gerencia todo o ciclo de vida de partidas 1x1, 2x2, 3x3 e 4x4 de Free Fire com apostas em dinheiro real. Centraliza filas, mediação, pagamento PIX, suporte, análise de denúncias e renovação de licença de mediadores — tudo dentro do Discord, sem ferramentas externas.
+
+### Fluxo Resumido
+
+```
+Jogador entra na fila (botão)
+    → Fila completa → Thread criada automaticamente
+    → Mediador conduz: pagamento → partida → vencedor → prêmio
+    → Thread devolvida ao pool para reutilização
+```
+
+---
+
+## ✨ Funcionalidades
+
+| Módulo | Descrição |
+|--------|----------|
+| 🎮 **Partidas** | Filas por modo/valor, cards interativos, threads automáticas |
+| ⚖️ **Mediação** | Confirmação de pagamento, definição de vencedor, entrega de prêmio |
+| 🎫 **Suporte** | Sistema de tickets com canais privados por atendente |
+| 🔍 **Análise** | Denúncias de hack, fila de casos, blacklist integrada |
+| 🚫 **Blacklist** | Consulta pública por auto-verificação ou Discord ID |
+| 💳 **PIX / Renovação** | Licença de mediador via Efí Pay, QR Code por DM, webhook automático |
+| 📊 **Dashboards** | Analytics em tempo real: partidas, mediadores, suporte, ranking |
+| 📣 **Influencers** | Cadastro, código de convite, comissão, ranking |
+| 🔄 **Thread Pool** | Reutilização de threads para economizar o limite do Discord |
+| 🏥 **Health Check** | Painel técnico de status do bot e banco de dados |
+| 🛡️ **Anti-Spam** | Bloqueio automático de flood e rate limit |
+
+---
+
+## 📦 Requisitos
+
+### Software
+
+| Requisito | Versão mínima | Observação |
+|-----------|--------------|------------|
+| **Python** | 3.11+ | Usar exatamente 3.11 para compatibilidade com as libs |
+| **pip** | 23+ | Incluído com Python |
+| **Git** | qualquer | Para clonar o repositório |
+| **Docker** *(opcional)* | 24+ | Somente para rodar com container |
+| **Docker Compose** *(opcional)* | 2.20+ | Somente para rodar com container |
+
+### Serviços Externos
+
+| Serviço | Obrigatório | Para que serve |
+|---------|------------|----------------|
+| **Discord Bot Token** | ✅ Sim | Conectar o bot ao Discord |
+| **MongoDB Atlas** | ✅ Sim | Banco de dados (tier M0 gratuito funciona) |
+| **Efí Pay (Gerencianet)** | ⚠️ Opcional | Cobrança PIX automática para renovação de mediadores |
+| **URL Pública (webhook)** | ⚠️ Opcional | Apenas se usar Efí Pay (ex: Railway, VPS com IP) |
+
+---
+
+## 🖥️ Instalação Local (sem Docker)
+
+### 1. Clonar o repositório
 
 ```bash
-src/
-├── main.py                     # Entry point do bot
-├── cogs/                       # Comandos por domínio
-│   ├── admin_cog.py            # Comandos administrativos e setup
-│   ├── mediator_cog.py         # Gestão de mediadores e /silence
-│   ├── support_cog.py          # Chamados e canais privados de suporte
-│   ├── match_cog.py            # Partidas, perfil e solicitação de análise
-│   ├── analyst_cog.py          # Casos de análise e blacklist
-│   ├── invite_cog.py           # Convites e rate limit stats
-│   ├── influencer_cog.py       # Gestão de influencers
-│   ├── renewal_cog.py          # Renovação de licença via PIX
-│   └── thread_pool_cog.py      # Monitoramento e pré-aquecimento do pool de threads
-├── services/                   # Lógica de negócio
-│   ├── match_service.py
-│   ├── thread_reuse_service.py
-│   ├── mediator_queue.py
-│   ├── invite_tracker_service.py
-│   ├── rate_limit_monitor_service.py
-│   ├── health_check_service.py
-│   ├── influencer_service.py
-│   ├── anti_spam_service.py
-│   ├── onboarding_service.py
-│   └── ...
-├── views/                      # Botões, modais, selects e embeds
-├── models/                     # Modelos de dados
-├── config/                     # Configurações gerais e canais
-└── utils/                      # Logger, retry, datetime, helpers
-deploy/
-├── x1frifas.service            # Serviço systemd para VPS
-└── INSTALL.md                  # Guia de instalação
-Instalação
-bash
-# 1. Clone o repositório
 git clone https://github.com/Cajuz/X1_frifas-Discord_bot.git
 cd X1_frifas-Discord_bot
+```
 
-# 2. Crie o arquivo .env
-cp .env.example .env
+### 2. Criar ambiente virtual (recomendado)
 
-# 3. Preencha as variáveis necessárias
-# DISCORD_TOKEN=
-# MONGO_URI=
-# EFI_CLIENT_ID=
-# EFI_CLIENT_SECRET=
-# WEBHOOK_BASE_URL=
-# API_PORT=8000
-# e demais configurações do projeto
+```bash
+# Criar
+python -m venv .venv
 
-# 4. Instale as dependências
+# Ativar — Linux / macOS
+source .venv/bin/activate
+
+# Ativar — Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Ativar — Windows (CMD)
+.venv\Scripts\activate.bat
+```
+
+### 3. Instalar dependências
+
+```bash
 pip install -r requirements.txt
 
-# 5. Execute o bot
+# Opcional: se for usar renovação PIX com Efí Pay
+pip install efipay
+```
+
+### 4. Configurar variáveis de ambiente
+
+```bash
+# Copie o arquivo de exemplo
+cp .env.example .env
+
+# Abra e preencha os valores reais
+nano .env   # ou code .env / notepad .env
+```
+
+> **Variáveis obrigatórias para rodar:** `DISCORD_TOKEN` e `MONGO_URI`
+> As demais são opcionais (Efí Pay só é necessário para renovação via PIX).
+
+### 5. Iniciar o bot
+
+```bash
 python src/main.py
-Docker
-bash
-docker-compose up -d
-VPS com systemd
-bash
+```
+
+Quando aparecer na saída:
+```
+✅ MongoDB conectado!
+✅ Bot online: X1Frifas#0000
+✅ Bot totalmente inicializado!
+```
+O bot está funcionando. Agora execute `!setupcanais` em qualquer canal do servidor para configurar toda a estrutura.
+
+---
+
+## 🐳 Instalação com Docker
+
+### Pré-requisitos
+- Docker 24+ instalado
+- Docker Compose 2.20+ instalado
+
+### 1. Configurar variáveis de ambiente
+
+```bash
+cp .env.example .env
+nano .env   # preencha DISCORD_TOKEN e MONGO_URI no mínimo
+```
+
+### 2. Build e iniciar
+
+```bash
+# Build e iniciar em background
+docker compose up -d --build
+
+# Ver logs em tempo real
+docker compose logs -f
+```
+
+### 3. Verificar se está rodando
+
+```bash
+docker compose ps
+```
+
+A coluna `STATUS` deve mostrar `Up`.
+
+### Comandos úteis do Docker
+
+```bash
+# Parar o bot
+docker compose down
+
+# Reiniciar o bot (após atualizar código)
+docker compose up -d --build
+
+# Ver logs das últimas 100 linhas
+docker compose logs --tail=100
+
+# Acessar o container
+docker compose exec bot bash
+```
+
+> 💡 **Dica:** O `Dockerfile` já usa `python:3.11-slim`, instala todas as dependências e define `PYTHONPATH=/app/src` automaticamente.
+
+---
+
+## ☁️ Deploy em Cloud (Railway)
+
+O Railway é a plataforma recomendada para rodar o bot 24/7 com custo mínimo (~$5/mês).
+
+### 1. Configurar MongoDB Atlas
+
+1. Acesse [cloud.mongodb.com](https://cloud.mongodb.com) e crie uma conta
+2. Crie um cluster **M0 Free Tier**
+3. Em **Database Access** → crie um usuário com senha forte
+4. Em **Network Access** → **Add IP Address** → **Allow Access from Anywhere** (`0.0.0.0/0`)
+5. Em **Clusters** → **Connect** → **Connect your application** → copie a URI:
+   ```
+   mongodb+srv://<usuario>:<senha>@<cluster>.mongodb.net/x1frifas?retryWrites=true&w=majority
+   ```
+
+### 2. Subir código no GitHub
+
+```bash
+# Se ainda não tem repositório:
+git init && git add . && git commit -m "inicial"
+git branch -M main
+git remote add origin https://github.com/SEU_USUARIO/x1frifas-bot.git
+git push -u origin main
+
+# Atualizar código existente:
+git add . && git commit -m "atualização" && git push
+```
+
+### 3. Criar projeto no Railway
+
+1. Acesse [railway.app](https://railway.app) → login com GitHub
+2. **New Project** → **Deploy from GitHub repo**
+3. Selecione o repositório do bot
+4. Railway detecta o `Dockerfile` automaticamente ✅
+
+### 4. Configurar variáveis no Railway
+
+No painel do projeto: **serviço** → aba **Variables** → **New Variable**:
+
+```env
+DISCORD_TOKEN        = seu_token_do_discord
+MONGO_URI            = mongodb+srv://usuario:senha@cluster.mongodb.net/x1frifas?...
+MONGO_DB_NAME        = x1frifas
+EFI_CLIENT_ID        = seu_client_id_efi
+EFI_CLIENT_SECRET    = seu_client_secret_efi
+EFI_PIX_KEY          = sua_chave_pix
+EFI_SANDBOX          = false
+WEBHOOK_BASE_URL     = https://SEU-PROJETO.up.railway.app
+RENEWAL_PRICE_7D     = 10.00
+RENEWAL_PRICE_15D    = 18.00
+RENEWAL_PRICE_30D    = 25.00
+LOG_LEVEL            = INFO
+```
+
+### 5. Gerar domínio público (necessário para webhook PIX)
+
+1. No Railway: **Settings** → **Networking** → **Generate Domain**
+2. Copie a URL gerada (ex: `x1frifas-bot.up.railway.app`)
+3. Atualize `WEBHOOK_BASE_URL` com essa URL
+4. No painel da Efí Pay, configure o webhook:
+   ```
+   https://x1frifas-bot.up.railway.app/webhook/efi
+   ```
+
+### 6. Deploy
+
+Após salvar as variáveis, clique em **Deploy**. Acompanhe na aba **Logs**:
+
+```
+✅ MongoDB conectado!
+✅ Bot online: X1Frifas#0000
+✅ Bot totalmente inicializado!
+```
+
+### 7. CI/CD automático
+
+A cada `git push` na branch `main`, o Railway realiza deploy automático em ~1 minuto.
+
+### Planos Railway
+
+| Plano | Custo | Ideal para |
+|-------|-------|------------|
+| Hobby | $5/mês | ✅ Bot Discord (uso típico: $2–4/mês) |
+| Pro | $20/mês | Múltiplos serviços / alto volume |
+
+---
+
+## 🖥️ Deploy em VPS (systemd)
+
+Para rodar em VPS Linux (Ubuntu/Debian) com reinício automático.
+
+### 1. Preparar o servidor
+
+```bash
+# Atualizar pacotes
+sudo apt update && sudo apt upgrade -y
+
+# Instalar Python 3.11 e pip
+sudo apt install -y python3.11 python3.11-venv python3-pip git
+```
+
+### 2. Clonar e configurar
+
+```bash
+# Clonar o repositório
+git clone https://github.com/Cajuz/X1_frifas-Discord_bot.git /opt/x1frifas
+cd /opt/x1frifas
+
+# Criar ambiente virtual e instalar dependências
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Configurar variáveis
+cp .env.example .env
+nano .env
+```
+
+### 3. Configurar serviço systemd
+
+```bash
+# Copiar o arquivo de serviço
 sudo cp deploy/x1frifas.service /etc/systemd/system/
+
+# Habilitar e iniciar
 sudo systemctl daemon-reload
 sudo systemctl enable x1frifas
 sudo systemctl start x1frifas
+
+# Verificar status
+sudo systemctl status x1frifas
+```
+
+### 4. Ver logs em tempo real
+
+```bash
 sudo journalctl -u x1frifas -f
-Perfis de uso
-ADM
-Responsável pela configuração do servidor, dashboards, canais, moderação, monitoramento técnico, gestão de mediadores, influencers e pool de threads.
-
-Mediador
-Responsável por conduzir a partida dentro do tópico, confirmar pagamento, iniciar a partida, declarar vencedor, confirmar envio do prêmio e aplicar silêncio em canal/thread.
-
-Suporte
-Responsável por atendimento em canais privados, fechamento e conclusão de chamados.
-
-Analista
-Responsável por assumir casos de denúncia, decidir casos e gerenciar a blacklist.
-
-Jogador
-Pode entrar em filas, cancelar entrada, consultar perfil, abrir chamados, solicitar análise e confirmar recebimento do prêmio.
-
-Comandos principais
-Administrador
-Comando	Tipo	Descrição
-!setupcanais	Prefixo	Configura a estrutura principal do servidor
-!setupfaturamento	Prefixo	Posta o painel de faturamento
-!setupguias	Prefixo	Atualiza canais de guias
-!setupsuporte	Prefixo	Posta os painéis de suporte
-!setupmediador	Prefixo	Posta os painéis de mediador
-!setupquerosermediador	Prefixo	Posta painel de candidatura a mediador
-!setupinfluencers	Prefixo	Posta painéis de influencers
-!setuppix	Prefixo	Posta painel de PIX
-!setuprenovacao	Prefixo	Posta painel de renovação
-!setuppartidas	Prefixo	Posta os cards de fila de partida
-!setupdashboards	Prefixo	Atualiza dashboards
-!dashboard	Prefixo	Atualiza o dashboard principal
-!atualizardashboards	Prefixo	Atualiza todos os dashboards
-!healthcheck	Prefixo	Exibe painel técnico do bot
-!bloquear @membro [motivo]	Prefixo	Bloqueia membro manualmente
-!desbloquear @membro	Prefixo	Remove bloqueio manual
-!limpar [1-100]	Prefixo	Limpa mensagens do canal
-!verpix [@membro]	Prefixo	Consulta chave PIX cadastrada
-!helpadm	Prefixo	Lista comandos administrativos
-!addmediador @membro	Prefixo	Adiciona membro à fila de mediadores
-!removemediador @membro	Prefixo	Remove membro da fila de mediadores
-!fila	Prefixo	Exibe fila e status de mediadores
-!setupanalise	Prefixo	Posta painel de solicitação de análise
-!setupexposed	Prefixo	Posta painel da blacklist
-!criarcanalsuporte [@membro]	Prefixo	Cria canal privado de suporte
-!renovarmediador @membro [dias] [valor]	Prefixo	Gera cobrança PIX manual para renovação
-/threadpool setup	Slash	Posta ou atualiza o painel do pool de threads
-/threadpool preaquecer [quantidade]	Slash	Cria threads arquivadas no pool
-/threadpool status	Slash	Mostra o resumo do estado do pool
-/topconvites	Slash	Ranking de convites
-/ratelimitstats [horas]	Slash	Estatísticas de rate limit
-/influencer add @membro invitecode [comissao]	Slash	Cadastra influencer
-/influencer remove @membro	Slash	Remove influencer
-/influencer ranking	Slash	Ranking de influencers
-Mediador
-Os comandos de fluxo da partida devem ser usados dentro da thread da partida.
-
-Comando	Tipo	Descrição
-!menu_partida	Prefixo	Envia painel do mediador via DM
-!confirmar_pagamento	Prefixo	Confirma recebimento dos pagamentos
-!iniciar_partida	Prefixo	Inicia a partida
-!winner_team blue	Prefixo	Define Time Blue como vencedor
-!winner_team red	Prefixo	Define Time Red como vencedor
-!prize	Prefixo	Confirma que o prêmio foi enviado
-!cancelar_match [motivo]	Prefixo	Cancela a partida
-/silence @membro [segundos] [motivo]	Slash	Silencia jogador no canal/thread atual
-/renovar [dias]	Slash	Gera cobrança PIX para renovar licença
-!verpix [@membro]	Prefixo	Consulta chave PIX
-Suporte
-Comando	Tipo	Descrição
-!chamado	Prefixo	Lista chamados abertos do usuário
-!fecharchamado [ticket_id]	Prefixo	Fecha um chamado
-!concluirchamado [ticket_id]	Prefixo	Marca chamado como resolvido
-!criarcanalsuporte [@membro]	Prefixo	Cria canal privado de suporte
-/renomearcanal [sufixo]	Slash	Renomeia o canal do agente de suporte
-!help	Prefixo	Lista comandos gerais úteis
-Analista
-Comando	Tipo	Descrição
-/assumircaso [case_id]	Slash	Assume um caso de análise
-/decidircaso [case_id] [decisao] [motivo]	Slash	Encerra um caso de análise
-/blacklistadd [player_id] [motivo]	Slash	Adiciona jogador à blacklist
-/blacklistremove [player_id]	Slash	Remove jogador da blacklist
-/blacklistcheck [player_id]	Slash	Consulta blacklist
-/blacklistlist	Slash	Lista os últimos registros da blacklist
-Decisões possíveis no comando /decidircaso:
+```
+
+### 5. Atualizar o bot
+
+```bash
+cd /opt/x1frifas
+git pull origin main
+source .venv/bin/activate
+pip install -r requirements.txt  # se houve mudança nas dependências
+sudo systemctl restart x1frifas
+```
+
+---
+
+## 🔐 Variáveis de Ambiente
+
+Copie `.env.example` para `.env` e preencha os valores. Nunca commite o `.env` real no Git.
+
+```env
+# ── Discord (obrigatório) ──────────────────────────────────────
+DISCORD_TOKEN=seu_token_aqui
+
+# ── MongoDB Atlas (obrigatório) ───────────────────────────────
+MONGO_URI=mongodb+srv://<usuario>:<senha>@<cluster>.mongodb.net/<database>?retryWrites=true&w=majority
+MONGO_DB_NAME=x1frifas
+
+# ── Efí Pay / PIX — renovação automática (opcional) ──────────
+EFI_CLIENT_ID=seu_client_id_efi
+EFI_CLIENT_SECRET=seu_client_secret_efi
+EFI_PIX_KEY=sua_chave_pix
+EFI_SANDBOX=true          # false em produção
+
+# ── Webhook Efí Pay (opcional) ────────────────────────────────
+WEBHOOK_BASE_URL=https://meubot.com
+
+# ── Preços de renovação (opcional) ───────────────────────────
+RENEWAL_PRICE_7D=10.00
+RENEWAL_PRICE_15D=18.00
+RENEWAL_PRICE_30D=25.00
+
+# ── Configurações gerais ─────────────────────────────────────
+LOG_LEVEL=INFO
+SERVER_NAME=X1 Frifas
+```
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+X1_frifas-Discord_bot/
+├── .env.example                   # Template de variáveis de ambiente
+├── .gitignore
+├── Dockerfile                     # Imagem Python 3.11-slim
+├── railway.toml                   # Configuração de deploy Railway
+├── requirements.txt               # Dependências Python
+│
+├── assets/                        # Banners e imagens dos canais de partida
+│
+├── deploy/
+│   ├── x1frifas.service           # Serviço systemd para VPS
+│   ├── RAILWAY.md                 # Guia detalhado de deploy Railway
+│   └── MANUTENCAO.md              # Guia de manutenção e operações
+│
+├── docs/
+│   └── COMMANDS.md                # 📖 Referência completa de comandos
+│
+└── src/
+    ├── main.py                    # Entry point — inicialização do bot
+    │
+    ├── cogs/                      # Comandos organizados por domínio
+    │   ├── admin_cog.py           # Setup, moderação, operacional
+    │   ├── mediator_cog.py        # Gestão de mediadores e /silence
+    │   ├── support_cog.py         # Tickets e canais de suporte
+    │   ├── match_cog.py           # Partidas, perfil, análise
+    │   ├── analyst_cog.py         # Casos de denúncia e blacklist
+    │   ├── invite_cog.py          # Convites e rate limit
+    │   ├── influencer_cog.py      # Sistema de influencers
+    │   ├── renewal_cog.py         # Renovação de licença via PIX
+    │   ├── renewal_dashboard_cog.py # Dashboard de contratos
+    │   └── thread_pool_cog.py     # Pool e reutilização de threads
+    │
+    ├── services/                  # Lógica de negócio
+    ├── views/                     # Botões, modais, selects, embeds
+    ├── models/                    # Modelos de dados (Pydantic)
+    ├── config/                    # Configurações e mapeamento de canais
+    └── utils/                     # Logger, retry, datetime, helpers
+```
+
+---
+
+## ⚙️ Primeiro Setup do Servidor
+
+Após o bot estar online, execute **uma única vez** em qualquer canal onde você tenha permissão de administrador:
+
+```
+!setupcanais
+```
+
+Este comando cria e configura:
+- ✅ Todos os cargos necessários
+- ✅ Todas as categorias e canais
+- ✅ Todas as permissões por cargo
+- ✅ Todos os painéis e embeds interativos
+- ✅ Cards de fila de partida
+- ✅ Dashboards de analytics
 
-confirmado
+> **Atenção:** o `!setupcanais` pode ser executado novamente para repostar painéis sem perder dados. Ele não apaga mensagens fora dos painéis.
 
-inconclusivo
+---
 
-invalido
+## 👥 Perfis de Usuário
 
-Jogador
-Comando	Tipo	Descrição
-Botões de fila	UI	Entrar ou sair da fila pelos cards
-!cancelar	Prefixo	Cancela sua entrada na fila
-/perfil	Slash	Exibe estatísticas de partidas
-/convites [@membro]	Slash	Consulta convites
-/solicitaranalise [match_id] [motivo] [evidencia]	Slash	Solicita análise de suspeita de hack
-!chamado	Prefixo	Lista chamados abertos
-!fecharchamado [ticket_id]	Prefixo	Fecha o próprio chamado
-Botão Confirmar Recebimento do Prêmio	UI	Confirma que recebeu o prêmio
-Fluxo de partida
-O jogador entra na fila pelo card no canal.
+| Cargo | Responsabilidades principais |
+|-------|-----------------------------|
+| **Controller / ADM** | Setup do servidor, moderação, dashboards, gestão completa |
+| **Mediador** | Conduzir partidas, confirmar pagamento, definir vencedor |
+| **Suporte** | Atender tickets, abrir/fechar canais de atendimento |
+| **Analista** | Analisar denúncias, gerenciar blacklist |
+| **Membro / Jogador** | Entrar em filas, abrir tickets, consultar perfil |
 
-Quando a fila completa, é criado um tópico de confirmação.
+> 📖 Para a lista completa de comandos por perfil, acesse [`docs/COMMANDS.md`](docs/COMMANDS.md).
 
-A fila é convertida em partida com mediador.
+---
 
-O mediador confirma pagamento com !confirmar_pagamento.
+## 🔧 Troubleshooting
 
-O mediador inicia com !iniciar_partida.
+**Bot não conecta ao banco:**
+- Verifique se o IP `0.0.0.0/0` está liberado no MongoDB Atlas → Network Access
+- Confirme que `MONGO_URI` não tem espaços extras
 
-Ao final, o mediador define o vencedor com !winner_team.
+**Bot inicia mas cai em loop:**
+- Veja os logs — geralmente variável de ambiente ausente
+- Confirme que `DISCORD_TOKEN` é válido e o bot tem os intents habilitados no portal do Discord
 
-O mediador confirma envio do prêmio com !prize.
+**Intents necessários no Discord Developer Portal:**
+- `Message Content Intent` ✅
+- `Server Members Intent` ✅
+- `Presence Intent` ✅ (opcional, para AFK check)
 
-O vencedor confirma recebimento pelo botão.
+**Webhook PIX não funciona:**
+- `EFI_SANDBOX` deve ser `false` em produção
+- A URL em `WEBHOOK_BASE_URL` deve ser pública (Railway ou VPS com IP)
+- Configurar a URL no painel Efí Pay: `https://sua-url.com/webhook/efi`
 
-A partida é finalizada e o tópico pode ser devolvido ao pool de reutilização.
+---
 
-Sistema de reutilização de tópicos
-O projeto possui um sistema de reutilização de threads para reduzir criação excessiva de tópicos e evitar chegar ao limite operacional do Discord.
+## 🔗 Links Úteis
 
-Recursos
-Reaproveitamento de threads arquivadas
+| Recurso | Link |
+|---------|------|
+| Discord Developer Portal | [discord.com/developers](https://discord.com/developers/applications) |
+| MongoDB Atlas | [cloud.mongodb.com](https://cloud.mongodb.com) |
+| Railway | [railway.app](https://railway.app) |
+| Efí Pay | [efipay.com.br](https://efipay.com.br) |
+| discord.py docs | [discordpy.readthedocs.io](https://discordpy.readthedocs.io) |
+| Guia Railway detalhado | [`deploy/RAILWAY.md`](deploy/RAILWAY.md) |
+| Guia de manutenção | [`deploy/MANUTENCAO.md`](deploy/MANUTENCAO.md) |
+| Referência de comandos | [`docs/COMMANDS.md`](docs/COMMANDS.md) |
 
-Pré-aquecimento de pool por canal
+---
 
-Monitoramento por painel administrativo
+<div align="center">
 
-Limpeza e retorno da thread ao pool ao final da partida
+Feito com ❤️ para o servidor X1 Frifas
 
-Controle de threads ativas e margem de segurança
-
-Comandos
-/threadpool setup
-
-/threadpool preaquecer
-
-/threadpool status
-
-Renovação de licença de mediador
-A renovação é feita via PIX, com suporte a geração de cobrança, QR Code em DM, validação manual por botão e confirmação automática por webhook.
-
-Recursos
-Planos de 7, 15 e 30 dias
-
-Expiração automática da cobrança
-
-Restauração automática do cargo de mediador após pagamento
-
-Avisos de vencimento
-
-Remoção automática do cargo quando a licença expira
-
-Comandos
-/renovar
-
-!renovarmediador
-
-Influencers
-O sistema de influencers permite cadastrar usuários com código de convite e acompanhar a performance deles.
-
-Recursos
-Registro de influencer
-
-Associação com código de convite
-
-Comissão por membro convidado
-
-Ranking e faturamento individual
-
-Comandos
-/influencer add
-
-/influencer remove
-
-/influencer stats
-
-/influencer faturamento
-
-/influencer ranking
-
-Convites e rate limit
-O bot monitora convites e também registra eventos de rate limit.
-
-Comandos
-/convites
-
-/topconvites
-
-/ratelimitstats
-
-Blacklist e análises
-O módulo de análise permite denunciar suspeita de hack e encaminhar o caso para analistas.
-
-Recursos
-Solicitação de análise por jogador
-
-Fila de casos
-
-Assunção de caso por analista
-
-Decisão final com justificativa
-
-Integração com blacklist
-
-Painel no canal de exposed
-
-Comandos
-/solicitaranalise
-
-/assumircaso
-
-/decidircaso
-
-/blacklistadd
-
-/blacklistremove
-
-/blacklistcheck
-
-/blacklistlist
-
-Suporte
-O sistema de suporte usa tickets e canais privados por atendente.
-
-Recursos
-Abertura de ticket por painel
-
-Fechamento e conclusão de chamado
-
-Canal privado por agente
-
-Renomeação do canal conforme assunto
-
-Comandos
-!chamado
-
-!fecharchamado
-
-!concluirchamado
-
-!criarcanalsuporte
-
-/renomearcanal
-
-Variáveis de ambiente
-Use o arquivo .env.example como referência.
-As variáveis podem incluir, entre outras:
-
-text
-DISCORD_TOKEN=
-MONGO_URI=
-EFI_CLIENT_ID=
-EFI_CLIENT_SECRET=
-WEBHOOK_BASE_URL=
-API_PORT=8000
-RENEWAL_PRICE_7D=
-RENEWAL_PRICE_15D=
-RENEWAL_PRICE_30D=
-Features implementadas
-Sistema modular com cogs por domínio
-
-Views persistentes registradas no startup
-
-Filas de partida com cards interativos
-
-Gestão completa de partidas mediadas
-
-Confirmação de prêmio por botão
-
-Reutilização de threads
-
-Health check e monitoramento do pool
-
-Sistema de suporte com canais privados
-
-Solicitação de análise de suspeita de hack
-
-Blacklist com painel dedicado
-
-Invite tracker
-
-Rate limit monitor
-
-Influencer control
-
-Renovação automática de licença via PIX
-
-AFK check para fila e partida
-
-Dashboards operacionais
-
-Integração com MongoDB
-
-Deploy em VPS com systemd
-
-Observações
-Alguns comandos funcionam apenas em canais específicos, como casos de blacklist no canal exposed.
-
-Os comandos de partida com prefixo devem ser executados dentro da thread da partida.
-
-O comando /silence deve ser usado no canal ou thread em que o membro será silenciado.
-
-A renovação depende da configuração correta da integração PIX e do webhook.
+</div>
