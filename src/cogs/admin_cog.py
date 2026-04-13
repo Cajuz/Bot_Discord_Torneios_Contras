@@ -113,7 +113,7 @@ class AdminCog(commands.Cog, name="Admin"):
         await msg.edit(content="✅ Todos os dashboards atualizados.")
 
     # ─────────────────────────────────────────
-    # SETUP INDIVIDUAIS — novos painéis ← NOVO
+    # SETUP INDIVIDUAIS — novos painéis
     # ─────────────────────────────────────────
 
     @commands.command(name="setup_avisos")
@@ -157,6 +157,42 @@ class AdminCog(commands.Cog, name="Admin"):
         from services.channel_setup_service import channel_setup_service
         await channel_setup_service.setup_mediadores_afks(ctx.guild)
         await ctx.reply("✅ Painel de mediadores AFK postado.")
+
+    # ─────────────────────────────────────────
+    # SETUP — Cadastro de Mediador ← NOVO
+    # ─────────────────────────────────────────
+
+    @commands.command(name="setup_cadastro_mediador")
+    @commands.has_permissions(administrator=True)
+    async def setup_cadastro_mediador(self, ctx: commands.Context):
+        """Posta o card fixo de cadastro de mediador com formulário modal."""
+        from views.mediator_register_view import MediatorRegisterView
+        from services.channel_service import CADASTRO_MEDIADOR_CHANNEL
+
+        ch = discord.utils.get(ctx.guild.text_channels, name=CADASTRO_MEDIADOR_CHANNEL)
+        if not ch:
+            await ctx.reply(
+                f"❌ Canal `#{CADASTRO_MEDIADOR_CHANNEL}` não encontrado. "
+                "Execute `!setupcanais` primeiro."
+            )
+            return
+
+        embed = discord.Embed(
+            title="📋  Cadastro de Mediador — X1 Frifas",
+            description=(
+                "Preencha o formulário abaixo para se cadastrar como mediador.\n\n"
+                "**Requisitos**\n"
+                "— Aprovação prévia pelo processo externo divulgado no servidor\n"
+                "— Comprovante de pagamento da licença\n"
+                "— Dados pessoais válidos (CPF, PIX, telefone)\n\n"
+                "Clique em **Cadastrar** para abrir o formulário."
+            ),
+            color=0xFFD54F,
+        )
+        embed.set_footer(text="X1 Frifas · Apenas candidatos aprovados externamente")
+
+        await ch.send(embed=embed, view=MediatorRegisterView())
+        await ctx.reply(f"✅ Card de cadastro de mediador postado em {ch.mention}.")
 
     # ─────────────────────────────────────────
     # MODERAÇÃO
@@ -240,19 +276,15 @@ class AdminCog(commands.Cog, name="Admin"):
         view  = HealthCheckView(bot=self.bot, start_time=BOT_START_TIME)
         await ctx.reply(embed=embed, view=view)
 
-
     @commands.command(name="faturamento")
     async def faturamento(self, ctx: commands.Context, member: discord.Member = None):
-        from services.faturamento_mediador import (FaturamentoMediadorService,FaturamentoView
-        )
+        from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView
         target = member or ctx.author
         is_admin = ctx.author.guild_permissions.administrator
         is_mediator = bool({r.name for r in ctx.author.roles} & {"Controller", "Mediador", "Mediator"})
-        # ❌ ninguém sem permissão usa
         if not is_admin and not is_mediator:
             await ctx.reply("❌ Apenas mediadores ou administradores podem usar este comando.")
             return
-        # ❌ mediador não pode ver de outros
         if not is_admin and target.id != ctx.author.id:
             await ctx.reply("❌ Você só pode ver o seu próprio faturamento.")
             return
@@ -262,11 +294,12 @@ class AdminCog(commands.Cog, name="Admin"):
             await ctx.reply(f"❌ Nenhuma partida encontrada para {target.mention}.")
             return
         avatar_url = target.display_avatar.url if target.display_avatar else None
-        view = FaturamentoView(service=service,partidas=partidas,mediador_id=int(target.id),nome_mediador=target.name,avatar_url=avatar_url)
+        view = FaturamentoView(
+            service=service, partidas=partidas, mediador_id=int(target.id),
+            nome_mediador=target.name, avatar_url=avatar_url
+        )
         embed = await view.gerar_embed(1)
         await ctx.reply(embed=embed, view=view)
-
-
 
     @commands.command(name="verpix")
     @commands.has_permissions(administrator=True)
@@ -299,19 +332,16 @@ class AdminCog(commands.Cog, name="Admin"):
             await ctx.reply(embed=embed, file=file)
         except Exception as e:
             await ctx.send(f"❌ ERRO: {e}")
+
     # ─────────────────────────────────────────
-    # AJUDA — atualizado com novos comandos
+    # AJUDA
     # ─────────────────────────────────────────
 
     @commands.command(name="help_adm")
     @commands.has_permissions(administrator=True)
     async def help_adm(self, ctx: commands.Context):
         embed = discord.Embed(title="Comandos Admin", color=THEME_COLOR)
-        embed.add_field(
-            name="Setup completo",
-            value="`!setupcanais`",
-            inline=False
-        )
+        embed.add_field(name="Setup completo", value="`!setupcanais`", inline=False)
         embed.add_field(
             name="Setup individual — painéis base",
             value=(
@@ -320,44 +350,41 @@ class AdminCog(commands.Cog, name="Admin"):
                 "`!setup_quero_ser_mediador`  `!setup_partidas`\n"
                 "`!setup_dashboards`  `!setup_faturamento`"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
-            name="Setup individual — novos painéis",    # ← NOVO
+            name="Setup individual — novos painéis",
             value=(
-                "`!setup_avisos`\n"
-                "`!setup_painel_suporte`\n"
-                "`!setup_casos_analisar`\n"
-                "`!setup_aprovar_mediadores`\n"
-                "`!setup_historico_exposed`\n"
-                "`!setup_mediadores_afks`"
+                "`!setup_avisos`  `!setup_painel_suporte`  `!setup_casos_analisar`\n"
+                "`!setup_aprovar_mediadores`  `!setup_historico_exposed`\n"
+                "`!setup_mediadores_afks`  `!setup_cadastro_mediador`"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Moderação",
             value="`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`",
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Operacional",
             value="`!dashboard`  `!atualizar_dashboards`  `!healthcheck`  `!verpix @m`",
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Mediadores → mediator_cog",
             value="`!addmediador @m`  `!removemediador @m`  `!fila`  `/silence @m`",
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Analistas → analyst_cog",
             value="`!setup_analise`  `!setup_exposed`  `/blacklist_add`  `/blacklist_remove`",
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Suporte → support_cog",
             value="`!criar_canal_suporte @m`",
-            inline=False
+            inline=False,
         )
         await ctx.reply(embed=embed)
 

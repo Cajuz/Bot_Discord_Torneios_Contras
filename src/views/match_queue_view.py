@@ -1,9 +1,9 @@
+from __future__ import annotations
 import os
 
 import discord
 from typing import Optional
 
-from discord import interactions
 from services.match_queue_service import match_queue_service
 from models.queue import MatchQueue
 from models.match import Match
@@ -19,19 +19,15 @@ from discord import Interaction
 
 def _channel_label(channel_name: str) -> str:
     name = channel_name.lower()
-    if name.endswith("-mob"):
-        category = "Mobile"
-    elif name.endswith("-emu"):
-        category = "Emulador"
-    elif name.endswith("-misto"):
-        category = "Misto"
-    else:
-        category = ""
+    if name.endswith("-mob"):   category = "Mobile"
+    elif name.endswith("-emu"): category = "Emulador"
+    elif name.endswith("-misto"): category = "Misto"
+    else:                         category = ""
     return f"{channel_name.upper()} {category}".strip()
 
 
 def is_1x1_mob(channel_name: str) -> bool:
-    return channel_name.lower().startswith("1x1")
+    return channel_name.lower().startswith("1x1-mob")
 
 
 async def _player_has_active_match(player_id: int) -> bool:
@@ -63,21 +59,18 @@ def create_match_queue_embed(
     max_players:          int = 2,
 ) -> discord.Embed:
     """
-    Constrói o embed do card de fila.
-    Emojis usados apenas para status funcional (🔒 quando confirmando).
-    Canal 1x1 mob → duas filas (Gel Normal / Gel Infinito).
+    Canal 1x1-mob → duas filas (Gel Normal / Gel Infinito).
     Demais canais   → fila única.
     """
     bet_str = f"{bet_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     is_1x1  = is_1x1_mob(channel_name)
 
-    # Cor reflete o estado geral da fila
     if locked_gel == "all":
-        color = 0xE74C3C   # vermelho — ambas confirmando
+        color = 0xE74C3C
     elif locked_gel:
-        color = 0xF39C12   # laranja  — uma confirmando
+        color = 0xF39C12
     else:
-        color = 0x2ECC71   # verde    — aguardando jogadores
+        color = 0x2ECC71
 
     embed = discord.Embed(
         title=f"R$ {bet_str}",
@@ -87,7 +80,6 @@ def create_match_queue_embed(
     embed.set_image(url="attachment://banner.png")
 
     if is_1x1:
-        # Status funcional: 🔒 só aparece quando a fila está confirmando
         normal_status   = "🔒 Confirmando..." if locked_gel in ("normal",   "all") else f"{queue_normal_count}/{max_players}"
         infinito_status = "🔒 Confirmando..." if locked_gel in ("infinito", "all") else f"{queue_infinito_count}/{max_players}"
         embed.add_field(name="Gel Normal",   value=normal_status,   inline=True)
@@ -105,6 +97,13 @@ def create_match_queue_embed(
 # ─────────────────────────────────────────────────────────────
 
 class MatchQueueView(discord.ui.View):
+    """
+    View de fila de partidas.
+    Ao registrar como persistent view (main.py), channel_name fica vazio —
+    nesse caso os botões são definidos pelos custom_ids e o contexto é lido do embed.
+    Ao criar o card real (match_cog), channel_name é informado e os botões
+    corretos são renderizados.
+    """
 
     def __init__(
         self,
@@ -117,14 +116,14 @@ class MatchQueueView(discord.ui.View):
         self.bet_value    = bet_value
         self.locked_gel   = locked_gel
 
-        # Controle de botões por tipo de canal
-        if is_1x1_mob(channel_name):
-            # Canal 1x1 mob: botões de gel + sair (remove o botão genérico)
-            self.remove_item(self.btn_entrar)
-        else:
-            # Demais canais: botão entrar genérico + sair (remove os de gel)
-            self.remove_item(self.btn_gel_normal)
-            self.remove_item(self.btn_gel_infinito)
+        # Só esconde/mostra botões quando channel_name está definido
+        # (evita erro no registro de persistent view sem parâmetros)
+        if channel_name:
+            if is_1x1_mob(channel_name):
+                self.remove_item(self.btn_entrar)
+            else:
+                self.remove_item(self.btn_gel_normal)
+                self.remove_item(self.btn_gel_infinito)
 
     def _parse_context(
         self, interaction: discord.Interaction
@@ -142,9 +141,9 @@ class MatchQueueView(discord.ui.View):
             logger.error(f"[Queue] Erro ao parsear contexto do embed: {e}")
             return "", 0.0
 
-    # ── Botão Entrar (demais modos) ───────────────────────────
+    # ── Botão Entrar (demais modos) ──────────────────────────────
     @discord.ui.button(
-        label="Entrar na fila",
+        label="Entrar na Fila",
         style=discord.ButtonStyle.green,
         custom_id="queue_entrar",
     )
@@ -154,7 +153,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "normal", ch, bet)
 
-    # ── Botões Gel (somente 1x1 mob) ─────────────────────────
+    # ── Botões Gel (somente 1x1-mob) ───────────────────────────
     @discord.ui.button(
         label="Gel Normal",
         style=discord.ButtonStyle.green,
@@ -177,9 +176,9 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "infinito", ch, bet)
 
-    # ── Botão Sair (todos os canais) ──────────────────────────
+    # ── Botão Sair (todos os canais) ────────────────────────────
     @discord.ui.button(
-        label="Sair da fila",
+        label="Sair da Fila",
         style=discord.ButtonStyle.red,
         custom_id="queue_sair",
     )
@@ -189,7 +188,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._leave_queue(interaction, ch, bet)
 
-    # ── Lógica de entrada ─────────────────────────────────────
+    # ── Lógica de entrada ───────────────────────────────────────
 
     async def _handle_join(
         self,
@@ -256,7 +255,7 @@ class MatchQueueView(discord.ui.View):
                 await interaction.response.send_message(
                     "Erro ao entrar na fila.", ephemeral=True)
 
-    # ── Lógica de saída ───────────────────────────────────────
+    # ── Lógica de saída ────────────────────────────────────────
 
     async def _leave_queue(
         self,
@@ -287,7 +286,7 @@ class MatchQueueView(discord.ui.View):
                 await interaction.response.send_message(
                     "Erro ao sair da fila.", ephemeral=True)
 
-    # ── Refresh do card ───────────────────────────────────────
+    # ── Refresh do card ────────────────────────────────────────
 
     async def _refresh_card(
         self,
@@ -329,10 +328,7 @@ class MatchQueueView(discord.ui.View):
             if file:
                 embed.set_image(url=f"attachment://{file.filename}")
                 await interaction.message.edit(
-                    embed=embed,
-                    view=view,
-                    attachments=[file]
-                )
+                    embed=embed, view=view, attachments=[file])
             else:
                 await interaction.message.edit(embed=embed, view=view)
 
