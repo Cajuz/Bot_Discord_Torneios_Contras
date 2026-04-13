@@ -9,7 +9,7 @@ from services.channel_service import MEMBER_ROLE_NAME, CHANNEL_STRUCTURE
 class ChannelsConfig:
     # Aliases para compatibilidade com imports antigos
     MEMBER_ROLE_NAME      = MEMBER_ROLE_NAME
-    INVITES_CHANNEL       = "invites"            # STATUS_BOT_CHANNEL (canal único)
+    INVITES_CHANNEL       = "invites"
     RATE_LIMIT_CHANNEL    = "rate-limit-logs"
     EXPOSED_CHANNEL       = "exposed"
     ANALYST_QUEUE_CHANNEL = "painel-analista"
@@ -19,18 +19,18 @@ class ChannelsConfig:
     CHANNEL_STRUCTURE = CHANNEL_STRUCTURE
 
     # ── Partidas ────────────────────────────────────────────────
-CATEGORIES = {
+    CATEGORIES = {
         "MOBILE":   {"emoji": "📱", "channels": [
-            {"name": "1x1-mob",  "players": 2, "gel_types": ["normal", "infinito"]},
-            {"name": "2x2-mob",  "players": 2, "gel_types": ["normal"]},
-            {"name": "3x3-mob",  "players": 2, "gel_types": ["normal"]},
-            {"name": "4x4-mob",  "players": 2, "gel_types": ["normal"]},
+            {"name": "1x1-mob",   "players": 2, "gel_types": ["normal", "infinito"]},
+            {"name": "2x2-mob",   "players": 2, "gel_types": ["normal"]},
+            {"name": "3x3-mob",   "players": 2, "gel_types": ["normal"]},
+            {"name": "4x4-mob",   "players": 2, "gel_types": ["normal"]},
         ]},
         "EMULADOR": {"emoji": "🖥️", "channels": [
-            {"name": "1x1-emu",  "players": 2, "gel_types": ["normal"]},
-            {"name": "2x2-emu",  "players": 2, "gel_types": ["normal"]},
-            {"name": "3x3-emu",  "players": 2, "gel_types": ["normal"]},
-            {"name": "4x4-emu",  "players": 2, "gel_types": ["normal"]},
+            {"name": "1x1-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "2x2-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "3x3-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "4x4-emu",   "players": 2, "gel_types": ["normal"]},
         ]},
         "MISTO":    {"emoji": "🔀", "channels": [
             {"name": "4x4-misto", "players": 2, "gel_types": ["normal"]},
