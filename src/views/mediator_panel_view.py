@@ -19,8 +19,6 @@ def create_mediator_panel_embed(info: dict | None = None) -> discord.Embed:
         description="Gerencie sua presença na fila de mediação.",
         color=THEME_COLOR,
     )
-    embed.add_field(name="📋 Na Fila", value=f"`{in_queue}`",     inline=True)
-    embed.add_field(name="✅ Ativos",  value=f"`{total_active}`", inline=True)
     embed.add_field(
         name="Como funciona",
         value=(
