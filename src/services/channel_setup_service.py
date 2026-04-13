@@ -59,8 +59,24 @@ class ChannelSetupService:
         await self.setup_match_cards(guild)
         await self.setup_dashboards(guild)
         await self.setup_faturamento(guild)
+        # Dashboard de contratos — delega ao RenewalDashboardCog se disponível
+        await self._setup_painel_contratos(guild)
         log_success(f"[ChannelSetup] Setup completo em {guild.name}")
         return f"Servidor **{guild.name}** configurado com sucesso."
+
+    async def _setup_painel_contratos(self, guild: discord.Guild):
+        """Chama RenewalDashboardCog._update_panels() se o cog estiver carregado."""
+        if not self.bot:
+            return
+        try:
+            cog = self.bot.cogs.get("PainelContratos")
+            if cog:
+                await cog._update_panels(guild)
+                logger.info("[ChannelSetup] Painel de contratos atualizado")
+            else:
+                logger.warning("[ChannelSetup] Cog PainelContratos não carregado — painel ignorado")
+        except Exception as e:
+            logger.error(f"[ChannelSetup] _setup_painel_contratos erro: {e}")
 
     # ══════════════════════════════════════════════════════════
     # ROLES

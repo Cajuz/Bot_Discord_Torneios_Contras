@@ -19,6 +19,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="setupcanais")
     @commands.has_permissions(administrator=True)
     async def setupcanais(self, ctx: commands.Context):
+        """Configura todos os canais, painéis e dashboards do servidor."""
         msg = await ctx.reply("⏳ Configurando servidor...\nIsso pode levar alguns segundos.")
         try:
             from services.channel_setup_service import channel_setup_service
@@ -106,6 +107,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="setup_dashboards")
     @commands.has_permissions(administrator=True)
     async def setup_dashboards(self, ctx: commands.Context):
+        """Atualiza os dashboards de analytics (partidas, mediadores, ranking, suporte)."""
         from services.channel_setup_service import channel_setup_service
         msg = await ctx.reply("⏳ Atualizando dashboards...")
         channel_setup_service.bot = self.bot
@@ -155,7 +157,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="setup_blacklist")
     @commands.has_permissions(administrator=True)
     async def setup_blacklist(self, ctx: commands.Context):
-        """Posta o painel de verificação de blacklist."""
+        """Posta o painel de verificação de blacklist no canal #blacklist."""
         from services.channel_setup_service import channel_setup_service
         await channel_setup_service.setup_blacklist(ctx.guild)
         await ctx.reply("✅ Painel de blacklist postado.")
@@ -167,7 +169,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="setup_painel_contratos")
     @commands.has_permissions(administrator=True)
     async def setup_painel_contratos(self, ctx: commands.Context):
-        """Posta/atualiza os painéis de contratos. Delega ao RenewalDashboardCog."""
+        """Posta/atualiza os painéis financeiros de contratos de mediadores."""
         cog = self.bot.cogs.get("PainelContratos")
         if not cog:
             await ctx.reply("❌ Cog PainelContratos não carregado.")
@@ -183,6 +185,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="bloquear")
     @commands.has_permissions(manage_messages=True)
     async def bloquear(self, ctx: commands.Context, member: discord.Member, *, motivo: str = "Bloqueado manualmente"):
+        """Bloqueia um membro por spam/abuso (adiciona cargo de bloqueado)."""
         from config.anti_spam_config import AntiSpamConfig
         from config.database import db
         blocked_role = discord.utils.get(ctx.guild.roles, name=AntiSpamConfig.SPAM_BLOCK_ROLE_NAME)
@@ -199,6 +202,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="desbloquear")
     @commands.has_permissions(manage_messages=True)
     async def desbloquear(self, ctx: commands.Context, member: discord.Member):
+        """Remove o bloqueio de um membro."""
         from config.anti_spam_config import AntiSpamConfig
         from config.database import db
         blocked_role = discord.utils.get(ctx.guild.roles, name=AntiSpamConfig.SPAM_BLOCK_ROLE_NAME)
@@ -214,6 +218,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="limpar")
     @commands.has_permissions(manage_messages=True)
     async def limpar(self, ctx: commands.Context, quantidade: int = 10):
+        """Apaga N mensagens do canal atual (máx. 100)."""
         if not 1 <= quantidade <= 100:
             await ctx.reply("Informe um valor entre 1 e 100.")
             return
@@ -227,6 +232,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="healthcheck")
     @commands.has_permissions(administrator=True)
     async def healthcheck(self, ctx: commands.Context):
+        """Exibe o health check completo do bot (banco, filas, latência)."""
         from views.health_check_view import build_overview_embed, HealthCheckView
         from main import BOT_START_TIME
         embed = await build_overview_embed(self.bot, BOT_START_TIME)
@@ -235,6 +241,7 @@ class AdminCog(commands.Cog, name="Admin"):
 
     @commands.command(name="faturamento")
     async def faturamento(self, ctx: commands.Context, member: discord.Member = None):
+        """Exibe o relatório de faturamento de um mediador. ADM pode ver qualquer um."""
         from services.faturamento_mediador import FaturamentoMediadorService, FaturamentoView
         target = member or ctx.author
         is_admin = ctx.author.guild_permissions.administrator
@@ -261,6 +268,7 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="verpix")
     @commands.has_permissions(administrator=True)
     async def verpix(self, ctx: commands.Context, member: discord.Member = None):
+        """Exibe a chave PIX e QR Code de um mediador."""
         try:
             from services.pix_mediador import PixQRCode
             from config.database import db
@@ -297,10 +305,15 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.command(name="help_adm")
     @commands.has_permissions(administrator=True)
     async def help_adm(self, ctx: commands.Context):
-        embed = discord.Embed(title="Comandos Admin", color=THEME_COLOR)
-        embed.add_field(name="Setup completo", value="`!setupcanais`", inline=False)
+        """Lista todos os comandos disponíveis para ADM/Controller."""
+        embed = discord.Embed(
+            title="📋 Comandos Admin — X1 Frifas",
+            description="Prefixo: `!`  |  Slash: `/`",
+            color=THEME_COLOR,
+        )
+        embed.add_field(name="🔧 Setup completo", value="`!setupcanais`", inline=False)
         embed.add_field(
-            name="Setup individual — painéis base",
+            name="🛠️ Setup individual — painéis base",
             value=(
                 "`!setup_guias`  `!setup_suporte`  `!setup_mediador`\n"
                 "`!setup_influencers`  `!setup_pix`  `!setup_renovacao`\n"
@@ -310,7 +323,7 @@ class AdminCog(commands.Cog, name="Admin"):
             inline=False,
         )
         embed.add_field(
-            name="Setup individual — novos painéis",
+            name="🆕 Setup individual — novos painéis",
             value=(
                 "`!setup_avisos`  `!setup_aprovar_mediadores`\n"
                 "`!setup_historico_exposed`  `!setup_mediadores_afks`\n"
@@ -319,35 +332,36 @@ class AdminCog(commands.Cog, name="Admin"):
             inline=False,
         )
         embed.add_field(
-            name="Contratos / Finance",
+            name="💰 Contratos & Finance",
             value="`!setup_painel_contratos`  `!resumo_financeiro`",
             inline=False,
         )
         embed.add_field(
-            name="Moderação",
+            name="🚫 Moderação",
             value="`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`",
             inline=False,
         )
         embed.add_field(
-            name="Operacional",
-            value="`!healthcheck`  `!verpix @m`  `!faturamento [@m]`",
+            name="⚙️ Operacional",
+            value="`!healthcheck`  `!verpix [@m]`  `!faturamento [@m]`",
             inline=False,
         )
         embed.add_field(
-            name="Mediadores → mediator_cog",
+            name="👥 Mediadores → mediator_cog",
             value="`!addmediador @m`  `!removemediador @m`  `!fila`  `/silence @m`",
             inline=False,
         )
         embed.add_field(
-            name="Analistas → analyst_cog",
+            name="🔍 Analistas → analyst_cog",
             value="`!setup_analise`  `!setup_exposed`  `/blacklist_add`  `/blacklist_remove`",
             inline=False,
         )
         embed.add_field(
-            name="Suporte → support_cog",
+            name="🎫 Suporte → support_cog",
             value="`!criar_canal_suporte @m`",
             inline=False,
         )
+        embed.set_footer(text="X1 Frifas · Apenas ADM/Controller")
         await ctx.reply(embed=embed)
 
     # ─────────────────────────────────────────
@@ -357,11 +371,11 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
-            await ctx.reply("Sem permissão para este comando.")
+            await ctx.reply("❌ Sem permissão para este comando.")
         elif isinstance(error, commands.MemberNotFound):
-            await ctx.reply("Membro não encontrado.")
+            await ctx.reply("❌ Membro não encontrado.")
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.reply(f"Argumento obrigatório: `{error.param.name}`")
+            await ctx.reply(f"❌ Argumento obrigatório faltando: `{error.param.name}`")
 
 
 async def setup(bot: commands.Bot):
