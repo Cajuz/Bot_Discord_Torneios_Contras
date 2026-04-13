@@ -44,6 +44,7 @@ GUIA_JOGADOR_CHANNEL      = "guia-jogador"
 GUIA_MEDIADOR_CHANNEL     = "guia-mediador"
 GUIA_SUPORTE_CHANNEL      = "guia-suporte"
 GUIA_ANALISTA_CHANNEL     = "guia-analista"
+BLACKLIST_CHANNEL         = "blacklist"
 
 # ── Canais — SUPORTE ──────────────────────────────────────────
 SOLICITAR_SUPORTE_CHANNEL  = "solicitar-suporte"
@@ -62,6 +63,7 @@ SOLICITACOES_CHANNEL       = "solicitacoes-mediador"
 FATURAMENTO_CHANNEL        = "faturamento-mediadores"
 APROVAR_MEDIADORES_CHANNEL = "aprovar-mediadores"
 HISTORICO_CHANNEL          = "historico-partidas"
+CADASTRO_MEDIADOR_CHANNEL  = "cadastro-mediador"
 
 # ── Canais — ANALISTAS ────────────────────────────────────────
 SOLICITAR_ANALISE_CHANNEL  = "solicitar-analise"
@@ -137,6 +139,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL, AVISOS_CHANNEL,
         GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL,
         GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,
+        BLACKLIST_CHANNEL,                          # <-- NOVO
     ],
     CATEGORY_MEDIACAO: [
         MEDIADOR_PANEL_CHANNEL, MEDIADORES_ADMIN_CHANNEL,
@@ -144,6 +147,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         SOLICITACOES_CHANNEL, MEDIADOR_PIX_CHANNEL,
         RENOVACAO_CHANNEL, FATURAMENTO_CHANNEL,
         HISTORICO_CHANNEL,
+        CADASTRO_MEDIADOR_CHANNEL,                  # <-- NOVO
     ],
     CATEGORY_MOBILE:   ["1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob"],
     CATEGORY_EMULADOR: ["1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu"],
@@ -197,7 +201,6 @@ READ_ONLY_CHANNELS = {
 # ── Canais de interação por botão ─────────────────────────────
 # Membro pode VER e INTERAGIR com componentes (botões/modais),
 # mas NÃO pode enviar mensagens de texto. Apenas bot/ADM postam.
-# Inclui todos os canais de partida — o membro entra pela fila via botão.
 INTERACTION_ONLY_CHANNELS = {
     # Canais de partida (membro entra via botão de fila)
     "1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob",
@@ -207,6 +210,8 @@ INTERACTION_ONLY_CHANNELS = {
     SOLICITAR_SUPORTE_CHANNEL,
     MEDIADOR_PIX_CHANNEL,
     SOLICITAR_ANALISE_CHANNEL,
+    BLACKLIST_CHANNEL,         # <-- NOVO: membro interage via botão, não digita
+    CADASTRO_MEDIADOR_CHANNEL, # <-- NOVO: membro preenche modal de cadastro
 }
 
 # ── Canais view-only (só bot/ADM postam; roles indicadas só leem) ─
@@ -217,6 +222,7 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     GUIA_SUPORTE_CHANNEL:       [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     GUIA_ANALISTA_CHANNEL:      [ANALYST_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     AVISOS_CHANNEL:             [],   # todos os membros leem
+    BLACKLIST_CHANNEL:          [],   # todos os membros veem e interagem via botão
 
     # Analistas
     CASOS_ANALISAR_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
@@ -230,6 +236,7 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     # Mediação
     HISTORICO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     FATURAMENTO_CHANNEL:        [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+    CADASTRO_MEDIADOR_CHANNEL:  [],   # qualquer pessoa interessada vê e preenche modal
 
     # Analytics (view-only para os cargos abaixo)
     DASHBOARD_CHANNEL_NAME:     [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
@@ -301,7 +308,7 @@ class PermissionService:
         member_role = roles.get(MEMBER_ROLE_NAME)
         overwrites  = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
 
-        # ── 1. Canais de interação por botão (partidas, suporte, pix) ──
+        # ── 1. Canais de interação por botão (partidas, suporte, pix, blacklist) ──
         if channel_name in INTERACTION_ONLY_CHANNELS:
             target = member_role or guild.default_role
             overwrites[target] = discord.PermissionOverwrite(
@@ -334,7 +341,6 @@ class PermissionService:
                 for role_name in viewers:
                     role = roles.get(role_name) or discord.utils.get(guild.roles, name=role_name)
                     if role:
-                        # Nenhuma role envia — só bot e ADM (tratado abaixo)
                         overwrites[role] = discord.PermissionOverwrite(
                             read_messages=True, send_messages=False)
 
