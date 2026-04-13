@@ -162,6 +162,14 @@ class AdminCog(commands.Cog, name="Admin"):
         await channel_setup_service.setup_blacklist(ctx.guild)
         await ctx.reply("✅ Painel de blacklist postado.")
 
+    @commands.command(name="setup_alertas")
+    @commands.has_permissions(administrator=True)
+    async def setup_alertas(self, ctx: commands.Context):
+        """Posta o painel informativo no canal #alertas-adm."""
+        from services.channel_setup_service import channel_setup_service
+        await channel_setup_service.setup_alertas_adm(ctx.guild)
+        await ctx.reply("✅ Painel de alertas postado em #alertas-adm.")
+
     # ─────────────────────────────────────────
     # CONTRATOS (delegado ao renewal_dashboard_cog)
     # ─────────────────────────────────────────
@@ -238,6 +246,103 @@ class AdminCog(commands.Cog, name="Admin"):
         embed = await build_overview_embed(self.bot, BOT_START_TIME)
         view  = HealthCheckView(bot=self.bot, start_time=BOT_START_TIME)
         await ctx.reply(embed=embed, view=view)
+
+    @commands.command(name="stats")
+    @commands.has_permissions(manage_messages=True)
+    async def stats(self, ctx: commands.Context, member: discord.Member = None):
+        """Exibe relatório completo de um membro (partidas, blacklist, contrato, tickets)."""
+        target = member or ctx.author
+        is_admin    = ctx.author.guild_permissions.administrator
+        is_analyst  = bool({r.name for r in ctx.author.roles} & {"Analista", "Analyst", "Controller"})
+        if not is_admin and not is_analyst and target.id != ctx.author.id:
+            await ctx.reply("❌ Você só pode consultar o seu próprio perfil.")
+            return
+
+        msg = await ctx.reply("⏳ Buscando dados...")
+        try:
+            from services.stats_service import stats_service
+            s = await stats_service.get(str(target.id))
+
+            cor = 0xFF0000 if s.na_blacklist else (0xFFD54F if s.e_mediador else 0x2ECC71)
+            embed = discord.Embed(
+                title=f"📊 Perfil — {target.display_name}",
+                color=cor,
+                timestamp=utcnow(),
+            )
+            embed.set_thumbnail(url=target.display_avatar.url)
+
+            # Tags de status
+            if s.tags:
+                embed.add_field(name="Status", value="  ".join(s.tags), inline=False)
+
+            # Partidas
+            embed.add_field(
+                name="🎮 Partidas",
+                value=(
+                    f"Total: **{s.total_partidas}**\n"
+                    f"Vitórias: **{s.partidas_ganhas}** · Derrotas: **{s.partidas_perdidas}**\n"
+                    f"Canceladas: **{s.partidas_canceladas}** · Win Rate: **{s.win_rate}%**"
+                ),
+                inline=True,
+            )
+
+            # Financeiro
+            embed.add_field(
+                name="💰 Financeiro",
+                value=(
+                    f"Apostado: **R$ {s.valor_apostado_total:.2f}**\n"
+                    f"Ganho: **R$ {s.valor_ganho_total:.2f}**"
+                ),
+                inline=True,
+            )
+
+            # Blacklist
+            if s.na_blacklist:
+                embed.add_field(
+                    name="🚫 Blacklist",
+                    value=(
+                        f"Motivo: {s.blacklist_motivo}\n"
+                        f"Data: {s.blacklist_data}\n"
+                        f"Por: {s.blacklist_adicionado_por or 'N/A'}"
+                    ),
+                    inline=False,
+                )
+            else:
+                embed.add_field(name="✅ Blacklist", value="Não está na blacklist.", inline=False)
+
+            # Mediador
+            if s.e_mediador:
+                embed.add_field(
+                    name="🎖️ Contrato",
+                    value=(
+                        f"Status: **{s.contrato_status}**\n"
+                        f"Vence: **{s.contrato_vence or 'N/A'}**\n"
+                        f"PIX: {'✅ Cadastrado' if s.pix_cadastrado else '⚠️ Não cadastrado'}"
+                    ),
+                    inline=True,
+                )
+
+            # Suporte
+            if s.tickets_abertos or s.tickets_fechados:
+                embed.add_field(
+                    name="🎫 Tickets",
+                    value=f"Abertos: **{s.tickets_abertos}** · Fechados: **{s.tickets_fechados}**",
+                    inline=True,
+                )
+
+            # Spam
+            if s.spam_bloqueado:
+                embed.add_field(
+                    name="🔇 Bloqueio Anti-Spam",
+                    value=f"Motivo: {s.spam_motivo or 'Não informado'}",
+                    inline=False,
+                )
+
+            embed.set_footer(text=f"ID: {target.id} · X1 Frifas")
+            await msg.edit(content=None, embed=embed)
+        except Exception as e:
+            logger.error(f"[stats] {e}", exc_info=True)
+            await msg.edit(content=f"❌ Erro ao buscar dados: {e}")
 
     @commands.command(name="faturamento")
     async def faturamento(self, ctx: commands.Context, member: discord.Member = None):
@@ -327,7 +432,8 @@ class AdminCog(commands.Cog, name="Admin"):
             value=(
                 "`!setup_avisos`  `!setup_aprovar_mediadores`\n"
                 "`!setup_historico_exposed`  `!setup_mediadores_afks`\n"
-                "`!setup_cadastro_mediador`  `!setup_blacklist`"
+                "`!setup_cadastro_mediador`  `!setup_blacklist`\n"
+                "`!setup_alertas`"
             ),
             inline=False,
         )
@@ -343,7 +449,7 @@ class AdminCog(commands.Cog, name="Admin"):
         )
         embed.add_field(
             name="⚙️ Operacional",
-            value="`!healthcheck`  `!verpix [@m]`  `!faturamento [@m]`",
+            value="`!healthcheck`  `!verpix [@m]`  `!faturamento [@m]`  `!stats [@m]`",
             inline=False,
         )
         embed.add_field(

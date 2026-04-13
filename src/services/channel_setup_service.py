@@ -40,6 +40,7 @@ from services.channel_service import (
 from config.channels_config import ChannelsConfig
 
 THEME = 0xFFD54F
+ALERTAS_ADM_CHANNEL = "alertas-adm"
 
 
 class ChannelSetupService:
@@ -166,6 +167,7 @@ class ChannelSetupService:
         await self.setup_mediadores_afks(guild)
         await self.setup_cadastro_mediador(guild)
         await self.setup_blacklist(guild)
+        await self.setup_alertas_adm(guild)
         logger.info("[ChannelSetup] Todos os painéis postados")
 
     # ══════════════════════════════════════════════════════════
@@ -417,6 +419,25 @@ class ChannelSetupService:
         )
         embed.set_footer(text="X1 Frifas · Blacklist · Consulta disponível para todos")
         await self._post_panel(guild, BLACKLIST_CHANNEL, embed, BlacklistCheckView())
+
+    async def setup_alertas_adm(self, guild: discord.Guild):
+        """Posta o painel informativo no canal #alertas-adm."""
+        from utils.datetime_utils import utcnow
+        embed = discord.Embed(
+            title="🔔 Central de Alertas — ADM",
+            description=(
+                "Este canal recebe **alertas automáticos** do bot a cada 5 minutos.\n\n"
+                "**Gatilhos monitorados:**\n"
+                "⚠️ Latência do bot acima de 300 ms\n"
+                "📋 Contratos vencidos ou vencendo em até 3 dias\n"
+                "🔇 Fila de mediadores parada há mais de 30 minutos\n"
+                "💤 Mediadores em AFK há mais de 2 horas\n\n"
+                "Para alertas manuais de outros sistemas, use `alerts_cog.send_alert()`."
+            ),
+            color=0xFF6B35,
+        )
+        embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · X1 Frifas")
+        await self._post_panel(guild, ALERTAS_ADM_CHANNEL, embed, None)
 
     # ══════════════════════════════════════════════════════════
     # MATCH CARDS
