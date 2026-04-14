@@ -14,7 +14,6 @@ from views.log_comand import CommandLog
 from views.log_call import CallLog
 from views.log_troca_cargo import Troca_cargo
 
-
 load_dotenv()
 
 from config.database         import db
@@ -22,8 +21,7 @@ from config.discord_bot      import create_discord_bot, start_discord_bot, set_b
 from utils.logger             import logger, log_success
 from utils.datetime_utils     import utcnow
 from utils.retry              import with_retry, on_rate_limit
-from services.channel_service import RATE_LIMIT_CHANNEL_NAME
-# ↑ STATUS_BOT_CHANNEL removido — não era usado neste arquivo (dead import)
+from services.channel_service import RATE_LIMIT_CHANNEL_NAME, ADM_ROLE_NAME, PROTECTED_ROLES
 
 BOT_START_TIME = datetime.now(timezone.utc)
 
@@ -37,87 +35,61 @@ COGS = [
     "cogs.influencer_cog",
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
+    "cogs.renewal_dashboard_cog",
 ]
 
 bot          = create_discord_bot()
 _initialized = False
 
-#---------------------------------------------------------------
-#TESTE
-#---------------------------------------------------------------
-@bot.event
-async def on_voice_state_update(member, before, after):
-    logger.info(f"[VOICE] {member} mudou de estado")
+# ─────────────────────────────────────────────────────────────
+# Servidor HTTP — health check + webhook EFI
+#
+# IMPORTANTE: O Railway injeta automaticamente a variável PORT e
+# bate o healthcheck NESSA porta. Usamos PORT como prioridade,
+# com fallback para API_PORT (8000).
+# ─────────────────────────────────────────────────────────────
 
-@bot.event
-async def on_message_delete(message):
-    logger.info(f"[DELETE] mensagem deletada de {message.author}")
+async def _start_http_server():
+    from aiohttp import web
 
-@bot.event
-async def on_message(message):
-    logger.info(f"[MESSAGE] detectada")
-    await bot.process_commands(message)
+    async def health(request: web.Request) -> web.Response:
+        return web.Response(text="ok", status=200)
 
-@bot.event
-async def on_member_update(before, after):
-    logger.info(f"[TrocaCargo] {before} para {after} detectada")
+    async def efi_webhook(request: web.Request) -> web.Response:
+        if not os.getenv("WEBHOOK_BASE_URL", ""):
+            return web.Response(status=404)
+        try:
+            data   = await request.json()
+            txid   = data.get("txid") or data.get("txId", "")
+            status = data.get("status", "")
+            if status == "CONCLUIDA" and txid:
+                renewal = await db.get_collection("mediator_renewals").find_one(
+                    {"txid": txid})
+                if renewal and not renewal.get("confirmed"):
+                    from cogs.renewal_cog import _confirm_and_update
+                    await _confirm_and_update(
+                        interaction=None,
+                        txid=txid,
+                        mediator_id=renewal["mediator_id"],
+                        bot=bot,
+                    )
+                    logger.info(f"[Webhook] Renovação confirmada: {txid}")
+        except Exception as e:
+            logger.error(f"[Webhook] Erro: {e}")
+        return web.Response(status=200)
 
+    app = web.Application()
+    app.router.add_get("/health",       health)
+    app.router.add_post("/webhook/efi", efi_webhook)
 
-troca_cargo=Troca_cargo(bot)
-@bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-    if before.roles == after.roles:
-        return
-
-    from views.log_troca_cargo import Troca_cargo
-
-    logger = Troca_cargo(bot)
-    await logger.send_on_troca_cargo(before, after)
-    
-
-call_log = CallLog(bot)
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-
-    logger.info(f"[VOICE] Evento detectado: {member}")
-
-    # entrou
-    if not before.channel and after.channel:
-        await call_log.on_enter(member, after.channel)
-
-    # saiu
-    elif before.channel and not after.channel:
-        await call_log.on_exit(member)
-
-command_log = CommandLog(bot)
-
-@bot.event
-async def on_command(ctx):
-
-    logger.info(f"[COMMAND] Detectado: {ctx.command}")
-
-    args = " ".join(ctx.message.content.split()[1:])
-
-    await command_log.send_command_log(
-        ctx.author,
-        str(ctx.command),
-        args,
-        ctx.channel
-    )
-
-delete_log = MessageDeleteLog(bot)
-
-@bot.event
-async def on_message_delete(message):
-    logger.info(f"[DELETE] Detectado: {message.author}")
-
-    # ignora bot
-    if message.author.bot:
-        return
-
-    await delete_log.send_delete_log(message)
-
+    # Railway injeta PORT automaticamente — DEVE ser usada para o healthcheck
+    # funcionar. API_PORT é fallback para ambientes locais.
+    port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site   = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"[HTTP] Servidor na porta {port} — GET /health ativo")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -154,7 +126,6 @@ async def on_ready():
 
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
 
-    # ── Carrega cogs ──────────────────────────────────────────
     for cog in COGS:
         try:
             await bot.load_extension(cog)
@@ -162,14 +133,12 @@ async def on_ready():
         except Exception as e:
             logger.error(f"[Cog] ❌ {cog}: {e}")
 
-    # ── Sincroniza slash commands ─────────────────────────────
     try:
         synced = await bot.tree.sync()
         logger.info(f"[SlashCommands] {len(synced)} comandos sincronizados")
     except Exception as e:
         logger.error(f"[SlashCommands] Erro: {e}")
 
-    # ── Persistent views ──────────────────────────────────────
     try:
         from views.ticket_view             import TicketPanelView, TicketCardView, SupportCardView
         from views.mediator_panel_view     import MediatorPanelView
@@ -191,6 +160,9 @@ async def on_ready():
             AnalistaPessoalView, AnalistaAdminView,
             SuporteAdminView,
         )
+        from views.blacklist_view          import BlacklistCheckView
+        from views.mediator_register_view  import MediatorRegisterView
+        from cogs.renewal_dashboard_cog    import ContractPanelView
         from services.faturamento_mediador import RelatorioGeralView
         from services.match_queue_service  import ConfirmationView
 
@@ -204,9 +176,6 @@ async def on_ready():
             MatchQueueView(),
             MatchThreadView(match_id="__persistent__"),
             ConfirmationView(),
-            # ↓ FIX: HealthCheckView para registro persistente não precisa de args;
-            #   bot e start_time são injetados apenas no !healthcheck (admin_cog).
-            #   Se o construtor exigir esses args, adicione defaults opcionais lá.
             HealthCheckView(),
             ExposedPanelView(),
             AnalystCaseView(case_id="__persistent__"),
@@ -222,6 +191,9 @@ async def on_ready():
             AnalistaPessoalView(),
             AnalistaAdminView(),
             SuporteAdminView(),
+            BlacklistCheckView(),
+            MediatorRegisterView(),
+            ContractPanelView(),
         ]
 
         for view in persistent_views:
@@ -234,7 +206,6 @@ async def on_ready():
     except Exception as e:
         logger.error(f"[views] Erro ao importar views: {e}", exc_info=True)
 
-    # ── Invite tracker + rate limit monitor ───────────────────
     from services.invite_tracker_service     import invite_tracker_service
     from services.rate_limit_monitor_service import rate_limit_monitor
     invite_tracker_service.bot = bot
@@ -244,11 +215,9 @@ async def on_ready():
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
-    # ── Onboarding ────────────────────────────────────────────
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
 
-    # ── Anti-spam ─────────────────────────────────────────────
     try:
         from services.anti_spam_service import init_anti_spam_service
         init_anti_spam_service(bot)
@@ -256,24 +225,16 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AntiSpam] {e}")
 
-    # ── Fila de mediadores ────────────────────────────────────
     from services.mediator_queue import mediator_queue
     await mediator_queue.initialize()
 
-    # ── Dashboard de mediador ─────────────────────────────────
-    from services.mediador_dashboard_service import mediator_dashboard_service
-    mediator_dashboard_service.start_task(bot)
-
-    # ── Card service ──────────────────────────────────────────
     from services.card_service import card_service
     card_service.bot = bot
 
-    # ── Analytics ─────────────────────────────────────────────
     from services.analytics_service import analytics_service
     analytics_service.start_task(bot)
-    logger.info("[Analytics] Dashboards inicializados (atualização a cada hora)")
+    logger.info("[Analytics] Dashboards inicializados")
 
-    # ── AFK service ───────────────────────────────────────────
     from services.afk_service import afk_service
     afk_service.bot = bot
     if not afk_service.check_queue_afk.is_running():
@@ -281,9 +242,8 @@ async def on_ready():
     if not afk_service.check_match_afk.is_running():
         afk_service.check_match_afk.start()
     bot._afk_service = afk_service
-    logger.info("[AFK] Serviço inicializado (fila + partida)")
+    logger.info("[AFK] Serviço inicializado")
 
-    # ── Thread reuse ──────────────────────────────────────────
     try:
         from services.thread_reuse_service import init_thread_reuse_service
         init_thread_reuse_service(bot)
@@ -291,7 +251,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[ThreadReuse] {e}")
 
-    # ── Thread log ────────────────────────────────────────────
     try:
         from services.thread_log_service import init_thread_log_service
         init_thread_log_service(bot)
@@ -299,7 +258,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[ThreadLog] {e}")
 
-    # ── Health check ──────────────────────────────────────────
     try:
         from services.health_check_service import (
             init_health_check_service, set_bot_start_time
@@ -310,7 +268,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[HealthCheck] {e}")
 
-    # ── Analise fila ──────────────────────────────────────────
     try:
         from services.analise_fila import analise_fila_service
         analise_fila_service.bot = bot
@@ -318,7 +275,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AnaliseFila] {e}")
 
-    # ── Restaura membros bloqueados por spam ──────────────────
     try:
         from services.anti_spam_service import anti_spam_service
         if anti_spam_service:
@@ -328,14 +284,13 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[AntiSpam] restore_blocked_members: {e}")
 
-    # ── Sincroniza mediadores por cargo ───────────────────────
+    from services.mediator_queue import mediator_queue
     for guild in bot.guilds:
         try:
             await mediator_queue.sync_mediators_by_role(guild, role_name="Controller")
         except Exception as e:
             logger.warning(f"[on_ready] Sync mediadores: {e}")
 
-    # ── Status rotativo ───────────────────────────────────────
     if not set_status.is_running():
         set_status.start()
 
@@ -357,6 +312,100 @@ async def on_member_join(member: discord.Member):
     svc = getattr(bot, "_onboarding_service", None)
     if svc:
         await svc.handle_new_member(member)
+
+
+_troca_cargo_log = Troca_cargo(bot)
+_call_log        = CallLog(bot)
+_command_log     = CommandLog(bot)
+_delete_log      = MessageDeleteLog(bot)
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if before.roles == after.roles:
+        return
+
+    try:
+        await _troca_cargo_log.send_on_troca_cargo(before, after)
+    except Exception as e:
+        logger.warning(f"[TrocaCargo] Erro no log: {e}")
+
+    added_roles  = set(after.roles) - set(before.roles)
+    illegal_adds = {r for r in added_roles if r.name in PROTECTED_ROLES}
+    if not illegal_adds:
+        return
+
+    try:
+        guild    = after.guild
+        adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
+
+        async for entry in guild.audit_logs(
+            limit=5,
+            action=discord.AuditLogAction.member_role_update,
+        ):
+            if entry.target.id != after.id:
+                continue
+            if entry.user.id == bot.user.id:
+                return
+            if ADM_ROLE_NAME in {r.name for r in entry.user.roles}:
+                return
+            break
+
+        for role in illegal_adds:
+            try:
+                await after.remove_roles(role, reason="[Anti-self-role] Cargo protegido removido")
+                logger.warning(f"[AntiSelfRole] {after} tentou se auto-atribuir '{role.name}'. Removido.")
+            except Exception as e:
+                logger.error(f"[AntiSelfRole] Falha: {e}")
+
+        role_names = ", ".join(f"**{r.name}**" for r in illegal_adds)
+        try:
+            await after.send(
+                f"⚠️ Olá {after.display_name},\n"
+                f"O(s) cargo(s) {role_names} são gerenciados pela administração "
+                f"e foram removidos automaticamente."
+            )
+        except discord.Forbidden:
+            pass
+
+        from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
+        log_ch = discord.utils.get(guild.text_channels, name=LOGS_TROCA_CARGO_CHANNEL)
+        if log_ch:
+            embed = discord.Embed(title="⚠️ Tentativa de Auto-Atribuição de Cargo",
+                                  color=0xE74C3C, timestamp=utcnow())
+            embed.add_field(name="Membro",   value=f"{after.mention} (`{after.id}`)", inline=True)
+            embed.add_field(name="Cargo(s)", value=role_names,                        inline=True)
+            embed.set_footer(text="Bot removeu automaticamente")
+            try:
+                await log_ch.send(embed=embed)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"[AntiSelfRole] Erro geral: {e}")
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    logger.info(f"[VOICE] Evento detectado: {member}")
+    if not before.channel and after.channel:
+        await _call_log.on_enter(member, after.channel)
+    elif before.channel and not after.channel:
+        await _call_log.on_exit(member)
+
+
+@bot.event
+async def on_command(ctx):
+    logger.info(f"[COMMAND] Detectado: {ctx.command}")
+    args = " ".join(ctx.message.content.split()[1:])
+    await _command_log.send_command_log(ctx.author, str(ctx.command), args, ctx.channel)
+
+
+@bot.event
+async def on_message_delete(message: discord.Message):
+    logger.info(f"[DELETE] Detectado: {message.author}")
+    if message.author.bot:
+        return
+    await _delete_log.send_delete_log(message)
 
 
 @bot.event
@@ -381,10 +430,7 @@ async def on_message(message: discord.Message):
 
 
 @bot.tree.error
-async def on_app_command_error(
-    interaction: discord.Interaction,
-    error: discord.app_commands.AppCommandError,
-):
+async def on_app_command_error(interaction, error):
     msg = "Erro ao executar comando."
     if isinstance(error, discord.app_commands.MissingAnyRole):
         msg = "Você não tem permissão para usar este comando."
@@ -423,46 +469,6 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Webhook server (pagamentos EFI)
-# ─────────────────────────────────────────────────────────────
-
-async def _start_webhook_server():
-    try:
-        from aiohttp import web
-
-        async def efi_webhook(request: web.Request) -> web.Response:
-            try:
-                data   = await request.json()
-                txid   = data.get("txid") or data.get("txId", "")
-                status = data.get("status", "")
-                if status == "CONCLUIDA" and txid:
-                    renewal = await db.get_collection("mediator_renewals").find_one(
-                        {"txid": txid})
-                    if renewal and not renewal.get("confirmed"):
-                        from cogs.renewal_cog import _confirm_and_update
-                        await _confirm_and_update(
-                            interaction=None,
-                            txid=txid,
-                            mediator_id=renewal["mediator_id"],
-                            bot=bot,
-                        )
-                        logger.info(f"[Webhook] Renovação confirmada: {txid}")
-            except Exception as e:
-                logger.error(f"[Webhook] Erro: {e}")
-            return web.Response(status=200)
-
-        app = web.Application()
-        app.router.add_post("/webhook/efi", efi_webhook)
-        app.router.add_get("/health", lambda r: web.Response(text="ok"))
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("API_PORT", "8000")))
-        await site.start()
-    except Exception as e:
-        logger.error(f"[Webhook] Falha ao iniciar servidor HTTP: {e}")
-
-
-# ─────────────────────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────────────────────
 
@@ -472,11 +478,20 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    if os.getenv("WEBHOOK_BASE_URL", ""):
-        asyncio.create_task(_start_webhook_server())
-        logger.info("[Webhook] Servidor HTTP iniciado na porta 8000")
+    # Sobe o servidor HTTP primeiro (blocking await),
+    # garantindo que /health ja responde ANTES do bot.start().
+    # Em seguida, gather roda bot + keep_alive em paralelo.
+    await _start_http_server()
+    await asyncio.gather(
+        start_discord_bot(bot),
+        _keep_alive(),
+    )
 
-    await start_discord_bot(bot)
+
+async def _keep_alive():
+    """Coroutine auxiliar para manter o gather ativo indefinidamente."""
+    while True:
+        await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":

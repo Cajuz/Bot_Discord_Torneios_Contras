@@ -1,4 +1,5 @@
 import discord
+from services.dashboard_service import THEME2
 
 
 class ServerRules:
@@ -80,7 +81,7 @@ O que deseja fazer?
         embed = discord.Embed(
             title=ServerRules.RULES_TITLE,
             description=ServerRules.RULES_TEXT,
-            color=discord.Color.blue()
+            color=THEME2
         )
         embed.set_footer(text="Leia com atenção • Você tem 5 minutos para aceitar")
         return embed
@@ -90,7 +91,7 @@ O que deseja fazer?
         embed = discord.Embed(
             title=ServerRules.CONFIRMATION_TITLE,
             description=ServerRules.CONFIRMATION_TEXT,
-            color=discord.Color.red()
+            color=THEME2
         )
         embed.set_footer(text="Esta ação é irreversível")
         return embed
@@ -100,7 +101,7 @@ O que deseja fazer?
         embed = discord.Embed(
             title=ServerRules.WELCOME_TITLE,
             description=ServerRules.WELCOME_TEXT,
-            color=discord.Color.green()
+            color=THEME2
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_footer(text=f"Membro desde {discord.utils.utcnow().strftime('%d/%m/%Y')}")
