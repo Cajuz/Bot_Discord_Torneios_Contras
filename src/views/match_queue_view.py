@@ -9,6 +9,7 @@ from models.queue import MatchQueue
 from models.match import Match
 from config.database import db
 from config.channels_config import ChannelsConfig
+from services.dashboard_service import THEME2
 from views.imagens import get_banner_file
 from utils.logger import logger
 from discord import Interaction
@@ -81,7 +82,7 @@ def create_match_queue_embed(
     embed = discord.Embed(
         title=f"💰 R$ {bet_str}",
         description=f"**Modo:** {_channel_label(channel_name)}",
-        color=color,
+        color=THEME2,
     )
     embed.set_image(url="attachment://banner.png")
 
@@ -139,7 +140,7 @@ class MatchQueueView(discord.ui.View):
 
     # 🔥 BOTÃO ENTRAR (OUTROS MODOS)
     @discord.ui.button(
-        label="⚔️ ENTRAR NA FILA",
+        label="✔️ ENTRAR NA FILA",
         style=discord.ButtonStyle.green,
         custom_id="queue_entrar",
     )
@@ -174,7 +175,7 @@ class MatchQueueView(discord.ui.View):
 
     # 🔥 BOTÃO SAIR
     @discord.ui.button(
-        label="🚪 SAIR DA FILA",
+        label="✖️ SAIR DA FILA",
         style=discord.ButtonStyle.red,
         custom_id="queue_sair",
     )

@@ -2,6 +2,7 @@ from venv import logger
 
 import discord
 from services.channel_service import LOGS_CALL_CHANNEL
+from services.dashboard_service import THEME2
 
 class CallLog:
 
@@ -70,7 +71,7 @@ class CallLog:
             embed = discord.Embed(
                 title="📞 Log de Call",
                 description="**Sessão de call finalizada**",
-                color=0x2b2d31
+                color=THEME2
             )
 
             embed.add_field(
@@ -119,7 +120,7 @@ def build_call_log_embed():
             "Todas as **calls finalizadas** serão registradas aqui.\n\n"
             "🔎 Monitoramento de atividade."
         ),
-        color=0x2b2d31
+        color=THEME2
     )
 
     embed.add_field(

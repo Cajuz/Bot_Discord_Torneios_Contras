@@ -20,18 +20,27 @@ CATEGORIAS = ["Bug", "Pagamento", "Dúvida", "Conta", "Partida", "Outro"]
 
 def build_support_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Suporte",
+        title="🎫 Central de Suporte",
         description=(
             "Selecione a categoria do seu problema no menu abaixo\n"
             "e clique em **Abrir Ticket** para entrar em contato com nossa equipe."
         ),
         color=THEME_COLOR
     )
+
     embed.add_field(
-        name="Categorias",
-        value="\n".join(f"• {c}" for c in CATEGORIAS),
+        name="📂 Categorias",
+        value=(
+            "• ❖  Pagamento\n"
+            "• 👤 Conta\n"
+            "• 🎮 Partida\n"
+            "• 💥 Bug\n" \
+            "• ❓ Dúvida\n"
+            "• 📌 Outro"
+        ),
         inline=False
     )
+
     embed.set_footer(text="Responderemos o mais breve possível")
     return embed
 

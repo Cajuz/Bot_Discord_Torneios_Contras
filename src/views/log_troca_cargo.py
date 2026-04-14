@@ -1,8 +1,8 @@
 import discord
 import asyncio
+from services.dashboard_service import THEME2
 from utils.logger import logger
 from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
-
 
 
 class Troca_cargo:
@@ -46,7 +46,7 @@ class Troca_cargo:
             except Exception as e:
                 logger.warning(f"[CARGO] Falha audit log: {e}")
             timestamp = int(discord.utils.utcnow().timestamp())
-            embed = discord.Embed(title="Alteração de Cargos",color=0x2b2d31)
+            embed = discord.Embed(title="Alteração de Cargos",color=THEME2)
             embed.add_field(name="👤 Usuário",value=after.mention,inline=True)
             embed.add_field(name="🛠️ Responsável",value=executor.mention if executor else "Desconhecido",inline=True)
             if cargos_adicionados:
@@ -70,7 +70,7 @@ class Troca_cargo:
 def build_troca_cargo_log_embed():
     embed = discord.Embed(
         title="Troca de Cargo",description=("Todas as alterações de cargo serão registradas aqui.\n\n"),
-        color=0x2b2d31)
+        color=THEME2)
     embed.add_field(
         name= "Registro troca de cargo",
         value=("• Adição de cargos\n""• Remoção de cargos\n""• Usuário afetado\n"

@@ -23,7 +23,7 @@ ALL_ROLES = [
 
 # ── Canais — INFORMAÇÕES ──────────────────────────────────────
 REGRAS_CHANNEL            = "🗒️regras"
-BOAS_VINDAS_CHANNEL       = "boas-vindas"
+BOAS_VINDAS_CHANNEL       = "👋boas-vindas"
 AVISOS_CHANNEL            = "🚨avisos"                    
 GUIA_JOGADOR_CHANNEL      = "guia-jogador"
 GUIA_MEDIADOR_CHANNEL     = "guia-mediador"
@@ -84,6 +84,7 @@ LOGS_CALL_CHANNEL           = "logs-call"
 LOGS_COMMAND_CHANNEL        = "logs-command"
 LOGS_MESSAGE_DELETE_CHANNEL = "logs-message-delete"
 LOGS_TROCA_CARGO_CHANNEL    = "logs-troca-cargo"
+MEDIADORES_AFKS_CHANNEL     = "mediadores-afks"   # ← NOVO
 HEALTH_CHECK_CHANNEL        = "health-check"      # ← adicionado
 
 # Aliases legados
@@ -225,6 +226,7 @@ CHANNEL_PERMISSIONS: dict[str, list[str] | None] = {
     LOGS_MESSAGE_DELETE_CHANNEL:[ADM_ROLE_NAME],
     LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME],
     HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],     # ← adicionado
+    }
 
 # ── Permissões — canais onde roles VEEM mas NÃO enviam ────────
 # (só ADM_ROLE_NAME e o bot podem postar)
@@ -248,11 +250,11 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     MEDIADORES_AFKS_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
 
     # Logs (todos view-only, adm posta)
-    LOGS_CALLS_CHANNEL:         [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_TROCA_PIX_CHANNEL:     [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_DELETES_CHANNEL:       [ADM_ROLE_NAME],
-    LOGS_COMANDOS_CHANNEL:      [ADM_ROLE_NAME],
-    HISTORICO_CARGOS_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_MESSAGE_DELETE_CHANNEL: [ADM_ROLE_NAME],
+    LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
 }
 
 READ_ONLY_CHANNELS = {

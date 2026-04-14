@@ -1,6 +1,7 @@
 import discord
 
 from services.channel_service import LOGS_PIX_LOG_CHANNEL
+from services.dashboard_service import THEME2
 
 
 class PixLog:
@@ -14,7 +15,7 @@ class PixLog:
             return
         acao = "Cadastro" if not pix_antigo else "Alteração"
         timestamp = int(discord.utils.utcnow().timestamp())
-        embed = discord.Embed(title="💳 Log de PIX",description=f"**{acao} de chave PIX realizada**",color=0x2b2d31)
+        embed = discord.Embed(title="💳 Log de PIX",description=f"**{acao} de chave PIX realizada**",color=THEME2)
         embed.add_field(name="👤 Usuário",value=f"{interaction.user.mention} (`{interaction.user.id}`)",inline=False)
         embed.add_field(name="📌 Tipo",value=f"`{acao}`",inline=True)
         embed.add_field(name="⏰ Data e Hora",value=f"<t:{timestamp}:F>",inline=True)
@@ -29,7 +30,7 @@ def build_pix_log_embed():
         description=(
             "Todos os **cadastros e alterações de chave PIX** serão registrados aqui.\n\n"
             "🔎 Este canal é automático e usado para auditoria da staff."
-        ),color=0x2b2d31)
+        ),color=THEME2)
     embed.add_field(name="📌 O que é registrado?",value=(
             "• Cadastro de PIX\n"
             "• Alteração de chave\n"
