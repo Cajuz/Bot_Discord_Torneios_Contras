@@ -14,6 +14,7 @@ import discord
 from discord.ext import tasks
 
 from config.database import db
+from services.analytics_service import THEME2
 from utils.datetime_utils import utcnow
 from utils.logger import logger
 
@@ -254,7 +255,7 @@ class AFKService:
             if ch:
                 embed = discord.Embed(
                     description=f"<@{uid}> — {msg}",
-                    color=0xE74C3C
+                    color=THEME2
                 )
                 embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
                 try:

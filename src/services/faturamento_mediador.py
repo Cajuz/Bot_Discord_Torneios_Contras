@@ -132,7 +132,7 @@ class RelatorioGeralView(discord.ui.View):
 
     @discord.ui.button(
         label="Gerar Relatório Geral (TXT)",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="relatorio_geral_txt"
     )
     async def gerar_relatorio_txt(self, interaction: discord.Interaction, button: discord.ui.Button):

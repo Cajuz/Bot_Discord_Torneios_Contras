@@ -1,7 +1,10 @@
 # channel_setup_service.py
 from __future__ import annotations
 import discord
+from discord import Interaction
+from discord import channel
 from config.rules import ServerRules
+from services.analytics_service import THEME2
 from views.rules_view import RulesView
 from views.imagens import get_banner_file
 from utils.logger import logger, log_success
@@ -393,7 +396,7 @@ class ChannelSetupService:
                 "Lista de mediadores com status AFK ou inativos.\n\n"
                 "Este painel é atualizado automaticamente pelo bot."
             ),
-            color=0x95A5A6,
+            color=THEME2,
         )
         embed.set_footer(text="Apenas leitura — atualizado automaticamente.")
         await self._post_panel(guild, MEDIADORES_AFKS_CHANNEL, embed, None)
@@ -476,6 +479,9 @@ class ChannelSetupService:
                         view = MatchQueueView(
                             channel_name=ch_config["name"],
                             bet_value=value,
+                            guild=guild,
+
+                        
                         )
                         file = get_banner_file(ch_config["name"])
 

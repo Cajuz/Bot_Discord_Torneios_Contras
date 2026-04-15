@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 from typing import Optional, Dict
-
+from discord import Interaction
+import discord
 import discord
 from config.database import db
 from models.queue import MatchQueue
@@ -133,6 +134,7 @@ class MatchQueueService:
                 channel_name=channel.name,
                 bet_value=bet_value,
                 locked_gel=locked_gel,
+                guild=channel.guild,
             )
             async for msg in channel.history(limit=50):
                 if msg.author == channel.guild.me and msg.embeds:
@@ -491,7 +493,7 @@ class ConfirmationView(discord.ui.View):
 
     @discord.ui.button(
         label="Confirmar", style=discord.ButtonStyle.green,
-        custom_id="confirm_match_btn", emoji="✅"   # ← custom_id fixo
+        custom_id="confirm_match_btn", emoji="✔"   # ← custom_id fixo
     )
     async def btn_confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId
@@ -540,7 +542,7 @@ class ConfirmationView(discord.ui.View):
 
     @discord.ui.button(
         label="Recusar", style=discord.ButtonStyle.red,
-        custom_id="decline_match_btn", emoji="❌"   # ← custom_id fixo
+        custom_id="decline_match_btn", emoji="✖"   # ← custom_id fixo
     )
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId

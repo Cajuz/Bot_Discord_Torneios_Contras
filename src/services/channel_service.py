@@ -41,7 +41,7 @@ GUIA_JOGADOR_CHANNEL      = "🎮-guia-jogador"
 GUIA_MEDIADOR_CHANNEL     = "⚡-guia-mediador"
 GUIA_SUPORTE_CHANNEL      = "🎫-guia-suporte"
 GUIA_ANALISTA_CHANNEL     = "🔍-guia-analista"
-BLACKLIST_CHANNEL         = "🚫-blacklist"
+BLACKLIST_CHANNEL         = "⊘-blacklist"
 
 # ── Canais — SUPORTE ──────────────────────────────────────────
 SOLICITAR_SUPORTE_CHANNEL  = "🎫-solicitar-suporte"
@@ -53,14 +53,14 @@ SUPORTE_ADMIN_CHANNEL      = "suporte-controle"
 
 # ── Canais — MEDIAÇÃO ─────────────────────────────────────────
 MEDIADOR_PANEL_CHANNEL     = "painel-mediador"
-MEDIADORES_ADMIN_CHANNEL   = "mediadores-controle"
-MEDIADOR_PIX_CHANNEL       = "cadastra-pix"
-RENOVACAO_CHANNEL          = "renovacao-mediadores"
-SOLICITACOES_CHANNEL       = "💸-pedido-mediador"
+MEDIADORES_ADMIN_CHANNEL   = "𓍝-mediadores-controle"
+MEDIADOR_PIX_CHANNEL       = "❖-cadastra-pix"
+RENOVACAO_CHANNEL          = "⟳-renovacao-mediadores"
+SOLICITACOES_CHANNEL       = "✉-pedido-mediador"
 FATURAMENTO_CHANNEL        = "faturamento-mediadores"
-APROVAR_MEDIADORES_CHANNEL = "aprovar-mediadores"
+APROVAR_MEDIADORES_CHANNEL = "✔-aprovar-mediadores"
 HISTORICO_CHANNEL          = "historico-partidas"
-CADASTRO_MEDIADOR_CHANNEL  = "cadastro-mediador"
+CADASTRO_MEDIADOR_CHANNEL  = "📝-cadastro-mediador"
 
 # ── Canais — ANALISTAS ────────────────────────────────────────
 SOLICITAR_ANALISE_CHANNEL  = "solicitar-analise"
@@ -88,7 +88,7 @@ RANKING_CHANNEL            = "ranking"
 
 # ── Canais — STAFF ────────────────────────────────────────────
 RATE_LIMIT_CHANNEL_NAME     = "rate-limit-logs"
-MEMBROS_BLOQUEADOS_CHANNEL  = "membros-bloqueados"
+MEMBROS_BLOQUEADOS_CHANNEL  = "⊘-membros-bloqueados"
 LOGS_PARTIDAS_CHANNEL       = "📝-logs-partidas"
 LOGS_MEDIADORES_CHANNEL     = "📝-logs-mediadores"
 LOGS_BOT_CHANNEL_NAME       = "📝-logs-bot"
@@ -148,9 +148,9 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         CADASTRO_MEDIADOR_CHANNEL,
     ],
     
-    CATEGORY_MOBILE:   ["1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob"],
-    CATEGORY_EMULADOR: ["1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu"],
-    CATEGORY_MISTO:    ["4x4-misto", "3x3-misto", "2x2-misto"],
+    CATEGORY_MOBILE:   ["📱1x1-mob", "📱2x2-mob", "📱3x3-mob", "📱4x4-mob"],
+    CATEGORY_EMULADOR: ["🖥️1x1-emu", "🖥️2x2-emu", "🖥️3x3-emu", "🖥️4x4-emu"],
+    CATEGORY_MISTO:    ["🔀4x4-misto", "🔀3x3-misto", "🔀2x2-misto"],
     CATEGORY_SUPORTE: [
         SOLICITAR_SUPORTE_CHANNEL,
         PAINEL_SUPORTE_CHANNEL,
@@ -199,9 +199,9 @@ READ_ONLY_CHANNELS = {
 
 # ── Canais de interação por botão ─────────────────────────────
 INTERACTION_ONLY_CHANNELS = {
-    "1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob",
-    "1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu",
-    "4x4-misto", "3x3-misto", "2x2-misto",
+    "📱1x1-mob", "📱2x2-mob", "📱3x3-mob", "📱4x4-mob",
+    "🖥️1x1-emu", "🖥️2x2-emu", "🖥️3x3-emu", "🖥️4x4-emu",
+    "🔀4x4-misto", "🔀3x3-misto", "🔀2x2-misto",
     SOLICITAR_SUPORTE_CHANNEL,
     MEDIADOR_PIX_CHANNEL,
     SOLICITAR_ANALISE_CHANNEL,

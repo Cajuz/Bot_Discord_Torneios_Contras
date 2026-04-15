@@ -21,7 +21,7 @@ class PedidomediadorEmbed:
     @staticmethod
     def beneficios() -> discord.Embed:
         embed = discord.Embed(
-            title="💼 Torne-se um Mediador",
+            title="Torne-se um Mediador",
             description=(
                 "Quer ganhar dinheiro ajudando nas negociações do servidor?\n\n"
                 "Os mediadores garantem segurança nas transações entre membros "
@@ -30,7 +30,7 @@ class PedidomediadorEmbed:
             color=THEME2,
         )
         embed.add_field(
-            name="✅ Benefícios",
+            name="✨ Benefícios",
             value=(
                 "• Cargo exclusivo de Mediador\n"
                 "• Acesso a canais privados\n"
@@ -303,7 +303,7 @@ class PedidoMediadorView(discord.ui.View):
 
     @discord.ui.button(
         label="Quero ser mediador",
-        style=discord.ButtonStyle.success,
+        style=discord.ButtonStyle.secondary,
         custom_id="quero_ser_mediador_btn"
     )
     async def pedir(self, interaction: discord.Interaction, button: discord.ui.Button):

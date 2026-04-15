@@ -174,7 +174,7 @@ class TicketOpenView(discord.ui.View):
     async def on_timeout(self):
         pass
 
-    @discord.ui.button(label="Abrir Ticket", style=discord.ButtonStyle.success, emoji="🎫")
+    @discord.ui.button(label="Abrir Ticket", style=discord.ButtonStyle.secondary, emoji="🎫")
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("Este botão não é para você.", ephemeral=True)
@@ -242,8 +242,8 @@ class SupportCardView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Assumir",
-        style=discord.ButtonStyle.primary,
+        label="*Assumir*",
+        style=discord.ButtonStyle.secondary,
         custom_id="assume_ticket_button",
         emoji="✋"
     )

@@ -154,7 +154,7 @@ class MatchService:
         mediator_id: int,
         bet_value:   float,
         gel_type:    str = "normal",
-        match_type:  str = "1x1",
+        match_type:  str = "📱1x1",
         platform:    str = "mob",
     ) -> Dict[str, Any]:
         try:
