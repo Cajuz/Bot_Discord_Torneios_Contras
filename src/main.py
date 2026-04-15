@@ -38,6 +38,7 @@ COGS = [
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
     "cogs.renewal_dashboard_cog",
+    "cogs.alerts_cog",  # fix: estava faltando na lista original
 ]
 
 bot          = create_discord_bot()
@@ -45,10 +46,6 @@ _initialized = False
 
 # ─────────────────────────────────────────────────────────────
 # Servidor HTTP — health check + webhook EFI
-#
-# IMPORTANTE: O Railway injeta automaticamente a variável PORT e
-# bate o healthcheck NESSA porta. Usamos PORT como prioridade,
-# com fallback para API_PORT (8000).
 # ─────────────────────────────────────────────────────────────
 
 async def _start_http_server():
@@ -84,8 +81,6 @@ async def _start_http_server():
     app.router.add_get("/health",       health)
     app.router.add_post("/webhook/efi", efi_webhook)
 
-    # Railway injeta PORT automaticamente — DEVE ser usada para o healthcheck
-    # funcionar. API_PORT é fallback para ambientes locais.
     port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
     runner = web.AppRunner(app)
     await runner.setup()
@@ -120,21 +115,14 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 
 @bot.event
 async def on_ready():
-    guild = bot.guilds[0]
     global _initialized
     if _initialized:
         logger.warning("[on_ready] Reconexão — pulando reinicialização.")
         return
     _initialized = True
 
+    guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
-
-    for cog in COGS:
-        try:
-            await bot.load_extension(cog)
-            logger.info(f"[Cog] ✅ {cog}")
-        except Exception as e:
-            logger.error(f"[Cog] ❌ {cog}: {e}")
 
     try:
         synced = await bot.tree.sync()
@@ -213,13 +201,16 @@ async def on_ready():
     from services.rate_limit_monitor_service import rate_limit_monitor
     invite_tracker_service.bot = bot
     rate_limit_monitor.bot     = bot
-    for guild in bot.guilds:
-        await invite_tracker_service.cache_guild_invites(guild)
+    for guild_item in bot.guilds:
+        await invite_tracker_service.cache_guild_invites(guild_item)
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
+    # Onboarding — instancia e restaura estado do DB
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
+    if guild:
+        await bot._onboarding_service.restore_state(guild)
 
     try:
         from services.anti_spam_service import init_anti_spam_service
@@ -281,16 +272,16 @@ async def on_ready():
     try:
         from services.anti_spam_service import anti_spam_service
         if anti_spam_service:
-            for guild in bot.guilds:
-                await anti_spam_service.restore_blocked_members(guild)
+            for guild_item in bot.guilds:
+                await anti_spam_service.restore_blocked_members(guild_item)
             logger.info("[AntiSpam] Membros bloqueados restaurados")
     except Exception as e:
         logger.warning(f"[AntiSpam] restore_blocked_members: {e}")
 
     from services.mediator_queue import mediator_queue
-    for guild in bot.guilds:
+    for guild_item in bot.guilds:
         try:
-            await mediator_queue.sync_mediators_by_role(guild, role_name="Controller")
+            await mediator_queue.sync_mediators_by_role(guild_item, role_name="Controller")
         except Exception as e:
             logger.warning(f"[on_ready] Sync mediadores: {e}")
 
@@ -472,7 +463,7 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Entrypoint
+# Entrypoint — Cogs carregados ANTES do bot.start()
 # ─────────────────────────────────────────────────────────────
 
 async def main():
@@ -481,9 +472,16 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Sobe o servidor HTTP primeiro (blocking await),
-    # garantindo que /health ja responde ANTES do bot.start().
-    # Em seguida, gather roda bot + keep_alive em paralelo.
+    # Carrega todos os cogs ANTES de iniciar o bot para evitar
+    # race condition no on_ready e garantir que tudo está disponível
+    # desde o primeiro evento, inclusive após reconexão.
+    for cog in COGS:
+        try:
+            await bot.load_extension(cog)
+            logger.info(f"[Cog] ✅ {cog}")
+        except Exception as e:
+            logger.error(f"[Cog] ❌ {cog}: {e}")
+
     await _start_http_server()
     await asyncio.gather(
         start_discord_bot(bot),

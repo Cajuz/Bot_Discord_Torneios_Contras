@@ -2,6 +2,7 @@
 SupportCog — Sistema de suporte com canal privado por agente.
 """
 from __future__ import annotations
+import re
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -11,6 +12,12 @@ from services.ticket_service import ticket_service, SUPORTE_ROLE_NAME
 from utils.logger import logger
 
 THEME_COLOR = 0xFFD54F
+
+
+def _sanitize_channel_name(name: str) -> str:
+    """Remove caracteres inválidos para nomes de canal do Discord."""
+    sanitized = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-"))
+    return sanitized[:80] or "user"
 
 
 class SupportCog(commands.Cog, name="Suporte"):
@@ -53,9 +60,9 @@ class SupportCog(commands.Cog, name="Suporte"):
 
         await post_or_update_card(ticket, ctx.guild, self.bot)
 
-        # Remove jogador do canal privado do suporte se ainda estiver lá
         try:
-            ch_name    = f"support-{ctx.author.name.lower()}"
+            safe_name  = _sanitize_channel_name(ctx.author.name)
+            ch_name    = f"support-{safe_name}-{str(ctx.author.id)[-4:]}"
             support_ch = discord.utils.get(ctx.guild.text_channels, name=ch_name)
             if support_ch:
                 player = ctx.guild.get_member(int(ticket.discord_id))
@@ -86,9 +93,9 @@ class SupportCog(commands.Cog, name="Suporte"):
 
         await post_or_update_card(ticket, ctx.guild, self.bot)
 
-        # Remove jogador do canal privado
         try:
-            ch_name    = f"support-{ctx.author.name.lower()}"
+            safe_name  = _sanitize_channel_name(ctx.author.name)
+            ch_name    = f"support-{safe_name}-{str(ctx.author.id)[-4:]}"
             support_ch = discord.utils.get(ctx.guild.text_channels, name=ch_name)
             if support_ch:
                 player = ctx.guild.get_member(int(ticket.discord_id))
@@ -101,7 +108,6 @@ class SupportCog(commands.Cog, name="Suporte"):
         except Exception as e:
             logger.warning(f"[SupportCog] Erro ao remover jogador do canal: {e}")
 
-        # Notifica jogador por DM
         membro = ctx.guild.get_member(int(ticket.discord_id))
         if membro:
             try:
@@ -120,11 +126,24 @@ class SupportCog(commands.Cog, name="Suporte"):
     @commands.has_permissions(administrator=True)
     async def criar_canal_suporte(self, ctx: commands.Context, member: discord.Member = None):
         target       = member or ctx.author
-        channel_name = f"support-{target.name.lower().replace(' ', '-')}"
+        safe_name    = _sanitize_channel_name(target.name)
+        channel_name = f"support-{safe_name}-{str(target.id)[-4:]}"
 
+        # Verifica se já existe canal para este usuário
         existing = discord.utils.get(ctx.guild.text_channels, name=channel_name)
         if existing:
-            await ctx.reply(f"Canal {existing.mention} já existe.")
+            await ctx.reply(
+                f"⚠️ {target.mention} já tem um canal de suporte aberto: {existing.mention}"
+            )
+            return
+
+        # Verifica se há ticket aberto
+        open_tickets = await ticket_service.get_user_tickets(str(target.id), ctx.guild.id)
+        if any(t.status in ("aberto", "pendente") for t in open_tickets):
+            await ctx.reply(
+                f"⚠️ {target.mention} já tem um chamado em aberto. "
+                "Feche o chamado anterior antes de abrir um novo."
+            )
             return
 
         support_role = discord.utils.get(ctx.guild.roles, name=SUPORTE_ROLE_NAME)
@@ -156,14 +175,15 @@ class SupportCog(commands.Cog, name="Suporte"):
     @app_commands.describe(sufixo="Sufixo descritivo, ex: problema_pagamento")
     @app_commands.checks.has_any_role("Support", "Admin")
     async def renomear_canal(self, interaction: discord.Interaction, sufixo: str):
-        agent_ch_name = f"support-{interaction.user.name.lower()}"
-        channel = discord.utils.get(interaction.guild.text_channels, name=agent_ch_name)
+        safe_name     = _sanitize_channel_name(interaction.user.name)
+        agent_ch_name = f"support-{safe_name}-{str(interaction.user.id)[-4:]}"
+        channel       = discord.utils.get(interaction.guild.text_channels, name=agent_ch_name)
         if not channel:
             await interaction.response.send_message(
                 f"Seu canal `{agent_ch_name}` não foi encontrado.", ephemeral=True
             )
             return
-        new_name = f"support-{interaction.user.name.lower()}-{sufixo.replace(' ', '_')}"[:100]
+        new_name = f"support-{safe_name}-{sufixo.replace(' ', '_')}"[:100]
         await channel.edit(name=new_name)
         await interaction.response.send_message(
             f"✅ Canal renomeado para `{new_name}`.", ephemeral=True

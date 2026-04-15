@@ -3,19 +3,72 @@ Funcionalidades:
   • Cadastrar / remover influencer vinculando invite
   • Rastrear membros trazidos por cada influencer
   • Calcular comissão (Opção A — valor fixo por membro)
+  • Validar links de redes sociais
+  • Ranking via aggregation pipeline (sem N+1 queries)
 """
 from __future__ import annotations
+import re
 from typing import Optional
+from urllib.parse import urlparse
 
 from config.database import db
 from utils.datetime_utils import utcnow
 from utils.logger import logger
 
 
+# ─────────────────────────────────────────────
+# Validação de links
+# ─────────────────────────────────────────────
+
+URL_PATTERN = re.compile(
+    r"^https?://"
+    r"(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}"
+    r"(?:/[^\s]*)?$"
+)
+
+ALLOWED_PLATFORMS = {
+    "youtube.com", "youtu.be",
+    "instagram.com", "tiktok.com",
+    "twitch.tv", "twitter.com", "x.com",
+    "kick.com", "facebook.com",
+}
+
+
+def validate_influencer_link(url: str) -> tuple[bool, str]:
+    """
+    Valida URL de influencer.
+    Retorna (True, url_normalizada) ou (False, mensagem_de_erro).
+    """
+    url = url.strip()
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    if not URL_PATTERN.match(url):
+        return False, "URL inválida. Use um link completo (ex: https://instagram.com/seu_perfil)"
+
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if domain not in ALLOWED_PLATFORMS:
+            platforms = ", ".join(sorted(ALLOWED_PLATFORMS))
+            return False, f"Plataforma não suportada. Permitidas: {platforms}"
+    except Exception:
+        return False, "Erro ao validar URL."
+
+    return True, url
+
+
+# ─────────────────────────────────────────────
+# Service
+# ─────────────────────────────────────────────
+
 class InfluencerService:
 
     COLLECTION   = "influencers"
-    INVITES_COLL = "invite_joins"   # collection unificada com invite_tracker_service
+    INVITES_COLL = "invite_joins"
     MATCHES_COLL = "matches"
 
     async def add_influencer(
@@ -23,12 +76,24 @@ class InfluencerService:
         discord_id: str,
         username: str,
         invite_code: str,
+        link: str = "",
         commission_per_member: float = 2.0,
-    ) -> dict:
+    ) -> tuple[bool, str, dict]:
+        """
+        Cadastra influencer com validação de link.
+        Retorna (sucesso, mensagem, documento).
+        """
+        if link:
+            ok, result = validate_influencer_link(link)
+            if not ok:
+                return False, result, {}
+            link = result
+
         doc = {
             "discord_id":            discord_id,
             "username":              username,
             "invite_code":           invite_code,
+            "link":                  link,
             "commission_per_member": commission_per_member,
             "total_earned":          0.0,
             "is_active":             True,
@@ -39,7 +104,18 @@ class InfluencerService:
             {"$set": doc},
             upsert=True,
         )
-        return doc
+        return True, "Influencer cadastrado com sucesso!", doc
+
+    async def update_link(self, discord_id: str, new_link: str) -> tuple[bool, str]:
+        """Atualiza link de um influencer com validação."""
+        ok, result = validate_influencer_link(new_link)
+        if not ok:
+            return False, result
+        await db.get_collection(self.COLLECTION).update_one(
+            {"discord_id": discord_id},
+            {"$set": {"link": result, "updated_at": utcnow()}}
+        )
+        return True, f"Link atualizado: {result}"
 
     async def remove_influencer(self, discord_id: str) -> bool:
         result = await db.get_collection(self.COLLECTION).update_one(
@@ -100,19 +176,30 @@ class InfluencerService:
         }
 
     async def get_ranking(self, guild_id: str, limit: int = 10) -> list[dict]:
-        all_inf = await self.get_all_active()
-        rows    = []
-        for inf in all_inf:
-            members    = await self.get_members_brought(inf["discord_id"], guild_id)
-            commission = len(members) * inf.get("commission_per_member", 2.0)
-            rows.append({
-                "discord_id":    inf["discord_id"],
-                "username":      inf.get("username", "?"),
-                "total_members": len(members),
-                "commission":    commission,
-            })
-        rows.sort(key=lambda x: x["total_members"], reverse=True)
-        return rows[:limit]
+        """
+        Usa aggregation pipeline para evitar N+1 queries.
+        """
+        pipeline = [
+            {"$match": {"is_active": True}},
+            {"$lookup": {
+                "from":       self.INVITES_COLL,
+                "localField": "invite_code",
+                "foreignField": "invite_code",
+                "as":         "members",
+                "pipeline":   [{"$match": {"guild_id": guild_id}}]
+            }},
+            {"$addFields": {"total_members": {"$size": "$members"}}},
+            {"$sort":   {"total_members": -1}},
+            {"$limit":  limit},
+            {"$project": {
+                "discord_id": 1, "username": 1, "link": 1,
+                "commission_per_member": 1, "total_members": 1,
+                "commission": {
+                    "$multiply": ["$total_members", "$commission_per_member"]
+                }
+            }}
+        ]
+        return await db.get_collection(self.COLLECTION).aggregate(pipeline).to_list(limit)
 
 
 influencer_service = InfluencerService()

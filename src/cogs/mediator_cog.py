@@ -1,7 +1,8 @@
 """
 MediatorCog — Comandos de mediadores.
-Roadmap: /silence implementado, !addmediador / !removemediador / !fila.
+Roadmap: /silence, /sala implementados. !addmediador / !removemediador / !fila.
 """
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -63,6 +64,133 @@ class MediatorCog(commands.Cog, name="Mediador"):
             embed.add_field(name="Mediadores", value="Nenhum na fila.", inline=False)
         await ctx.reply(embed=embed)
 
+    # ── /sala ──────────────────────────────────────────────────────
+    @app_commands.command(
+        name="sala",
+        description="[Mediador] Informa sala + senha e inicia a partida automaticamente"
+    )
+    @app_commands.describe(
+        match_id="ID da partida (ex: 64abc123...)",
+        sala_id="ID da sala no jogo",
+        senha="Senha da sala",
+        modo="Modo de jogo (ex: Normal, Ranked, Torneio)"
+    )
+    @app_commands.checks.has_any_role("Controller", "Mediador", "Mediator")
+    async def sala(
+        self,
+        interaction: discord.Interaction,
+        match_id: str,
+        sala_id: str,
+        senha: str,
+        modo: str = "Normal",
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        from config.database import db
+        from bson import ObjectId
+
+        # Valida ObjectId
+        try:
+            oid = ObjectId(match_id)
+        except Exception:
+            await interaction.followup.send(
+                "❌ `match_id` inválido. Use o ID completo da partida.", ephemeral=True
+            )
+            return
+
+        col   = db.get_collection("matches")
+        match = await col.find_one({"_id": oid})
+
+        if not match:
+            await interaction.followup.send(
+                f"❌ Partida `{match_id}` não encontrada.", ephemeral=True
+            )
+            return
+
+        if match.get("status") not in ("aguardando_pagamento", "confirmado", "criado"):
+            await interaction.followup.send(
+                f"⚠️ Partida já está com status `{match.get('status')}` — não pode ser iniciada.",
+                ephemeral=True
+            )
+            return
+
+        if str(interaction.user.id) != str(match.get("mediator_id")):
+            await interaction.followup.send(
+                "❌ Você não é o mediador designado desta partida.", ephemeral=True
+            )
+            return
+
+        # Atualiza partida para em_andamento
+        await col.update_one(
+            {"_id": oid},
+            {"$set": {
+                "status":     "em_andamento",
+                "sala_id":    sala_id,
+                "sala_senha": senha,
+                "modo_jogo":  modo,
+                "started_at": utcnow(),
+            }}
+        )
+
+        # Busca thread da partida
+        thread_id = match.get("thread_id")
+        thread    = None
+        if thread_id:
+            thread = interaction.guild.get_thread(int(thread_id))
+
+        # Monta embed card da sala
+        embed = discord.Embed(
+            title="🎮 Sala Criada — Partida Iniciada!",
+            color=discord.Color.green(),
+            timestamp=utcnow()
+        )
+        embed.add_field(name="🏠 ID da Sala", value=f"`{sala_id}`",  inline=True)
+        embed.add_field(name="🔑 Senha",      value=f"`{senha}`",    inline=True)
+        embed.add_field(name="🎯 Modo",       value=f"`{modo}`",     inline=True)
+        embed.add_field(name="📋 Partida",    value=f"`{match_id}`", inline=False)
+
+        time_blue = match.get("time_blue", [])
+        time_red  = match.get("time_red",  [])
+        if time_blue or time_red:
+            embed.add_field(
+                name="⚔️ Times",
+                value=(
+                    "**Time Blue:** " + (" ".join(f"<@{p}>" for p in time_blue) or "—") + "\n"
+                    "**Time Red:** "  + (" ".join(f"<@{p}>" for p in time_red)  or "—")
+                ),
+                inline=False
+            )
+
+        embed.set_footer(
+            text=f"Mediador: {interaction.user.display_name}",
+            icon_url=interaction.user.display_avatar.url
+        )
+
+        player_ids = match.get("player_ids", [])
+        mentions   = " ".join(f"<@{pid}>" for pid in player_ids)
+
+        if thread:
+            await thread.send(content=f"🚨 **SALA ABERTA!** {mentions}", embed=embed)
+            await interaction.followup.send("✅ Sala publicada na thread da partida!", ephemeral=True)
+        else:
+            await interaction.channel.send(content=f"🚨 **SALA ABERTA!** {mentions}", embed=embed)
+            await interaction.followup.send(
+                "✅ Sala publicada (thread não encontrada — postado no canal atual).",
+                ephemeral=True
+            )
+
+        logger.info(
+            f"[Sala] Partida {match_id} iniciada pelo mediador "
+            f"{interaction.user.name} — Sala: {sala_id}"
+        )
+
+    @sala.error
+    async def sala_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.MissingAnyRole):
+            await interaction.response.send_message(
+                "Apenas mediadores podem usar este comando.", ephemeral=True
+            )
+
     # ── /silence ───────────────────────────────────────────────────
     @app_commands.command(name="silence", description="Silencia um jogador por X segundos")
     @app_commands.describe(membro="Jogador a silenciar", segundos="Duração (máx 300)", motivo="Motivo")
@@ -99,7 +227,6 @@ class MediatorCog(commands.Cog, name="Mediador"):
             await channel.send(embed=embed)
             await interaction.followup.send(f"✅ {membro.mention} silenciado por {segundos}s.", ephemeral=True)
 
-            import asyncio
             await asyncio.sleep(segundos)
             overwrite.send_messages = None
             await channel.set_permissions(membro, overwrite=overwrite, reason="Silenciamento expirado")
