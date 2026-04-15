@@ -39,7 +39,7 @@ class MediatorRegisterView(discord.ui.View):
 
     @discord.ui.button(
         label="📋 Cadastrar Mediador",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="mediator_register:open_form",
     )
     async def open_form(self, interaction: discord.Interaction, _: discord.ui.Button):

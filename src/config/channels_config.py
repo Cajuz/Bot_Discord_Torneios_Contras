@@ -21,21 +21,21 @@ class ChannelsConfig:
     # ── Partidas ────────────────────────────────────────────────
     CATEGORIES = {
         "MOBILE":   {"emoji": "📱", "channels": [
-            {"name": "1x1-mob",   "players": 2, "gel_types": ["normal", "infinito"]},
-            {"name": "2x2-mob",   "players": 2, "gel_types": ["normal"]},
-            {"name": "3x3-mob",   "players": 2, "gel_types": ["normal"]},
-            {"name": "4x4-mob",   "players": 2, "gel_types": ["normal"]},
+            {"name": "📱1x1-mob",   "players": 2, "gel_types": ["normal", "infinito"]},
+            {"name": "📱2x2-mob",   "players": 2, "gel_types": ["normal"]},
+            {"name": "📱3x3-mob",   "players": 2, "gel_types": ["normal"]},
+            {"name": "📱4x4-mob",   "players": 2, "gel_types": ["normal"]},
         ]},
         "EMULADOR": {"emoji": "🖥️", "channels": [
-            {"name": "1x1-emu",   "players": 2, "gel_types": ["normal"]},
-            {"name": "2x2-emu",   "players": 2, "gel_types": ["normal"]},
-            {"name": "3x3-emu",   "players": 2, "gel_types": ["normal"]},
-            {"name": "4x4-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "🖥️1x1-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "🖥️2x2-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "🖥️3x3-emu",   "players": 2, "gel_types": ["normal"]},
+            {"name": "🖥️4x4-emu",   "players": 2, "gel_types": ["normal"]},
         ]},
         "MISTO":    {"emoji": "🔀", "channels": [
-            {"name": "4x4-misto", "players": 2, "gel_types": ["normal"]},
-            {"name": "3x3-misto", "players": 2, "gel_types": ["normal"]},
-            {"name": "2x2-misto", "players": 2, "gel_types": ["normal"]},
+            {"name": "🔀4x4-misto", "players": 2, "gel_types": ["normal"]},
+            {"name": "🔀3x3-misto", "players": 2, "gel_types": ["normal"]},
+            {"name": "🔀2x2-misto", "players": 2, "gel_types": ["normal"],}
         ]},
     }
 

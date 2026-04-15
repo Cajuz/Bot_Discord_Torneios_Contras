@@ -4,6 +4,9 @@ import os
 import discord
 from typing import Optional
 
+from discord import guild
+from discord import channel
+
 from services.match_queue_service import match_queue_service
 from models.queue import MatchQueue
 from models.match import Match
@@ -13,6 +16,8 @@ from services.dashboard_service import THEME2
 from views.imagens import get_banner_file
 from utils.logger import logger
 from discord import Interaction
+
+
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -28,7 +33,7 @@ def _channel_label(channel_name: str) -> str:
 
 
 def is_1x1_mob(channel_name: str) -> bool:
-    return channel_name.lower().startswith("1x1-mob")
+    return channel_name.lower().startswith("📱1x1-mob")
 
 
 async def _player_has_active_match(player_id: int) -> bool:
@@ -111,12 +116,21 @@ class MatchQueueView(discord.ui.View):
         channel_name: str   = "",
         bet_value:    float = 0.0,
         locked_gel:   str   = None,
+        guild:       discord.Guild = None,
     ):
         super().__init__(timeout=None)
         self.channel_name = channel_name
         self.bet_value    = bet_value
         self.locked_gel   = locked_gel
+        self.guild        = guild
+        aprovar_emoji = discord.utils.get(guild.emojis, name="aprovar")
+        cancelar_emoji = discord.utils.get(guild.emojis, name="cancelar")
+        gel_emoji = discord.utils.get(guild.emojis, name="gel")
 
+        self.btn_entrar.emoji = aprovar_emoji
+        self.btn_sair.emoji = cancelar_emoji
+        self.btn_gel_normal.emoji = gel_emoji
+        self.btn_gel_infinito.emoji = gel_emoji
         # Só esconde/mostra botões quando channel_name está definido
         # (evita erro no registro de persistent view sem parâmetros)
         if channel_name:
@@ -125,7 +139,7 @@ class MatchQueueView(discord.ui.View):
             else:
                 self.remove_item(self.btn_gel_normal)
                 self.remove_item(self.btn_gel_infinito)
-
+    
     def _parse_context(
         self, interaction: discord.Interaction
     ) -> tuple[str, float]:
@@ -141,11 +155,11 @@ class MatchQueueView(discord.ui.View):
         except Exception as e:
             logger.error(f"[Queue] Erro ao parsear contexto do embed: {e}")
             return "", 0.0
-
+    
     # ── Botão Entrar (demais modos) ──────────────────────────────
     @discord.ui.button(
-        label="✔️ ENTRAR NA FILA",
-        style=discord.ButtonStyle.green,
+        label="ENTRAR NA FILA",
+        style=discord.ButtonStyle.secondary,
         custom_id="queue_entrar",
     )
     async def btn_entrar(
@@ -157,7 +171,7 @@ class MatchQueueView(discord.ui.View):
     # ── Botões Gel (somente 1x1-mob) ───────────────────────────
     @discord.ui.button(
         label="Gel Normal",
-        style=discord.ButtonStyle.green,
+        style=discord.ButtonStyle.secondary,
         custom_id="queue_gel_normal",
     )
     async def btn_gel_normal(
@@ -168,7 +182,7 @@ class MatchQueueView(discord.ui.View):
 
     @discord.ui.button(
         label="Gel Infinito",
-        style=discord.ButtonStyle.blurple,
+        style=discord.ButtonStyle.secondary,
         custom_id="queue_gel_infinito",
     )
     async def btn_gel_infinito(
@@ -179,8 +193,8 @@ class MatchQueueView(discord.ui.View):
 
     # ── Botão Sair (todos os canais) ────────────────────────────
     @discord.ui.button(
-        label="✖️ SAIR DA FILA",
-        style=discord.ButtonStyle.red,
+        label="SAIR DA FILA",
+        style=discord.ButtonStyle.secondary,
         custom_id="queue_sair",
     )
     async def btn_sair(
@@ -322,6 +336,7 @@ class MatchQueueView(discord.ui.View):
                 channel_name=channel_name,
                 bet_value=bet_value,
                 locked_gel=locked_gel,
+                guild=interaction.guild,
             )
 
             file = get_banner_file(channel_name)

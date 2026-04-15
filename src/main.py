@@ -4,6 +4,8 @@ import asyncio
 import os
 import random
 from datetime import datetime, timezone
+from discord import Interaction
+
 
 import discord
 from discord.ext import commands, tasks
@@ -118,6 +120,7 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 
 @bot.event
 async def on_ready():
+    guild = bot.guilds[0]
     global _initialized
     if _initialized:
         logger.warning("[on_ready] Reconexão — pulando reinicialização.")
@@ -173,7 +176,7 @@ async def on_ready():
             MediatorPanelView(),
             PedidoMediadorView(),
             SpamBlockCardView(),
-            MatchQueueView(),
+            MatchQueueView(guild=guild),
             MatchThreadView(match_id="__persistent__"),
             ConfirmationView(),
             HealthCheckView(),
