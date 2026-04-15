@@ -25,16 +25,22 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Instalar dependências
+      - name: Instalar dependências mínimas para testes
+        # Não instala requirements.txt completo para evitar falhas de conexão
+        # (MongoDB, Discord, EFI) no ambiente de CI sem segredos.
+        # Os testes são unitários puros e mockam todas as dependências externas.
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
           pip install pytest pytest-asyncio
+          pip install discord.py motor pymongo python-dotenv
 
       - name: Rodar testes
+        # Roda da RAIZ do repo para que sys.path.insert(0, "src") nos
+        # arquivos de teste resolva corretamente independente do OS.
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          cd tests
-          python -m pytest . -v --tb=short
+          python -m pytest tests/ -v --tb=short
 
       - name: Resumo dos resultados
         if: always()
