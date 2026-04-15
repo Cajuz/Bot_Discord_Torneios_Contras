@@ -110,6 +110,54 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 
 
 # ─────────────────────────────────────────────────────────────
+# Auto Setup — executa !setupcanais automaticamente no startup
+# ─────────────────────────────────────────────────────────────
+
+async def _auto_setup_canais(guild: discord.Guild):
+    """
+    Executa o equivalente ao !setupcanais automaticamente toda vez que o
+    bot inicializa (startup, redeploy, crash+restart).
+    Não precisa de Context — chama o channel_setup_service diretamente.
+    """
+    try:
+        from services.channel_setup_service import channel_setup_service
+        channel_setup_service.bot = bot
+        result = await channel_setup_service.setup_all(guild)
+        log_success(f"[AutoSetup] !setupcanais executado automaticamente: {result}")
+
+        # Notifica no canal alertas-adm que o setup rodou após reinício
+        alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
+        if alertas_ch:
+            embed = discord.Embed(
+                title="🔄 Bot reiniciado — Setup automático concluído",
+                description=(
+                    "O bot foi reiniciado e executou `!setupcanais` automaticamente.\n"
+                    "Todos os painéis e cards foram reconstruídos.\n\n"
+                    f"**Resultado:** {result or 'OK'}"
+                ),
+                color=0x2ECC71,
+                timestamp=utcnow(),
+            )
+            embed.set_footer(text="X1 Frifas · Auto-Setup")
+            await alertas_ch.send(embed=embed)
+    except Exception as e:
+        logger.error(f"[AutoSetup] Erro ao executar setupcanais automático: {e}", exc_info=True)
+        # Tenta notificar o erro no alertas-adm
+        try:
+            alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
+            if alertas_ch:
+                embed = discord.Embed(
+                    title="❌ Bot reiniciado — Erro no setup automático",
+                    description=f"```{e}```",
+                    color=0xE74C3C,
+                    timestamp=utcnow(),
+                )
+                await alertas_ch.send(embed=embed)
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────
 # on_ready
 # ─────────────────────────────────────────────────────────────
 
@@ -287,6 +335,13 @@ async def on_ready():
 
     if not set_status.is_running():
         set_status.start()
+
+    # ── Auto Setup de canais ─────────────────────────────────
+    # Toda vez que o bot sobe (novo deploy, crash recovery, redeploy)
+    # executa !setupcanais automaticamente — sem precisar digitar nada.
+    # O resultado é notificado em #alertas-adm.
+    if guild:
+        asyncio.create_task(_auto_setup_canais(guild))
 
     log_success("Bot totalmente inicializado!")
 
