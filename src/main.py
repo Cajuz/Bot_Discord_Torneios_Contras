@@ -336,7 +336,16 @@ async def on_ready():
     if not set_status.is_running():
         set_status.start()
 
-    # ── Auto Setup de canais ─────────────────────────────────
+    # ── Circuit Breaker — injeta bot para notificações em #alertas-adm ──
+    # Precisa ser feito aqui pois o bot só está disponível após on_ready.
+    try:
+        from utils.circuit_breaker import db_circuit_breaker
+        db_circuit_breaker.set_bot(bot)
+        logger.info("[CircuitBreaker] Bot injetado — notificações em #alertas-adm ativas")
+    except Exception as e:
+        logger.warning(f"[CircuitBreaker] Erro ao injetar bot: {e}")
+
+    # ── Auto Setup de canais ─────────────────────────────────────────────
     # Toda vez que o bot sobe (novo deploy, crash recovery, redeploy)
     # executa !setupcanais automaticamente — sem precisar digitar nada.
     # O resultado é notificado em #alertas-adm.
