@@ -1,6 +1,7 @@
 from venv import logger
 import discord
 from services.channel_service import LOGS_COMMAND_CHANNEL
+from services.dashboard_service import THEME2
 
 
 class CommandLog:
@@ -22,7 +23,7 @@ class CommandLog:
             timestamp = int(discord.utils.utcnow().timestamp())
             embed = discord.Embed(
                 title="⚙️ Comando Executado",
-                color=0x2b2d31
+                color=THEME2
             )
             embed.add_field(
                 name="👤 Usuário",
@@ -65,7 +66,7 @@ def build_command_log_embed():
             "Todos os comandos executados serão registrados aqui.\n\n"
             "🔎 Monitoramento e segurança."
         ),
-        color=0x2b2d31
+        color=THEME2
     )
     embed.add_field(
         name="📌 O que é registrado?",

@@ -2,6 +2,7 @@ import asyncio
 from utils.logger import logger
 import discord
 from services.channel_service import LOGS_MESSAGE_DELETE_CHANNEL
+from services.dashboard_service import THEME2
 
 
 class MessageDeleteLog:
@@ -41,7 +42,7 @@ class MessageDeleteLog:
             except Exception as e:
                 logger.warning(f"[DELETE] Falha audit log: {e}")
             timestamp = int(discord.utils.utcnow().timestamp())
-            embed = discord.Embed(title="🗑️ Mensagem Deletada",color=0x2b2d31)
+            embed = discord.Embed(title="🗑️ Mensagem Deletada",color=THEME2)
             embed.add_field(name="👤 Autor",value=message.author.mention if message.author else "Desconhecido",inline=True)
             embed.add_field(name="🛠️ Deletado por",value=deleter.mention if deleter else "Desconhecido",inline=True)
             embed.add_field(name="📍 Canal",value=message.channel.mention if message.channel else "Desconhecido",inline=True)
@@ -70,7 +71,7 @@ def build_message_delete_embed():
             "Mensagens deletadas serão registradas aqui.\n\n"
             "🔎 Auditoria da staff."
         ),
-        color=0x2b2d31
+        color=THEME2
     )
     embed.add_field(
         name="📌 O que é registrado?",

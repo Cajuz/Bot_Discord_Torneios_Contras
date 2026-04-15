@@ -4,6 +4,7 @@ import discord
 from datetime import timedelta
 
 from config.database import db
+from services.dashboard_service import THEME2
 from utils.datetime_utils import utcnow
 from services.channel_service import (
     SOLICITACOES_CHANNEL as SOLICITACOES_MEDIADOR_CHANNEL,
@@ -26,7 +27,7 @@ class PedidomediadorEmbed:
                 "Os mediadores garantem segurança nas transações entre membros "
                 "e recebem benefícios exclusivos durante o contrato."
             ),
-            color=discord.Color.blue()
+            color=THEME2,
         )
         embed.add_field(
             name="✅ Benefícios",
@@ -107,7 +108,7 @@ class VerificacaoMediadoresEmbed:
                 "• Dias restantes\n"
                 "• Status do benefício"
             ),
-            color=discord.Color.green(),
+            color=THEME2,
             timestamp=utcnow()
         )
         embed.add_field(name="👥 Total de Mediadores", value=str(len(mediators)), inline=False)

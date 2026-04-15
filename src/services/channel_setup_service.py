@@ -1,14 +1,14 @@
 # channel_setup_service.py
 from __future__ import annotations
 import discord
+from config.rules import ServerRules
+from views.rules_view import RulesView
 from views.imagens import get_banner_file
 from utils.logger import logger, log_success
 from services.channel_service import (
-    CHANNEL_STRUCTURE, ALL_ROLES,
-    GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL,
-    GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,
-    # Informações
-    AVISOS_CHANNEL, BLACKLIST_CHANNEL,
+    BLACKLIST_CHANNEL, CHANNEL_STRUCTURE, ALL_ROLES,
+    GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL, GUIA_SUPORTE_CHANNEL, REGRAS_CHANNEL, SUPORTE_ADMIN_CHANNEL,
+    GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,AVISOS_CHANNEL,
     # Suporte
     SOLICITAR_SUPORTE_CHANNEL, SUPPORT_CHANNEL_NAME,
     CHAMADOS_CHANNEL_NAME, CHAT_SUPORTE_STAFF_CHANNEL,
@@ -30,11 +30,9 @@ from services.channel_service import (
     CHAT_ANALISTAS_CHANNEL,
     # Comunidade
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL, LOGS_COMMAND_CHANNEL,
-    FATURAMENTO_CHANNEL, LOGS_PIX_LOG_CHANNEL, LOGS_CALL_CHANNEL,
-    LOGS_MESSAGE_DELETE_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
-    HEALTH_CHECK_CHANNEL,
-    MEDIADORES_AFKS_CHANNEL,
+    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
+    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL,
+    LOGS_TROCA_CARGO_CHANNEL,MEDIADORES_AFKS_CHANNEL,HEALTH_CHECK_CHANNEL,    # ← adicionado
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -47,6 +45,8 @@ class ChannelSetupService:
 
     def __init__(self):
         self.bot: discord.Client | None = None
+        self.member: discord.Member | None = None
+
 
     # ══════════════════════════════════════════════════════════
     # ENTRY POINT
@@ -162,6 +162,7 @@ class ChannelSetupService:
         await self.setup_health_check(guild)
         # Painéis novos
         await self.setup_avisos(guild)
+        await self.regras(guild)
         await self.setup_aprovar_mediadores(guild)
         await self.setup_historico_exposed(guild)
         await self.setup_mediadores_afks(guild)
@@ -334,6 +335,16 @@ class ChannelSetupService:
     # ══════════════════════════════════════════════════════════
     # PAINÉIS NOVOS
     # ══════════════════════════════════════════════════════════
+    async def regras(self, guild: discord.Guild):
+        embed = discord.Embed(
+            title="📜 Regras do Servidor",
+            description=(
+                "Bem-vindo ao servidor X1 Frifas! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
+            ),
+            color=0xFFD54F,
+        )
+        embed.set_footer(text="Respeite as regras para manter a comunidade saudável!")
+        await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(),    RulesView(self, self.member))
 
     async def setup_avisos(self, guild: discord.Guild):
         embed = discord.Embed(

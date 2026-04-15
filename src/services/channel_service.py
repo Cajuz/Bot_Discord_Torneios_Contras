@@ -34,17 +34,17 @@ ALL_ROLES = [
 ]
 
 # ── Canais — INFORMAÇÕES ──────────────────────────────────────
-REGRAS_CHANNEL            = "🗒️regras"
-BOAS_VINDAS_CHANNEL       = "boas-vindas"
-AVISOS_CHANNEL            = "🚨avisos"
-GUIA_JOGADOR_CHANNEL      = "guia-jogador"
-GUIA_MEDIADOR_CHANNEL     = "guia-mediador"
-GUIA_SUPORTE_CHANNEL      = "guia-suporte"
-GUIA_ANALISTA_CHANNEL     = "guia-analista"
-BLACKLIST_CHANNEL         = "blacklist"
+REGRAS_CHANNEL            = "🗒️-regras"
+BOAS_VINDAS_CHANNEL       = "👋-boas-vindas"
+AVISOS_CHANNEL            = "🚨-avisos"                    
+GUIA_JOGADOR_CHANNEL      = "🎮-guia-jogador"
+GUIA_MEDIADOR_CHANNEL     = "⚡-guia-mediador"
+GUIA_SUPORTE_CHANNEL      = "🎫-guia-suporte"
+GUIA_ANALISTA_CHANNEL     = "🔍-guia-analista"
+BLACKLIST_CHANNEL         = "🚫-blacklist"
 
 # ── Canais — SUPORTE ──────────────────────────────────────────
-SOLICITAR_SUPORTE_CHANNEL  = "solicitar-suporte"
+SOLICITAR_SUPORTE_CHANNEL  = "🎫-solicitar-suporte"
 SUPPORT_CHANNEL_NAME       = SOLICITAR_SUPORTE_CHANNEL
 CHAT_SUPORTE_STAFF_CHANNEL = "chat-suporte"
 PAINEL_SUPORTE_CHANNEL     = "painel-suporte"
@@ -56,7 +56,7 @@ MEDIADOR_PANEL_CHANNEL     = "painel-mediador"
 MEDIADORES_ADMIN_CHANNEL   = "mediadores-controle"
 MEDIADOR_PIX_CHANNEL       = "cadastra-pix"
 RENOVACAO_CHANNEL          = "renovacao-mediadores"
-SOLICITACOES_CHANNEL       = "solicitacoes-mediador"
+SOLICITACOES_CHANNEL       = "💸-pedido-mediador"
 FATURAMENTO_CHANNEL        = "faturamento-mediadores"
 APROVAR_MEDIADORES_CHANNEL = "aprovar-mediadores"
 HISTORICO_CHANNEL          = "historico-partidas"
@@ -87,22 +87,21 @@ RESULTADOS_CHANNEL         = "resultados"
 RANKING_CHANNEL            = "ranking"
 
 # ── Canais — STAFF ────────────────────────────────────────────
-RATE_LIMIT_CHANNEL_NAME      = "rate-limit-logs"
-MEMBROS_BLOQUEADOS_CHANNEL   = "membros-bloqueados"
-LOGS_PARTIDAS_CHANNEL        = "logs-partidas"
-LOGS_MEDIADORES_CHANNEL      = "logs-mediadores"
-LOGS_BOT_CHANNEL_NAME        = "logs-bot"
-LOGS_PIX_LOG_CHANNEL         = "logs-pix"
-LOGS_CALL_CHANNEL            = "logs-call"
-LOGS_COMMAND_CHANNEL         = "logs-command"
-LOGS_MESSAGE_DELETE_CHANNEL  = "logs-message-delete"
-LOGS_TROCA_CARGO_CHANNEL     = "logs-troca-cargo"
-HEALTH_CHECK_CHANNEL         = "health-check"
-MEDIADORES_AFKS_CHANNEL      = "mediadores-afks"
-ALERTAS_ADM_CHANNEL          = "alertas-adm"   # <-- NOVO
+RATE_LIMIT_CHANNEL_NAME     = "rate-limit-logs"
+MEMBROS_BLOQUEADOS_CHANNEL  = "membros-bloqueados"
+LOGS_PARTIDAS_CHANNEL       = "📝-logs-partidas"
+LOGS_MEDIADORES_CHANNEL     = "📝-logs-mediadores"
+LOGS_BOT_CHANNEL_NAME       = "📝-logs-bot"
+LOGS_PIX_LOG_CHANNEL        = "📝-logs-pix"
+LOGS_CALL_CHANNEL           = "📝-logs-call"
+LOGS_COMMAND_CHANNEL        = "📝-logs-command"
+LOGS_MESSAGE_DELETE_CHANNEL = "📝-logs-message-delete"
+LOGS_TROCA_CARGO_CHANNEL    = "📝-logs-troca-cargo"
+MEDIADORES_AFKS_CHANNEL     = "mediadores-afks"   # ← NOVO
+HEALTH_CHECK_CHANNEL        = "health-check"      # ← adicionado
 
 # ── Aliases legados ───────────────────────────────────────────
-CATEGORY_ANALYTICS_NAME      = "📊 ANALYTICS"
+CATEGORY_ANALYTICS_NAME      = "📊 | ANALYTICS"
 EXPOSED_CHANNEL              = EXPOSED_CHANNEL_NAME
 RATE_LIMIT_CHANNEL           = RATE_LIMIT_CHANNEL_NAME
 LOGS_BOT_CHANNEL             = LOGS_BOT_CHANNEL_NAME
@@ -114,22 +113,23 @@ LOGS_CALLS_CHANNEL           = LOGS_CALL_CHANNEL
 LOGS_TROCA_PIX_CHANNEL       = LOGS_PIX_LOG_CHANNEL
 LOGS_DELETES_CHANNEL         = LOGS_MESSAGE_DELETE_CHANNEL
 LOGS_COMANDOS_CHANNEL        = LOGS_COMMAND_CHANNEL
+ALERTAS_ADM_CHANNEL          = "alertas-adm"
 HISTORICO_CARGOS_CHANNEL     = LOGS_TROCA_CARGO_CHANNEL
 INVITE_CHANNEL_NAME          = STATUS_BOT_CHANNEL
 INVITE_CHANNEL               = STATUS_BOT_CHANNEL
 
 # ── Categorias ────────────────────────────────────────────────
-CATEGORY_INFORMACOES = "📋 INFORMAÇÕES"
-CATEGORY_MOBILE      = "📱 MOBILE"
-CATEGORY_EMULADOR    = "🖥️ EMULADOR"
-CATEGORY_MISTO       = "🔀 MISTO"
-CATEGORY_SUPORTE     = "🎫 SUPORTE"
-CATEGORY_MEDIACAO    = "⚡ MEDIAÇÃO"
-CATEGORY_ANALISTAS   = "🔍 ANALISTAS"
-CATEGORY_ANALYTICS   = "📊 ANALYTICS"
-CATEGORY_COMUNIDADE  = "🏆 COMUNIDADE"
-CATEGORY_STAFF       = "🔐 STAFF"
-CATEGORY_LOGS        = "📝 LOGS"
+CATEGORY_INFORMACOES = "📋 | INFORMAÇÕES"
+CATEGORY_MOBILE      = "📱 | MOBILE"
+CATEGORY_EMULADOR    = "🖥️ | EMULADOR"
+CATEGORY_MISTO       = "🔀 | MISTO"
+CATEGORY_SUPORTE     = "🎫 | SUPORTE"
+CATEGORY_MEDIACAO    = "⚡ | MEDIAÇÃO"
+CATEGORY_ANALISTAS   = "🔍 | ANALISTAS"
+CATEGORY_ANALYTICS   = "📊 | ANALYTICS"
+CATEGORY_COMUNIDADE  = "🏆 | COMUNIDADE"
+CATEGORY_STAFF       = "🔐 | STAFF"
+CATEGORY_LOGS        = "📝 | LOGS"
 
 # ── Estrutura ─────────────────────────────────────────────────
 CHANNEL_STRUCTURE: dict[str, list[str]] = {
@@ -147,6 +147,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         HISTORICO_CHANNEL,
         CADASTRO_MEDIADOR_CHANNEL,
     ],
+    
     CATEGORY_MOBILE:   ["1x1-mob", "2x2-mob", "3x3-mob", "4x4-mob"],
     CATEGORY_EMULADOR: ["1x1-emu", "2x2-emu", "3x3-emu", "4x4-emu"],
     CATEGORY_MISTO:    ["4x4-misto", "3x3-misto", "2x2-misto"],
@@ -245,9 +246,36 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
     LOGS_MESSAGE_DELETE_CHANNEL:[ADM_ROLE_NAME],
     LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME],
-    RATE_LIMIT_CHANNEL_NAME:    [ADM_ROLE_NAME],
-    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],
-    MEMBROS_BLOQUEADOS_CHANNEL: [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],     # ← adicionado
+    }
+
+# ── Permissões — canais onde roles VEEM mas NÃO enviam ────────
+# (só ADM_ROLE_NAME e o bot podem postar)
+CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
+    # Analistas
+    CASOS_ANALISAR_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
+    PAINEL_ANALISTA_CHANNEL:    [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
+    HISTORICO_EXPOSED_CHANNEL:  [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
+    APROVAR_MEDIADORES_CHANNEL: [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+
+    # Suporte
+    PAINEL_SUPORTE_CHANNEL:     [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+
+    # Informações (membros veem, só adm/bot posta)
+    AVISOS_CHANNEL:             [],  # lista vazia = Membro pode ver
+
+    # Mediação
+    HISTORICO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+
+    # Staff
+    MEDIADORES_AFKS_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+
+    # Logs (todos view-only, adm posta)
+    LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_MESSAGE_DELETE_CHANNEL: [ADM_ROLE_NAME],
+    LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
 }
 
 # ── Canais onde roles podem enviar mensagens ──────────────────
