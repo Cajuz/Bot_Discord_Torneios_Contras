@@ -35,7 +35,8 @@ class Match:
         self.match_type   = data.get('match_type')
         self.platform     = data.get('platform')
         self.bet_value    = data.get('bet_value')
-        self.gel_type     = data.get('gel_type', 'normal')
+        # "or 'normal'" garante fallback quando o valor e None (nao so quando a chave esta ausente)
+        self.gel_type     = data.get('gel_type') or 'normal'
 
         self.player_ids  = [str(p) for p in data.get('player_ids', [])]
         self.max_players = data.get('max_players', 2)
