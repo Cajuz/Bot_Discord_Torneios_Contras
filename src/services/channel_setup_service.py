@@ -5,11 +5,15 @@ from discord import Interaction
 from discord import channel
 from config.rules import ServerRules
 from services.analytics_service import THEME2
+from views.dashboard_financeiro import build_financeiro_image
+from views.dashboard_governanca import build_governanca_image
+from views.dashboard_operacional import build_operacional_image
 from views.rules_view import RulesView
 from views.imagens import get_banner_file
 from utils.logger import logger, log_success
 from services.channel_service import (
-    BLACKLIST_CHANNEL, CHANNEL_STRUCTURE, ALL_ROLES,
+    BLACKLIST_CHANNEL, CHANNEL_STRUCTURE, ALL_ROLES, DASHBOARD_OPERACIONAL_CHANNEL,
+    DASHBOARD_GOVERNAÇA_CHANNEL, DASHBOARD_FINANCEIRO_CHANNEL,
     GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL, GUIA_SUPORTE_CHANNEL, REGRAS_CHANNEL, SUPORTE_ADMIN_CHANNEL,
     GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,AVISOS_CHANNEL,
     # Suporte
@@ -39,6 +43,7 @@ from services.channel_service import (
     permission_service,
 )
 from config.channels_config import ChannelsConfig
+from config.database import db
 
 THEME = 0xFFD54F
 ALERTAS_ADM_CHANNEL = "alertas-adm"
@@ -46,11 +51,12 @@ ALERTAS_ADM_CHANNEL = "alertas-adm"
 
 class ChannelSetupService:
 
-    def __init__(self):
+    def __init__(self,db ):
         self.bot: discord.Client | None = None
         self.member: discord.Member | None = None
+        self.db = db
 
-
+    
     # ══════════════════════════════════════════════════════════
     # ENTRY POINT
     # ══════════════════════════════════════════════════════════
@@ -164,6 +170,9 @@ class ChannelSetupService:
         await self.setup_troca_cargo_logs(guild)
         await self.setup_health_check(guild)
         # Painéis novos
+        #await self.post_operacional_dashboard(guild,)
+        #await self.post_financeiro_dashboard(guild,) 
+        #await self.post_governanca_dashboard(guild,)
         await self.setup_avisos(guild)
         await self.regras(guild)
         await self.setup_aprovar_mediadores(guild)
@@ -338,6 +347,56 @@ class ChannelSetupService:
     # ══════════════════════════════════════════════════════════
     # PAINÉIS NOVOS
     # ══════════════════════════════════════════════════════════
+
+
+    async def post_operacional_dashboard(self, guild: discord.Guild):
+        buf = await build_operacional_image(self.db)
+        file = discord.File(buf, filename="dashboard_operacional.png")
+
+        embed = discord.Embed(
+            title="[OP] Dashboard Operacional",
+            description="Mediadores · Partidas · Filas",
+            color=0x5865F2
+        )
+        embed.set_image(url="attachment://dashboard_operacional.png")
+
+        channel = discord.utils.get(guild.text_channels, name=DASHBOARD_OPERACIONAL_CHANNEL)
+        if not channel:
+            return
+        await channel.send(embed=embed, file=file)
+    async def post_financeiro_dashboard(self, guild: discord.Guild):
+        buf = await build_financeiro_image(self.db)
+        file = discord.File(buf, filename="dashboard_financeiro.png")
+
+        embed = discord.Embed(
+            title="[FIN] Dashboard Financeiro",
+            description="Pagamentos PIX · Volume de Apostas",
+            color=0xF0B429
+        )
+        embed.set_image(url="attachment://dashboard_financeiro.png")
+
+        channel = discord.utils.get(guild.text_channels, name=DASHBOARD_FINANCEIRO_CHANNEL)
+        if not channel:
+            return
+
+        await channel.send(embed=embed, file=file)
+
+    async def post_governanca_dashboard(self, guild: discord.Guild):
+        buf = await build_governanca_image(self.db)
+        file = discord.File(buf, filename="dashboard_governanca.png")
+
+        embed = discord.Embed(
+            title="[GOV] Dashboard Governança 🛡️",
+            description="Tickets · Usuários · Segurança",
+            color=0x9B59B6
+        )
+        embed.set_image(url="attachment://dashboard_governanca.png")
+
+        channel = discord.utils.get(guild.text_channels, name=DASHBOARD_GOVERNAÇA_CHANNEL)
+        if not channel:
+            return
+
+        await channel.send(embed=embed, file=file)
     async def regras(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📜 Regras do Servidor",
@@ -633,4 +692,4 @@ class ChannelSetupService:
         return embed
 
 
-channel_setup_service = ChannelSetupService()
+channel_setup_service = ChannelSetupService(db=db)
