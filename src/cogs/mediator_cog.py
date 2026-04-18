@@ -243,7 +243,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
             await interaction.response.send_message(
                 "Apenas mediadores podem usar este comando.", ephemeral=True
             )
-
-
+    
+        
 async def setup(bot: commands.Bot):
     await bot.add_cog(MediatorCog(bot))

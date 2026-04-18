@@ -39,6 +39,7 @@ from services.channel_service import (
     permission_service,
 )
 from config.channels_config import ChannelsConfig
+from config.database import db
 
 THEME = 0xFFD54F
 ALERTAS_ADM_CHANNEL = "alertas-adm"
@@ -46,11 +47,12 @@ ALERTAS_ADM_CHANNEL = "alertas-adm"
 
 class ChannelSetupService:
 
-    def __init__(self):
+    def __init__(self,db ):
         self.bot: discord.Client | None = None
         self.member: discord.Member | None = None
+        self.db = db
 
-
+    
     # ══════════════════════════════════════════════════════════
     # ENTRY POINT
     # ══════════════════════════════════════════════════════════
@@ -338,6 +340,7 @@ class ChannelSetupService:
     # ══════════════════════════════════════════════════════════
     # PAINÉIS NOVOS
     # ══════════════════════════════════════════════════════════
+
     async def regras(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📜 Regras do Servidor",
@@ -633,4 +636,4 @@ class ChannelSetupService:
         return embed
 
 
-channel_setup_service = ChannelSetupService()
+channel_setup_service = ChannelSetupService(db=db)
