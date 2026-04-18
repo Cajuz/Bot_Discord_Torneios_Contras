@@ -1,420 +1,159 @@
-<div align="center">
-
-# 📖 X1 Frifas — Referência de Comandos
-
-**Guia completo de comandos, canais e permissões**
-
-</div>
-
+Relatório de Comandos — Bot X1 Frifas
+Repositório: `Cajuz/X1_frifas-Discord_bot`  
+Gerado em: 18/04/2026  
+Total de Cogs: 11
 ---
-
-## 📋 Sumário
-
-- [Legenda](#-legenda)
-- [ADM / Controller](#️-adm--controller)
-  - [Setup do Servidor](#setup-do-servidor)
-  - [Moderação](#moderação)
-  - [Operacional](#operacional)
-- [Mediador](#-mediador)
-- [Suporte](#-suporte)
-- [Analista](#-analista)
-- [Membro / Jogador](#-membro--jogador)
-- [Mapa de Canais](#-mapa-de-canais)
-- [Fluxo de Partida](#-fluxo-de-partida)
-
+1. Visão Geral
+O bot é inicializado em `main.py` e carrega automaticamente os seguintes módulos (cogs):
+#	Módulo	Nome do Cog
+1	`cogs.admin_cog`	Administração
+2	`cogs.mediator_cog`	Mediador
+3	`cogs.support_cog`	Suporte
+4	`cogs.match_cog`	Partida
+5	`cogs.analyst_cog`	Analista
+6	`cogs.invite_cog`	Convites
+7	`cogs.influencer_cog`	Influencer
+8	`cogs.renewal_cog`	Renovação
+9	`cogs.thread_pool_cog`	Thread Pool
+10	`cogs.renewal_dashboard_cog`	Painel Contratos
+11	`cogs.alerts_cog`	Alertas
 ---
-
-## 🏷️ Legenda
-
-| Símbolo | Significado |
-|---------|------------|
-| `!comando` | Comando de prefixo (digitar no chat) |
-| `/comando` | Slash command (barra `/` no Discord) |
-| 🔘 Botão | Interação via botão na interface |
-| ✅ | Funcional |
-| ⚠️ | Funcional com restrição de contexto |
-| 🔒 | Requer permissão de administrador Discord |
-| 🎯 | Requer cargo específico no servidor |
-
+2. Comandos por Cog
+2.1 AdminCog — Administração
+Responsável pela gestão de mediadores, candidaturas, ajustes de saldo, configuração de canais e ações administrativas gerais.
+Comando	Tipo	Permissão	Descrição
+`/candidatura`	Slash	Público	Abre modal para candidatura a mediador
+`/mediador add`	Slash (grupo)	Administrador	Cadastra novo mediador
+`/mediador remove`	Slash (grupo)	Administrador	Remove mediador
+`/mediador info`	Slash (grupo)	Administrador	Exibe informações de um mediador
+`/mediador listar`	Slash (grupo)	Administrador	Lista todos os mediadores ativos
+`/mediador fila`	Slash (grupo)	Administrador	Mostra a fila de mediadores
+`/ajustar_saldo`	Slash	Administrador	Adiciona ou subtrai saldo de um usuário
+`/ver_saldo`	Slash	Administrador	Consulta saldo de qualquer usuário
+`!setup_painel_contratos`	Prefix	Administrador	Cria/atualiza o painel de contratos
+`!atualizar_contratos`	Prefix	Administrador	Força atualização dos painéis
+`!aprovar`	Prefix	Administrador	Aprova candidatura de mediador pendente
+`!rejeitar`	Prefix	Administrador	Rejeita candidatura de mediador pendente
+`!setup_renovacao`	Prefix	Administrador	Posta painel fixo no canal de renovação
 ---
-
-## 🛡️ ADM / Controller
-
-### Setup do Servidor
-
-> Execute estes comandos em qualquer canal onde você tenha permissão de administrador.
-
-#### Setup Completo
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `!setupcanais` 🔒 | ✅ | Qualquer | Cria/atualiza **toda** a estrutura: cargos, categorias, canais, permissões, painéis, cards de fila e dashboards |
-
-> ⚠️ Leva alguns segundos. O bot responde com confirmação ao concluir.
-
+2.2 MediatorCog — Mediador
+Gerencia o ciclo de vida do mediador: fila, status, entrada em partidas e encerramento.
+Comando	Tipo	Permissão	Descrição
+`/entrar`	Slash	Cargo Controller/Mediador	Entra na fila de mediadores disponíveis
+`/sair`	Slash	Cargo Controller/Mediador	Sai da fila de mediadores
+`/status`	Slash	Cargo Controller/Mediador	Exibe status atual na fila
+`/sala`	Slash	Cargo Controller/Mediador	Inicia a partida (muda status para `partida_iniciada`)
+`/afk`	Slash	Cargo Controller/Mediador	Marca mediador como AFK
+`/voltar`	Slash	Cargo Controller/Mediador	Remove status AFK e retorna à fila
+`/fila`	Slash	Público	Mostra fila atual de mediadores
 ---
-
-#### Setup Individual — Painéis Base
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `!setup_guias` 🔒 | ✅ | Qualquer | Reescreve os 4 guias: `#guia-jogador`, `#guia-mediador`, `#guia-suporte`, `#guia-analista` |
-| `!setup_suporte` 🔒 | ✅ | Qualquer | Posta painéis em `#solicitar-suporte` e `#suporte-admin` |
-| `!setup_mediador` 🔒 | ✅ | Qualquer | Posta painéis em `#painel-mediador`, `#mediadores-adm` e `#quero-ser-mediador` |
-| `!setup_quero_ser_mediador` 🔒 | ✅ | Qualquer | Posta somente o painel de candidatura a mediador |
-| `!setup_influencers` 🔒 | ✅ | Qualquer | Posta painéis em `#influencers` e `#influencers-admin` |
-| `!setup_pix` 🔒 | ✅ | Qualquer | Posta o painel PIX em `#pix-mediador` |
-| `!setup_renovacao` 🔒 | ✅ | Qualquer | Posta painel de renovação em `#renovacao` |
-| `!setup_partidas` 🔒 | ✅ | Qualquer | Posta todos os cards de fila nos canais de partida |
-| `!setup_dashboards` 🔒 | ✅ | Qualquer | Atualiza todos os dashboards de analytics |
-| `!setup_faturamento` 🔒 | ✅ | Qualquer | Posta painel em `#faturamento` |
-
+2.3 SupportCog — Suporte
+Sistema de tickets para suporte ao usuário via canal privado.
+Comando	Tipo	Permissão	Descrição
+`!chamado`	Prefix	Público	Abre ou lista tickets de suporte do usuário
+`/ticket`	Slash	Público	Cria novo ticket de suporte (canal privado)
+`/fechar_ticket`	Slash	Cargo Suporte	Fecha um ticket aberto
 ---
-
-#### Setup Individual — Novos Painéis
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `!setup_avisos` 🔒 | ✅ | Qualquer | Posta o painel fixo em `#avisos` |
-| `!setup_aprovar_mediadores` 🔒 | ✅ | Qualquer | Posta o painel instrucional em `#aprovar-mediadores` |
-| `!setup_historico_exposed` 🔒 | ✅ | Qualquer | Posta o painel de histórico em `#historico-blacklist` |
-| `!setup_mediadores_afks` 🔒 | ✅ | Qualquer | Posta o painel de AFK em `#mediadores-afks` |
-| `!setup_cadastro_mediador` 🔒 | ✅ | Qualquer | Posta o card com formulário de cadastro em `#cadastro-mediador` |
-| `!setup_blacklist` 🔒 | ✅ | Qualquer | Posta o painel de consulta em `#blacklist` |
-| `!setup_painel_contratos` 🔒 | ✅ | Qualquer | Gera/atualiza painéis em `#painel-contratos` e `#analytics-adm` |
-
+2.4 MatchCog — Partida
+Gerencia criação de partidas e o fluxo de X1 (desafio entre dois jogadores).
+Comando	Tipo	Permissão	Descrição
+`/x1`	Slash	Público	Desafia outro usuário para uma partida
+`/cancelar_partida`	Slash	Administrador	Cancela uma partida em andamento
+`/partidas`	Slash	Público	Lista partidas ativas do usuário
+`!wt red`	Prefix	Cargo Controller/Mediador	Declara time Red como vencedor da partida
+`!wt blue`	Prefix	Cargo Controller/Mediador	Declara time Blue como vencedor da partida
 ---
-
-### Moderação
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!bloquear @membro [motivo]` | ✅ | Qualquer | Manage Messages | Aplica cargo de bloqueio ao membro e registra no banco |
-| `!desbloquear @membro` | ✅ | Qualquer | Manage Messages | Remove cargo de bloqueio do membro |
-| `!limpar <1–100>` | ✅ | Qualquer | Manage Messages | Apaga N mensagens do canal (máx. 100) |
-
+2.5 AnalystCog — Analista
+Dashboard analítico com estatísticas do servidor, partidas e financeiro.
+Comando	Tipo	Permissão	Descrição
+`/stats`	Slash	Público	Estatísticas gerais do usuário (partidas, saldo)
+`/leaderboard`	Slash	Público	Ranking dos jogadores por vitórias
+`/stats_servidor`	Slash	Administrador	Estatísticas globais do servidor
+`/relatorio_diario`	Slash	Administrador	Relatório financeiro e operacional do dia
+`/relatorio_semanal`	Slash	Administrador	Relatório da semana
+`!dashboard`	Prefix	Administrador	Posta painel analítico no canal atual
 ---
-
-### Operacional
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!healthcheck` 🔒 | ✅ | Qualquer | Administrador | Exibe painel técnico interativo: latência, conexão, fila, estatísticas |
-| `!faturamento [@membro]` 🎯 | ✅ | Qualquer | ADM ou Mediador | Relatório paginado de partidas e faturamento de um mediador |
-| `!verpix [@membro]` 🔒 | ✅ | Qualquer | Administrador | Exibe chave PIX e QR Code de um mediador |
-| `!help_adm` 🔒 | ✅ | Qualquer | Administrador | Lista todos os comandos admin com descrição |
-
+2.6 InviteCog — Convites
+Rastreamento de convites e monitoramento de rate limits da API do Discord.
+Comando	Tipo	Permissão	Descrição
+`/convites`	Slash	Público	Exibe total de convites do usuário ou de outro membro
+`/top_convites`	Slash	`manage_guild`	Ranking dos membros que mais convidaram
+`/ratelimit_stats`	Slash	Administrador	Estatísticas de rate limit da API (período configurável em horas)
+Listeners automáticos: `on_member_join` (registra quem convidou), `on_member_remove` (log de saída), `on_invite_create/delete` (atualiza cache).
 ---
-
-### Análise & Exposição (via analyst_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!setup_analise` 🔒 | ✅ | Qualquer | Administrador | Posta o painel de solicitação de análise |
-| `!setup_exposed` 🔒 | ✅ | Qualquer | Administrador | Posta o painel de gestão da blacklist |
-
+2.7 InfluencerCog — Influencer
+Controle e comissionamento de influencers que trazem membros ao servidor.
+Comando	Tipo	Permissão	Descrição
+`/influencer add`	Slash (grupo)	Administrador	Cadastra influencer com código de invite e comissão
+`/influencer remove`	Slash (grupo)	Administrador	Remove influencer e revoga cargo
+`/influencer stats`	Slash (grupo)	Público / Admin	Estatísticas de membros trazidos, partidas e comissão
+`/influencer faturamento`	Slash (grupo)	Público / Admin	Relatório financeiro de comissão acumulada
+`/influencer ranking`	Slash (grupo)	Administrador	Ranking geral dos 10 influencers com mais membros
 ---
-
-### Gestão de Mediadores (via mediator_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!addmediador @membro` 🔒 | ✅ | Qualquer | Administrador | Adiciona o membro à fila de mediadores disponíveis |
-| `!removemediador @membro` 🔒 | ✅ | Qualquer | Administrador | Remove o membro da fila de mediadores |
-| `!fila` 🎯 | ✅ | Qualquer | ADM / Mediador | Exibe a fila atual e status de cada mediador |
-
+2.8 RenewalCog — Renovação
+Renovação automática de licença de mediador via PIX (integração Efí Pay).
+Comando	Tipo	Permissão	Descrição
+`/renovar`	Slash	Cargo Controller/Mediador/Mediator	Abre modal para renovação de licença (planos 7, 15 ou 30 dias)
+`!renovar_mediador`	Prefix	Administrador	Gera cobrança PIX para outro mediador via DM
+Tasks automáticas:
+`check_expiring` (a cada 12h): avisa mediadores com licença vencendo em D-3 e D-1; notifica licenças já vencidas.
+`expire_mediators` (a cada 24h): expira mediadores vencidos, remove cargo Controller e envia DM.
 ---
-
-### Thread Pool (via thread_pool_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `/threadpool setup` 🔒 | ✅ | Qualquer | Administrador | Posta ou atualiza o painel de status do pool de threads |
-| `/threadpool preaquecer [qtd]` 🔒 | ✅ | Qualquer | Administrador | Cria N threads arquivadas no pool para uso futuro |
-| `/threadpool status` 🔒 | ✅ | Qualquer | Administrador | Exibe resumo: total, disponíveis, em uso, margem |
-
+2.9 ThreadPoolCog — Pool de Threads
+Monitoramento e gerenciamento do pool de threads reutilizáveis para partidas.
+Comando	Tipo	Permissão	Descrição
+`/thread_pool setup`	Slash (grupo)	Administrador	Posta/atualiza painel de monitoramento no canal atual
+`/thread_pool preaquecer`	Slash (grupo)	Administrador	Cria N threads arquivadas no pool (padrão 3, máx 10)
+`/thread_pool status`	Slash (grupo)	Administrador	Exibe resumo rápido do pool (ephemeral)
+Task automática: `_auto_refresh` (a cada 5 minutos) — atualiza o painel em todos os servidores.
 ---
-
-### Influencers (via influencer_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `/influencer add @m <invitecode> [comissao]` 🔒 | ✅ | Qualquer | Administrador | Cadastra influencer com código de convite e % de comissão |
-| `/influencer remove @membro` 🔒 | ✅ | Qualquer | Administrador | Remove influencer |
-| `/influencer stats @membro` 🔒 | ✅ | Qualquer | Administrador | Estatísticas do influencer (convites, comissão acumulada) |
-| `/influencer faturamento` 🔒 | ✅ | Qualquer | Administrador | Relatório de faturamento de todos os influencers |
-| `/influencer ranking` | ✅ | Qualquer | Qualquer | Ranking público de influencers por convites |
-
+2.10 RenewalDashboardCog — Painel de Contratos
+Painel financeiro e operacional de contratos de mediadores, atualizado automaticamente.
+Comando	Tipo	Permissão	Descrição
+`!resumo_financeiro`	Prefix	Administrador	Envia resumo financeiro analítico diretamente no chat
+Canais gerenciados:
+`#painel-contratos` — embed fixo com resumo financeiro + botões Atualizar e Ver Pendentes.
+`#analytics-adm` — dashboard detalhado com métricas semanais e mensais.
+Task automática: `auto_refresh` (a cada 6h) — atualiza ambos os painéis automaticamente.
 ---
-
-### Renovação Manual (via renewal_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!renovarmediador @m [dias] [valor]` 🔒 | ✅ | Qualquer | Administrador | Gera cobrança PIX manual para renovação do mediador |
-
+2.11 AlertsCog — Alertas
+Loop automático de alertas operacionais para o canal `#alertas-adm`.
+Recurso	Tipo	Descrição
+`alerts_loop`	Task (5 min)	Verifica latência alta, contratos vencendo, fila parada e mediadores AFK prolongado
+`send_alert()`	Método público	API interna para outros cogs enviarem alertas manuais para `#alertas-adm`
+Verificações automáticas:
+Latência do bot acima de 300 ms.
+Contratos vencidos ou vencendo em até 3 dias.
+Fila de mediadores inativa há mais de 30 minutos.
+Mediadores com status AFK há mais de 2 horas.
+> Este cog **não expõe comandos de usuário** — funciona exclusivamente como serviço de monitoramento em background.
 ---
-
-### Convites & Rate Limit (via invite_cog)
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `/topconvites` 🔒 | ✅ | Qualquer | Administrador | Ranking de membros que mais convidaram |
-| `/ratelimitstats [horas]` 🔒 | ✅ | Qualquer | Administrador | Estatísticas de rate limit nas últimas N horas |
-
+3. Resumo por Tipo de Comando
+Tipo	Quantidade
+Slash (`/`)	35
+Prefix (`!`)	10
+Total	45
 ---
-
-## ⚖️ Mediador
-
-> ⚠️ Os comandos de fluxo de partida **devem ser usados dentro da thread da partida**.
-
-### Fila de Mediadores
-
-| Interação | Status | Canal | Descrição |
-|-----------|--------|-------|-----------|
-| 🔘 **Entrar na Fila** | ✅ | `#painel-mediador` | Coloca o mediador disponível para assumir partidas |
-| 🔘 **Sair da Fila** | ✅ | `#painel-mediador` | Remove o mediador da fila |
-| `!fila` | ✅ | Qualquer | Exibe status atual da fila |
-
+4. Resumo por Nível de Permissão
+Permissão	Comandos
+Público	`/x1`, `/partidas`, `/convites`, `/stats`, `/leaderboard`, `/fila`, `/status`, `/candidatura`, `/influencer stats`, `/influencer faturamento`
+Cargo específico (Mediador/Controller)	`/entrar`, `/sair`, `/sala`, `/afk`, `/voltar`, `/renovar`, `!wt red`, `!wt blue`
+`manage_guild`	`/top_convites`
+Administrador	Demais comandos
 ---
-
-### Fluxo de Partida
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `!confirmar_pagamento` 🎯 | ✅ | Thread da partida | Confirma que ambos os jogadores pagaram via PIX |
-| `!iniciar_partida` 🎯 | ✅ | Thread da partida | Declara oficialmente o início da partida |
-| `!winner_team blue` 🎯 | ✅ | Thread da partida | Define o **Time Azul** como vencedor |
-| `!winner_team red` 🎯 | ✅ | Thread da partida | Define o **Time Vermelho** como vencedor |
-| `!prize` 🎯 | ✅ | Thread da partida | Confirma que o prêmio foi enviado ao vencedor |
-| `!cancelar_match [motivo]` 🎯 | ✅ | Thread da partida | Cancela a partida e devolve a thread ao pool |
-| `/silence @membro [seg] [motivo]` 🎯 | ✅ | Thread / canal | Silencia jogador no contexto atual |
-| `!menu_partida` 🎯 | ✅ | Thread da partida | Envia painel de controle completo via DM |
-
----
-
-### PIX e Renovação
-
-| Comando / Interação | Status | Canal | Descrição |
-|---------------------|--------|-------|-----------|
-| 🔘 **Cadastrar PIX** | ✅ | `#pix-mediador` | Abre modal para cadastrar/atualizar chave PIX |
-| `/renovar [dias]` | ✅ | Qualquer | Gera cobrança PIX para renovar própria licença (7, 15 ou 30 dias) |
-| `!verpix` | ✅ | Qualquer | Exibe própria chave PIX e QR Code |
-
----
-
-## 🎫 Suporte
-
-### Painel de Chamados
-
-| Interação | Status | Canal | Descrição |
-|-----------|--------|-------|-----------|
-| 🔘 **Abrir Ticket** | ✅ | `#solicitar-suporte` | Cria ticket e notifica o staff em `#chamados` |
-| 🔘 **Assumir** | ✅ | `#chamados` | Atendente assume o ticket e abre canal privado |
-
-### Comandos de Atendimento
-
-| Comando | Status | Canal | Permissão | Descrição |
-|---------|--------|-------|----------|-----------|
-| `!fechar_chamado <ticket_id>` 🎯 | ✅ | Canal do chamado | Suporte / ADM | Fecha e arquiva o chamado |
-| `!concluir_chamado <ticket_id>` 🎯 | ✅ | Canal do chamado | Suporte / ADM | Marca chamado como resolvido com sucesso |
-| `!criar_canal_suporte [@membro]` 🎯 | ✅ | Qualquer | Suporte / ADM | Cria canal privado de atendimento para o membro |
-| `/renomear_canal [sufixo]` 🎯 | ✅ | Canal do chamado | Suporte | Renomeia o canal com o assunto do chamado |
-
----
-
-## 🔍 Analista
-
-### Gestão de Casos
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `/assumir_caso <case_id>` 🎯 | ✅ | `#casos-analisar` | Analista assume o caso e o bloqueia para outros |
-| `/decidir_caso <case_id> <decisao> <motivo>` 🎯 | ✅ | `#casos-analisar` | Encerra o caso com decisão: `confirmado` / `inconclusivo` / `invalido` |
-
----
-
-### Blacklist
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `/blacklist_add <player_id> <motivo>` 🎯 | ✅ | `#exposed` | Adiciona jogador à blacklist (registra no banco + posta no canal) |
-| `/blacklist_remove <player_id>` 🎯 | ✅ | `#exposed` | Remove jogador da blacklist |
-| `/blacklist_check <player_id>` 🎯 | ✅ | Qualquer | Consulta se um jogador está na blacklist |
-| `/blacklist_list` 🎯 | ✅ | Qualquer | Lista os últimos registros da blacklist |
-| 🔘 **Verificar Minha Situação** | ✅ | `#blacklist` | Auto-verificação — exibe status do próprio usuário (ephemeral) |
-| 🔘 **Buscar por Discord ID** | ✅ | `#blacklist` | Abre modal para buscar qualquer usuário pelo ID (visível apenas para quem clicou) |
-
----
-
-## 🎮 Membro / Jogador
-
-### Filas e Partidas
-
-| Interação / Comando | Status | Canal | Descrição |
-|---------------------|--------|-------|-----------|
-| 🔘 **Entrar na Fila** | ✅ | Canal de partida | Entra na fila do card selecionado (modo + valor) |
-| 🔘 **Sair da Fila** | ✅ | Canal de partida | Cancela entrada na fila |
-| `!cancelar` | ✅ | Qualquer | Cancela todas as entradas de fila ativas |
-| 🔘 **Confirmar Presença** | ✅ | Thread da partida | Confirma que está presente para a partida |
-| 🔘 **Confirmar Recebimento do Prêmio** | ✅ | Thread da partida | Confirma que recebeu o prêmio após vitória |
-
----
-
-### Perfil e Histórico
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `/perfil` | ✅ | Qualquer | Exibe estatísticas pessoais: partidas, vitórias, taxa de vitória |
-| `/convites [@membro]` | ✅ | Qualquer | Consulta quantos membros um usuário convidou |
-
----
-
-### Suporte
-
-| Interação / Comando | Status | Canal | Descrição |
-|---------------------|--------|-------|-----------|
-| 🔘 **Abrir Ticket** | ✅ | `#solicitar-suporte` | Abre chamado de suporte |
-| `!chamado` | ✅ | Qualquer | Lista os próprios chamados abertos |
-| `!fechar_chamado <ticket_id>` | ✅ | Qualquer | Fecha o próprio chamado |
-
----
-
-### Análise de Suspeita
-
-| Comando | Status | Canal | Descrição |
-|---------|--------|-------|-----------|
-| `/solicitar_analise <match_id> <motivo> [evidencia]` | ✅ | `#solicitar-analise` | Solicita investigação de suspeita de hack em uma partida |
-
----
-
-### Blacklist
-
-| Interação | Status | Canal | Descrição |
-|-----------|--------|-------|-----------|
-| 🔘 **Verificar Minha Situação** | ✅ | `#blacklist` | Consulta se o próprio usuário está na blacklist (privado) |
-| 🔘 **Buscar por Discord ID** | ✅ | `#blacklist` | Busca qualquer usuário pelo Discord ID (privado) |
-
----
-
-## 🗺️ Mapa de Canais
-
-### 📢 Informações
-
-| Canal | Quem vê | Descrição |
-|-------|---------|----------|
-| `#avisos` | Todos | Avisos oficiais da equipe |
-| `#guia-jogador` | Todos | Tutorial completo para jogadores |
-| `#ranking` | Todos | Dashboard de ranking atualizado automaticamente |
-| `#blacklist` | Todos | Painel de consulta de blacklist |
-
----
-
-### 🎮 Partidas
-
-| Canal | Quem usa | Descrição |
-|-------|----------|----------|
-| `#1x1-mob`, `#2x2-mob`, etc. | Jogadores | Cards de fila por modo Mobile |
-| `#1x1-emu`, `#2x2-emu`, etc. | Jogadores | Cards de fila por modo Emulador |
-| `#2x2-mix`, `#3x3-mix`, etc. | Jogadores | Cards de fila por modo Misto |
-
----
-
-### ⚖️ Mediação
-
-| Canal | Quem acessa | Descrição |
-|-------|------------|----------|
-| `#painel-mediador` | Mediadores | Entrar/sair da fila de mediadores |
-| `#pix-mediador` | Mediadores | Cadastrar/atualizar chave PIX |
-| `#renovacao` | Mediadores | Renovar licença via PIX |
-| `#faturamento` | Mediadores / ADM | Relatório de faturamento |
-| `#mediadores-adm` | ADM | Painel administrativo de mediadores |
-| `#aprovar-mediadores` | ADM | Cards automáticos de aprovação de candidatos |
-| `#mediadores-afks` | ADM | Lista de mediadores AFK/inativos |
-| `#cadastro-mediador` | ADM / Suporte | Formulário de cadastro de novo mediador |
-| `#quero-ser-mediador` | Todos | Canal para candidatura a mediador |
-
----
-
-### 🎫 Suporte
-
-| Canal | Quem acessa | Descrição |
-|-------|------------|----------|
-| `#solicitar-suporte` | Todos | Painel para abrir ticket |
-| `#chamados` | Suporte / ADM | Cards de chamados aguardando atendimento |
-| `#chat-suporte-staff` | Suporte / ADM | Comunicação interna da equipe de suporte |
-| `#suporte-admin` | ADM | Painel administrativo de suporte |
-
----
-
-### 🔍 Análise e Blacklist
-
-| Canal | Quem acessa | Descrição |
-|-------|------------|----------|
-| `#solicitar-analise` | Todos | Painel para denunciar suspeita de hack |
-| `#casos-analisar` | Analistas / ADM | Fila de casos para análise |
-| `#painel-analista` | Analistas / ADM | Painel pessoal do analista |
-| `#exposed` | Analistas / ADM | Gestão ativa da blacklist |
-| `#historico-blacklist` | ADM | Log completo de adições/remoções da blacklist |
-| `#chat-analistas` | Analistas / ADM | Comunicação interna dos analistas |
-
----
-
-### 📣 Influencers
-
-| Canal | Quem acessa | Descrição |
-|-------|------------|----------|
-| `#influencers` | Todos | Painel público de influencers |
-| `#influencers-admin` | ADM | Painel administrativo de influencers |
-
----
-
-### 📊 Dashboards e Logs (ADM)
-
-| Canal | Descrição |
-|-------|-----------|
-| `#analytics-adm` | Dashboard financeiro completo |
-| `#painel-contratos` | Contratos e renovações de mediadores |
-| `#dashboard-partidas` | Estatísticas de partidas em tempo real |
-| `#dashboard-mediadores` | Performance e status dos mediadores |
-| `#dashboard-suporte` | Métricas do suporte |
-| `#dashboard-influencers` | Métricas de influencers |
-| `#status-bot` | Status técnico do bot |
-| `#health-check` | Painel interativo de health check |
-| `#logs-pix` | Registro de pagamentos PIX |
-| `#logs-calls` | Log de chamadas de voz/partidas |
-| `#logs-commands` | Log de todos os comandos executados |
-| `#logs-delete` | Log de mensagens deletadas |
-| `#logs-troca-cargo` | Log de alterações de cargo |
-
----
-
-## 🔄 Fluxo de Partida
-
+5. Fluxo de Partida (Status)
+O fluxo atual de uma partida segue os seguintes estados:
 ```
-1. Jogador clica no botão de valor no card do canal de partida
-       ↓
-2. Fila completa (2 a 8 jogadores dependendo do modo)
-       ↓
-3. Thread criada automaticamente → jogadores confirmam presença
-       ↓
-4. Mediador entra na thread → !confirmar_pagamento
-       ↓
-5. !iniciar_partida → partida começa oficialmente
-       ↓
-6. Fim da partida → mediador usa !winner_team blue OU !winner_team red
-       ↓
-7. !prize → mediador confirma que o prêmio foi enviado
-       ↓
-8. Vencedor clica em [Confirmar Recebimento do Prêmio]
-       ↓
-9. Partida finalizada → thread devolvida ao pool para reutilização
+criado
+  └→ aguardando_partida   (mediador entra na thread)
+       └→ partida_iniciada  (mediador usa /sala)
+            └→ finalizado   (mediador usa !wt red ou !wt blue)
+            └→ cancelado    (cancelamento manual)
 ```
-
+Os comandos envolvidos neste fluxo são:
+`/x1` (MatchCog) — cria a partida com status `criado`.
+Mediador entra na thread (automático via fila) — status passa para `aguardando_partida`.
+`/sala` (MediatorCog) — mediador inicia oficialmente a partida → `partida_iniciada`.
+`!wt red` ou `!wt blue` (MatchCog) — declara vencedor → `finalizado`.
 ---
-
-<div align="center">
-
-*Dúvidas? Execute `!help_adm` no servidor ou consulte [`deploy/MANUTENCAO.md`](../deploy/MANUTENCAO.md)*
-
-</div>
+Relatório gerado automaticamente a partir do código-fonte do repositório `Cajuz/X1_frifas-Discord_bot`.
