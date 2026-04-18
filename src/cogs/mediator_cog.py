@@ -70,7 +70,6 @@ class MediatorCog(commands.Cog, name="Mediador"):
         description="[Mediador] Informa sala + senha e inicia a partida"
     )
     @app_commands.describe(
-        match_id="ID da partida (ex: 64abc123...)",
         sala_id="ID da sala no jogo",
         senha="Senha da sala",
         modo="Modo de jogo (ex: Normal, Ranked, Torneio)"
@@ -79,7 +78,6 @@ class MediatorCog(commands.Cog, name="Mediador"):
     async def sala(
         self,
         interaction: discord.Interaction,
-        match_id: str,
         sala_id: str,
         senha: str,
         modo: str = "Normal",
@@ -88,35 +86,23 @@ class MediatorCog(commands.Cog, name="Mediador"):
 
         from services.match_service import match_service
         from models.match import Match
-        from bson import ObjectId
 
-        try:
-            ObjectId(match_id)
-        except Exception:
-            await interaction.followup.send(
-                "❌ `match_id` inválido. Use o ID completo da partida.", ephemeral=True
-            )
-            return
+        # Busca automaticamente a partida ativa do mediador
+        partidas = await match_service.get_matches_by_mediator(interaction.user.id, limit=10)
+        match = next(
+            (m for m in partidas if m.get("status") == Match.STATUS_AGUARDANDO_PARTIDA),
+            None
+        )
 
-        match = await match_service.get_match(match_id)
         if not match:
             await interaction.followup.send(
-                f"❌ Partida `{match_id}` não encontrada.", ephemeral=True
-            )
-            return
-
-        if match.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
-            await interaction.followup.send(
-                f"⚠️ Status atual é `{match.get('status')}` — esperado `aguardando_partida`.",
+                "❌ Nenhuma partida sua com status `aguardando_partida` encontrada.\n"
+                "Verifique se a partida foi criada corretamente.",
                 ephemeral=True
             )
             return
 
-        if str(interaction.user.id) != str(match.get("mediator_id")):
-            await interaction.followup.send(
-                "❌ Você não é o mediador designado desta partida.", ephemeral=True
-            )
-            return
+        match_id = str(match["_id"])
 
         # Transiciona aguardando_partida → partida_iniciada
         updated = await match_service.iniciar_partida(
