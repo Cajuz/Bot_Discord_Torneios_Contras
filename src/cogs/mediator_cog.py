@@ -18,7 +18,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── !addmediador ───────────────────────────────────────────────
+    # ── !addmediador ─────────────────────────────────────────────────────
     @commands.command(name="addmediador")
     @commands.has_permissions(administrator=True)
     async def addmediador(self, ctx: commands.Context, member: discord.Member):
@@ -32,7 +32,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
         pos = result.position if result else "?"
         await ctx.reply(f"✅ {member.mention} adicionado como mediador! Posição: `{pos}`")
 
-    # ── !removemediador ────────────────────────────────────────────
+    # ── !removemediador ────────────────────────────────────────────────
     @commands.command(name="removemediador")
     @commands.has_permissions(administrator=True)
     async def removemediador(self, ctx: commands.Context, member: discord.Member):
@@ -45,7 +45,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
 
         await ctx.reply(f"✅ {member.mention} removido da fila de mediadores.")
 
-    # ── !fila ──────────────────────────────────────────────────────
+    # ── !fila ─────────────────────────────────────────────────────────
     @commands.command(name="fila")
     @commands.has_permissions(administrator=True)
     async def fila(self, ctx: commands.Context):
@@ -64,10 +64,10 @@ class MediatorCog(commands.Cog, name="Mediador"):
             embed.add_field(name="Mediadores", value="Nenhum na fila.", inline=False)
         await ctx.reply(embed=embed)
 
-    # ── /sala ──────────────────────────────────────────────────────
+    # ── /sala ─────────────────────────────────────────────────────────
     @app_commands.command(
         name="sala",
-        description="[Mediador] Informa sala + senha e inicia a partida automaticamente"
+        description="[Mediador] Informa sala + senha e inicia a partida"
     )
     @app_commands.describe(
         match_id="ID da partida (ex: 64abc123...)",
@@ -86,30 +86,28 @@ class MediatorCog(commands.Cog, name="Mediador"):
     ):
         await interaction.response.defer(ephemeral=True)
 
-        from config.database import db
+        from services.match_service import match_service
+        from models.match import Match
         from bson import ObjectId
 
-        # Valida ObjectId
         try:
-            oid = ObjectId(match_id)
+            ObjectId(match_id)
         except Exception:
             await interaction.followup.send(
                 "❌ `match_id` inválido. Use o ID completo da partida.", ephemeral=True
             )
             return
 
-        col   = db.get_collection("matches")
-        match = await col.find_one({"_id": oid})
-
+        match = await match_service.get_match(match_id)
         if not match:
             await interaction.followup.send(
                 f"❌ Partida `{match_id}` não encontrada.", ephemeral=True
             )
             return
 
-        if match.get("status") not in ("aguardando_pagamento", "confirmado", "criado"):
+        if match.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
             await interaction.followup.send(
-                f"⚠️ Partida já está com status `{match.get('status')}` — não pode ser iniciada.",
+                f"⚠️ Status atual é `{match.get('status')}` — esperado `aguardando_partida`.",
                 ephemeral=True
             )
             return
@@ -120,27 +118,22 @@ class MediatorCog(commands.Cog, name="Mediador"):
             )
             return
 
-        # Atualiza partida para em_andamento
-        await col.update_one(
-            {"_id": oid},
-            {"$set": {
-                "status":     "em_andamento",
-                "sala_id":    sala_id,
-                "sala_senha": senha,
-                "modo_jogo":  modo,
-                "started_at": utcnow(),
-            }}
+        # Transiciona aguardando_partida → partida_iniciada
+        updated = await match_service.iniciar_partida(
+            match_id=match_id,
+            sala_id=sala_id,
+            sala_senha=senha,
+            modo_jogo=modo,
         )
+        if not updated:
+            await interaction.followup.send(
+                "❌ Erro ao iniciar partida. Tente novamente.", ephemeral=True
+            )
+            return
 
-        # Busca thread da partida
-        thread_id = match.get("thread_id")
-        thread    = None
-        if thread_id:
-            thread = interaction.guild.get_thread(int(thread_id))
-
-        # Monta embed card da sala
+        # Monta embed da sala
         embed = discord.Embed(
-            title="🎮 Sala Criada — Partida Iniciada!",
+            title="🎮 Sala Aberta — Partida Iniciada!",
             color=discord.Color.green(),
             timestamp=utcnow()
         )
@@ -169,6 +162,9 @@ class MediatorCog(commands.Cog, name="Mediador"):
         player_ids = match.get("player_ids", [])
         mentions   = " ".join(f"<@{pid}>" for pid in player_ids)
 
+        thread_id = match.get("thread_id")
+        thread    = interaction.guild.get_thread(int(thread_id)) if thread_id else None
+
         if thread:
             await thread.send(content=f"🚨 **SALA ABERTA!** {mentions}", embed=embed)
             await interaction.followup.send("✅ Sala publicada na thread da partida!", ephemeral=True)
@@ -191,7 +187,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
                 "Apenas mediadores podem usar este comando.", ephemeral=True
             )
 
-    # ── /silence ───────────────────────────────────────────────────
+    # ── /silence ─────────────────────────────────────────────────────────
     @app_commands.command(name="silence", description="Silencia um jogador por X segundos")
     @app_commands.describe(membro="Jogador a silenciar", segundos="Duração (máx 300)", motivo="Motivo")
     @app_commands.checks.has_any_role("Controller", "Mediador", "Mediator")
@@ -243,7 +239,7 @@ class MediatorCog(commands.Cog, name="Mediador"):
             await interaction.response.send_message(
                 "Apenas mediadores podem usar este comando.", ephemeral=True
             )
-    
-        
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(MediatorCog(bot))
