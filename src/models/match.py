@@ -12,7 +12,7 @@ class Match:
     STATUS_FINALIZADO         = 'finalizado'
     STATUS_CANCELADO          = 'cancelado'
 
-    # mantidos por compatibilidade com registros antigos no banco
+    # legados — mantidos para compatibilidade com registros antigos e testes
     STATUS_AGUARDANDO_PAGAMENTO = 'aguardando_pagamento'
     STATUS_AGUARDANDO_INICIO    = 'aguardando_inicio'
     STATUS_EM_ANDAMENTO         = 'em_andamento'
@@ -27,9 +27,19 @@ class Match:
         'em_andamento',
     ]
 
+    # FLOW principal (novo)
     FLOW = [
         'aguardando_partida',
         'partida_iniciada',
+        'aguardando_premio',
+        'finalizado',
+    ]
+
+    # FLOW legado — usado por can_transition_to para registros antigos
+    FLOW_LEGADO = [
+        'aguardando_pagamento',
+        'aguardando_inicio',
+        'em_andamento',
         'aguardando_premio',
         'finalizado',
     ]
@@ -59,7 +69,7 @@ class Match:
         self.proof_url = data.get('proof_url')
 
         self.premio_confirmado_jogador = data.get('premio_confirmado_jogador', False)
-        # legados — mantidos para não quebrar documentos antigos
+        # legados — mantidos para não quebrar documentos antigos nem testes
         self.pagamento_confirmado     = data.get('pagamento_confirmado', False)
         self.premio_entregue_mediador = data.get('premio_entregue_mediador', False)
 
@@ -94,6 +104,9 @@ class Match:
             'winner_id':                  self.winner_id,
             'proof_url':                  self.proof_url,
             'premio_confirmado_jogador':  self.premio_confirmado_jogador,
+            # legados — mantidos para compatibilidade com banco e testes
+            'pagamento_confirmado':       self.pagamento_confirmado,
+            'premio_entregue_mediador':   self.premio_entregue_mediador,
             'cancelled_by':               self.cancelled_by,
             'cancel_reason':              self.cancel_reason,
             'created_at':                 self.created_at,
@@ -113,12 +126,16 @@ class Match:
     def can_transition_to(self, new_status: str) -> bool:
         if new_status == self.STATUS_CANCELADO:
             return not self.is_finished()
-        try:
-            current_idx = self.FLOW.index(self.status)
-            new_idx     = self.FLOW.index(new_status)
-            return new_idx == current_idx + 1
-        except ValueError:
-            return False
+        # Tenta no fluxo principal primeiro, depois no legado
+        for flow in (self.FLOW, self.FLOW_LEGADO):
+            try:
+                current_idx = flow.index(self.status)
+                new_idx     = flow.index(new_status)
+                if new_idx == current_idx + 1:
+                    return True
+            except ValueError:
+                continue
+        return False
 
     def get_all_player_ids(self) -> List[str]:
         return list(self.player_ids)
