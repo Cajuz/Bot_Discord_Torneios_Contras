@@ -5,10 +5,10 @@ from services.dashboard_service import THEME2
 class ServerRules:
     """Configuração das regras do servidor"""
 
-    RULES_TITLE = "📜 Regras do Servidor — TSUKI-SERVER"
+    RULES_TITLE = "📜 Regras do Servidor — SOLAR E-SPORTS"
 
     RULES_TEXT = """
-**Bem-vindo(a) ao TSUKI-SERVER!**
+**Bem-vindo(a) ao SOLAR E-SPORTS!**
 
 Leia com atenção antes de entrar no servidor.
 
@@ -59,7 +59,7 @@ Caso não aceite, **você será expulso automaticamente** do servidor.
 O que deseja fazer?
 """
 
-    WELCOME_TITLE = "✅ Bem-vindo(a) ao TSUKI-SERVER!"
+    WELCOME_TITLE = "✅ Bem-vindo(a) ao SOLAR E-SPORTS!"
     WELCOME_TEXT = """
 **Parabéns! Você agora é um Membro oficial!**
 
