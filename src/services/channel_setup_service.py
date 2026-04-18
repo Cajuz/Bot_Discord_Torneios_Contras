@@ -345,7 +345,7 @@ class ChannelSetupService:
         embed = discord.Embed(
             title="📜 Regras do Servidor",
             description=(
-                "Bem-vindo ao servidor X1 Frifas! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
+                "Bem-vindo ao servidor SOLAR E-SPORTS! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
             ),
             color=0xFFD54F,
         )
@@ -408,7 +408,7 @@ class ChannelSetupService:
         """Posta o card fixo de cadastro de mediador com formulário modal."""
         from views.mediator_register_view import MediatorRegisterView
         embed = discord.Embed(
-            title="📋  Cadastro de Mediador — X1 Frifas",
+            title="📋  Cadastro de Mediador — SOLAR E-SPORTS",
             description=(
                 "Preencha o formulário abaixo para cadastrar um novo mediador.\n\n"
                 "**Requisitos**\n"
@@ -419,14 +419,14 @@ class ChannelSetupService:
             ),
             color=0xFFD54F,
         )
-        embed.set_footer(text="X1 Frifas · Apenas ADM/Suporte")
+        embed.set_footer(text="SOLAR E-SPORTS · Apenas ADM/Suporte")
         await self._post_panel(guild, CADASTRO_MEDIADOR_CHANNEL, embed, MediatorRegisterView())
 
     async def setup_blacklist(self, guild: discord.Guild):
         """Posta o painel de verificação de blacklist com botões interativos."""
         from views.blacklist_view import BlacklistCheckView
         embed = discord.Embed(
-            title="🚫  Verificação de Blacklist — X1 Frifas",
+            title="🚫  Verificação de Blacklist — SOLAR E-SPORTS",
             description=(
                 "Verifique se um membro está na blacklist do servidor.\n\n"
                 "🔍 **Verificar Minha Situação** — consulta o seu próprio status\n"
@@ -434,7 +434,7 @@ class ChannelSetupService:
             ),
             color=0x992D22,
         )
-        embed.set_footer(text="X1 Frifas · Blacklist · Consulta disponível para todos")
+        embed.set_footer(text="SOLAR E-SPORTS · Blacklist · Consulta disponível para todos")
         await self._post_panel(guild, BLACKLIST_CHANNEL, embed, BlacklistCheckView())
 
     async def setup_alertas_adm(self, guild: discord.Guild):
@@ -453,7 +453,7 @@ class ChannelSetupService:
             ),
             color=0xFF6B35,
         )
-        embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · X1 Frifas")
+        embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · SOLAR E-SPORTS")
         await self._post_panel(guild, ALERTAS_ADM_CHANNEL, embed, None)
 
     # ══════════════════════════════════════════════════════════
