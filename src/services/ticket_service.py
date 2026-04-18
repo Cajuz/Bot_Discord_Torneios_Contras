@@ -75,6 +75,27 @@ class TicketService:
         ticket.updated_at   = now
         return True, "", ticket
 
+    async def resolve_ticket(
+        self, ticket_id: str, guild_id: int
+    ) -> tuple[bool, str, Optional[Ticket]]:
+        """Marca o chamado como resolvido. Apenas Suporte/Admin."""
+        col = db.get_collection("tickets")
+        doc = await col.find_one({"ticket_id": ticket_id, "guild_id": guild_id})
+        if not doc:
+            return False, "Chamado não encontrado.", None
+        ticket = Ticket.from_dict(doc)
+        if ticket.is_closed():
+            return False, f"Chamado já está `{ticket.status}`.", None
+        now = utcnow()
+        await col.update_one(
+            {"ticket_id": ticket_id},
+            {"$set": {"status": Ticket.STATUS_RESOLVIDO, "resolved_at": now, "updated_at": now}}
+        )
+        ticket.status      = Ticket.STATUS_RESOLVIDO
+        ticket.resolved_at = now
+        ticket.updated_at  = now
+        return True, "", ticket
+
     async def close_ticket(
         self, ticket_id: str, guild_id: int
     ) -> tuple[bool, str, Optional[Ticket]]:

@@ -13,7 +13,6 @@ from utils.logger import logger
 THEME_COLOR   = 0xFFD54F
 THEME_COLOR_2 = 0xFFA726
 
-
 CATEGORIAS = ["Bug", "Pagamento", "Dúvida"]
 
 
@@ -60,10 +59,10 @@ def build_card_embed(ticket: Ticket, guild: discord.Guild) -> discord.Embed:
         title=f"Ticket {ticket.ticket_id}",
         color=color_map.get(ticket.status, discord.Color.greyple())
     )
-    embed.add_field(name="Usuário",   value=f"<@{ticket.discord_id}>",                      inline=True)
-    embed.add_field(name="Categoria", value=ticket.categoria,                                inline=True)
-    embed.add_field(name="Status",    value=status_label.get(ticket.status, ticket.status),  inline=True)
-    embed.add_field(name="Descrição", value=ticket.descricao[:1024],                         inline=False)
+    embed.add_field(name="Usuário",   value=f"<@{ticket.discord_id}>",                     inline=True)
+    embed.add_field(name="Categoria", value=ticket.categoria,                               inline=True)
+    embed.add_field(name="Status",    value=status_label.get(ticket.status, ticket.status), inline=True)
+    embed.add_field(name="Descrição", value=ticket.descricao[:1024],                        inline=False)
     if ticket.atendente_id:
         embed.add_field(name="Atendente", value=f"<@{ticket.atendente_id}>", inline=True)
     ts = ticket.resolved_at or ticket.closed_at
@@ -95,32 +94,35 @@ def build_channel_embed(ticket: Ticket, status: str = "aguardando") -> discord.E
         title=f"🎫 Chamado {ticket.ticket_id}",
         color=color_map.get(status, THEME_COLOR)
     )
-
     embed.add_field(name="Jogador",   value=f"<@{ticket.discord_id}>", inline=True)
     embed.add_field(name="Categoria", value=ticket.categoria,           inline=True)
     embed.add_field(name="Status",    value=status_label[status],       inline=True)
-
-    embed.add_field(name="Descrição", value=ticket.descricao[:500], inline=False)
+    embed.add_field(name="Descrição", value=ticket.descricao[:500],     inline=False)
 
     if ticket.atendente_id:
         embed.add_field(name="Atendente", value=f"<@{ticket.atendente_id}>", inline=True)
 
     if status == "aguardando":
-        acoes = (
-            "◀ **Assumir** — pega o chamado e libera escrita no canal\n"
-            "✅ **Concluir** — marca como resolvido e encerra\n"
-            "❌ **Fechar** — encerra sem marcar como resolvido"
+        embed.add_field(
+            name="⚙️ Ações disponíveis",
+            value=(
+                "◀ **Assumir** — pega o chamado e libera escrita no canal\n"
+                "❌ **Fechar** — encerra sem marcar como resolvido"
+            ),
+            inline=False
         )
-        embed.add_field(name="⚙️ Ações disponíveis", value=acoes, inline=False)
         embed.set_footer(text="Apenas Suporte/Admin pode usar os botões abaixo.")
 
     elif status == "atendimento":
-        acoes = (
-            "✅ **Concluir** — marca como resolvido e encerra\n"
-            "❌ **Fechar** — encerra sem marcar como resolvido"
+        embed.add_field(
+            name="⚙️ Ações disponíveis",
+            value=(
+                "✅ **Concluir** — marca como resolvido e encerra\n"
+                "❌ **Fechar** — encerra sem marcar como resolvido"
+            ),
+            inline=False
         )
-        embed.add_field(name="⚙️ Ações disponíveis", value=acoes, inline=False)
-        embed.set_footer(text="Chamado em atendimento — use os botões abaixo para encerrar.")
+        embed.set_footer(text="Chamado em atendimento — use o select abaixo para encerrar.")
 
     else:
         embed.set_footer(text=f"Chamado encerrado — {ticket.ticket_id}")
@@ -136,9 +138,7 @@ async def post_or_update_card(
     chamados_channel = discord.utils.get(guild.text_channels, name=CHAMADOS_CHANNEL_NAME)
     if not chamados_channel:
         return None
-
     embed = build_card_embed(ticket, guild)
-
     if ticket.card_message_id:
         try:
             old = await chamados_channel.fetch_message(ticket.card_message_id)
@@ -146,7 +146,6 @@ async def post_or_update_card(
             return old
         except discord.NotFound:
             pass
-
     msg = await chamados_channel.send(embed=embed)
     await ticket_service.save_card_message_id(ticket.ticket_id, msg.id)
     return msg
@@ -190,7 +189,6 @@ class TicketPanelView(discord.ui.View):
         if not tickets:
             await interaction.followup.send("Nenhum chamado encontrado no seu histórico.", ephemeral=True)
             return
-
         status_emoji = {
             Ticket.STATUS_ABERTO:    "🟡",
             Ticket.STATUS_PENDENTE:  "🔵",
@@ -212,7 +210,7 @@ class TicketPanelView(discord.ui.View):
 
 
 # ─────────────────────────────────────────────
-# View de abertura — enviada ao usuário após selecionar categoria
+# View de abertura
 # ─────────────────────────────────────────────
 
 class TicketOpenView(discord.ui.View):
@@ -261,7 +259,6 @@ class TicketDescricaoModal(discord.ui.Modal, title="Descreva o problema"):
             categoria=self.categoria,
             descricao=self.descricao.value,
         )
-
         if not success:
             await interaction.followup.send(f"❌ {erro}", ephemeral=True)
             return
@@ -271,11 +268,10 @@ class TicketDescricaoModal(discord.ui.Modal, title="Descreva o problema"):
         if support_ch:
             await ticket_service.save_channel_id(ticket.ticket_id, support_ch.id)
             ticket.channel_id = support_ch.id
-
             channel_embed = build_channel_embed(ticket, status="aguardando")
             await support_ch.send(
                 embed=channel_embed,
-                view=TicketChannelView(ticket_id=ticket.ticket_id)
+                view=TicketChannelViewAguardando(ticket_id=ticket.ticket_id)
             )
 
         await post_or_update_card(ticket, interaction.guild, interaction.client)
@@ -289,311 +285,219 @@ class TicketDescricaoModal(discord.ui.Modal, title="Descreva o problema"):
 
 
 # ─────────────────────────────────────────────
-# View do canal do ticket — Assumir + Concluir + Fechar
+# Helpers de encerramento (reutilizados nas 2 views)
 # ─────────────────────────────────────────────
 
-class TicketChannelView(discord.ui.View):
-    """View persistente postada dentro do canal suporte-{username}."""
+def _is_suporte_or_admin(member: discord.Member) -> bool:
+    suporte_role = discord.utils.get(member.guild.roles, name=SUPORTE_ROLE_NAME)
+    return member.guild_permissions.administrator or (suporte_role and suporte_role in member.roles)
+
+
+async def _do_resolve(interaction: discord.Interaction):
+    ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
+    if not ticket:
+        await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
+        return
+    success, msg, ticket = await ticket_service.resolve_ticket(
+        ticket_id=ticket.ticket_id, guild_id=interaction.guild.id
+    )
+    if not success:
+        await interaction.followup.send(f"❌ {msg}", ephemeral=True)
+        return
+    await post_or_update_card(ticket, interaction.guild, interaction.client)
+    player = interaction.guild.get_member(int(ticket.discord_id))
+    if player:
+        try:
+            dm = discord.Embed(
+                title=f"✅ Chamado Resolvido — {ticket.ticket_id}",
+                description=(
+                    f"Seu chamado na categoria **{ticket.categoria}** foi marcado como **resolvido**.\n"
+                    f"Obrigado! Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
+                ),
+                color=discord.Color.green()
+            )
+            await player.send(embed=dm)
+        except discord.Forbidden:
+            pass
+    final_embed = build_channel_embed(ticket, status="resolvido")
+    await interaction.message.edit(embed=final_embed, view=None)
+    await interaction.followup.send(
+        f"✅ Chamado `{ticket.ticket_id}` concluído. Canal será deletado em 5 segundos.",
+        ephemeral=True
+    )
+    await asyncio.sleep(5)
+    try:
+        await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} resolvido.")
+    except Exception as e:
+        logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
+
+
+async def _do_close(interaction: discord.Interaction):
+    ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
+    if not ticket:
+        await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
+        return
+    success, msg, ticket = await ticket_service.close_ticket(
+        ticket_id=ticket.ticket_id, guild_id=interaction.guild.id
+    )
+    if not success:
+        await interaction.followup.send(f"❌ {msg}", ephemeral=True)
+        return
+    await post_or_update_card(ticket, interaction.guild, interaction.client)
+    player = interaction.guild.get_member(int(ticket.discord_id))
+    if player:
+        try:
+            dm = discord.Embed(
+                title=f"Chamado Encerrado — {ticket.ticket_id}",
+                description=(
+                    f"Seu chamado na categoria **{ticket.categoria}** foi encerrado.\n"
+                    f"Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
+                ),
+                color=discord.Color.red()
+            )
+            await player.send(embed=dm)
+        except discord.Forbidden:
+            pass
+    final_embed = build_channel_embed(ticket, status="fechado")
+    await interaction.message.edit(embed=final_embed, view=None)
+    await interaction.followup.send(
+        f"✅ Chamado `{ticket.ticket_id}` fechado. Canal será deletado em 5 segundos.",
+        ephemeral=True
+    )
+    await asyncio.sleep(5)
+    try:
+        await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} fechado.")
+    except Exception as e:
+        logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
+
+
+# ─────────────────────────────────────────────
+# View AGUARDANDO — Select com Assumir + Fechar
+# Aparece quando o ticket é aberto
+# ─────────────────────────────────────────────
+
+class TicketChannelViewAguardando(discord.ui.View):
+    """View inicial: Select com opções Assumir e Fechar."""
 
     def __init__(self, ticket_id: str = "__persistent__"):
         super().__init__(timeout=None)
         self.ticket_id = ticket_id
 
-    def _is_suporte_or_admin(self, member: discord.Member) -> bool:
-        suporte_role = discord.utils.get(member.guild.roles, name=SUPORTE_ROLE_NAME)
-        return member.guild_permissions.administrator or (suporte_role and suporte_role in member.roles)
-
-    # ── ◀ Assumir ────────────────────────────────────────────
-    @discord.ui.button(
-        label="Assumir",
-        style=discord.ButtonStyle.secondary,
-        custom_id="channel_assume_ticket",
-        emoji="◀"
+    @discord.ui.select(
+        cls=discord.ui.Select,
+        placeholder="⚙️ Selecione uma ação...",
+        custom_id="channel_action_aguardando",
+        options=[
+            discord.SelectOption(
+                label="Assumir Chamado",
+                value="assumir",
+                emoji="◀",
+                description="Pega o chamado e libera escrita no canal"
+            ),
+            discord.SelectOption(
+                label="Fechar Chamado",
+                value="fechar",
+                emoji="❌",
+                description="Encerra sem marcar como resolvido"
+            ),
+        ]
     )
-    async def assume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self._is_suporte_or_admin(interaction.user):
+    async def action_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not _is_suporte_or_admin(interaction.user):
             await interaction.response.send_message(
-                "Apenas a equipe de Suporte pode assumir chamados.", ephemeral=True
+                "Apenas a equipe de Suporte pode gerenciar chamados.", ephemeral=True
             )
             return
 
+        escolha = select.values[0]
         await interaction.response.defer()
 
-        ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
-        if not ticket:
-            await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
-            return
-
-        if ticket.status != Ticket.STATUS_ABERTO:
-            await interaction.followup.send(
-                f"Este chamado já está `{ticket.status}`.", ephemeral=True
-            )
-            return
-
-        success, msg, ticket = await ticket_service.assume_ticket(
-            ticket_id=ticket.ticket_id,
-            atendente_id=str(interaction.user.id),
-            guild_id=interaction.guild.id,
-        )
-        if not success:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-            return
-
-        try:
-            ow = interaction.channel.overwrites_for(interaction.user)
-            ow.send_messages = True
-            await interaction.channel.set_permissions(interaction.user, overwrite=ow)
-        except Exception as e:
-            logger.warning(f"[Ticket] Erro ao dar permissão ao suporte: {e}")
-
-        new_view = _build_post_assume_view(ticket.ticket_id)
-        new_embed = build_channel_embed(ticket, status="atendimento")
-        await interaction.message.edit(embed=new_embed, view=new_view)
-
-        await post_or_update_card(ticket, interaction.guild, interaction.client)
-
-        await interaction.followup.send(
-            f"◀ Você assumiu o chamado `{ticket.ticket_id}`! Pode enviar mensagens neste canal.",
-            ephemeral=True
-        )
-
-    # ── ✅ Concluir ───────────────────────────────────────────
-    @discord.ui.button(
-        label="Concluir",
-        style=discord.ButtonStyle.success,
-        custom_id="channel_resolve_ticket",
-        emoji="✅"
-    )
-    async def resolve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self._is_suporte_or_admin(interaction.user):
-            await interaction.response.send_message(
-                "Apenas a equipe de Suporte pode concluir chamados.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
-
-        ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
-        if not ticket:
-            await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
-            return
-
-        success, msg, ticket = await ticket_service.resolve_ticket(
-            ticket_id=ticket.ticket_id,
-            guild_id=interaction.guild.id,
-        )
-        if not success:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-            return
-
-        await post_or_update_card(ticket, interaction.guild, interaction.client)
-
-        player = interaction.guild.get_member(int(ticket.discord_id))
-        if player:
-            try:
-                dm_embed = discord.Embed(
-                    title=f"✅ Chamado Resolvido — {ticket.ticket_id}",
-                    description=(
-                        f"Seu chamado na categoria **{ticket.categoria}** foi marcado como **resolvido**.\n"
-                        f"Obrigado por entrar em contato! Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
-                    ),
-                    color=discord.Color.green()
-                )
-                await player.send(embed=dm_embed)
-            except discord.Forbidden:
-                pass
-
-        final_embed = build_channel_embed(ticket, status="resolvido")
-        await interaction.message.edit(embed=final_embed, view=None)
-
-        await interaction.followup.send(
-            f"✅ Chamado `{ticket.ticket_id}` concluído. Canal será deletado em 5 segundos.",
-            ephemeral=True
-        )
-
-        await asyncio.sleep(5)
-        try:
-            await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} resolvido.")
-        except Exception as e:
-            logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
-
-    # ── ❌ Fechar ─────────────────────────────────────────────
-    @discord.ui.button(
-        label="Fechar",
-        style=discord.ButtonStyle.danger,
-        custom_id="channel_close_ticket",
-        emoji="❌"
-    )
-    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self._is_suporte_or_admin(interaction.user):
-            await interaction.response.send_message(
-                "Apenas a equipe de Suporte pode fechar chamados.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
-
-        ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
-        if not ticket:
-            await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
-            return
-
-        success, msg, ticket = await ticket_service.close_ticket(
-            ticket_id=ticket.ticket_id,
-            guild_id=interaction.guild.id,
-        )
-        if not success:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-            return
-
-        await post_or_update_card(ticket, interaction.guild, interaction.client)
-
-        player = interaction.guild.get_member(int(ticket.discord_id))
-        if player:
-            try:
-                dm_embed = discord.Embed(
-                    title=f"Chamado Encerrado — {ticket.ticket_id}",
-                    description=(
-                        f"Seu chamado na categoria **{ticket.categoria}** foi encerrado.\n"
-                        f"Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
-                    ),
-                    color=discord.Color.red()
-                )
-                await player.send(embed=dm_embed)
-            except discord.Forbidden:
-                pass
-
-        final_embed = build_channel_embed(ticket, status="fechado")
-        await interaction.message.edit(embed=final_embed, view=None)
-
-        await interaction.followup.send(
-            f"✅ Chamado `{ticket.ticket_id}` fechado. Canal será deletado em 5 segundos.",
-            ephemeral=True
-        )
-
-        await asyncio.sleep(5)
-        try:
-            await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} fechado.")
-        except Exception as e:
-            logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
-
-
-# ─────────────────────────────────────────────
-# View pós-assumir — apenas Concluir + Fechar
-# ─────────────────────────────────────────────
-
-def _build_post_assume_view(ticket_id: str) -> discord.ui.View:
-    """Retorna View sem o botão Assumir, usada após assumir o chamado."""
-
-    class PostAssumeView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=None)
-
-        def _is_suporte_or_admin(self, member: discord.Member) -> bool:
-            suporte_role = discord.utils.get(member.guild.roles, name=SUPORTE_ROLE_NAME)
-            return member.guild_permissions.administrator or (suporte_role and suporte_role in member.roles)
-
-        @discord.ui.button(
-            label="Concluir",
-            style=discord.ButtonStyle.success,
-            custom_id="channel_resolve_ticket",
-            emoji="✅"
-        )
-        async def resolve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            if not self._is_suporte_or_admin(interaction.user):
-                await interaction.response.send_message(
-                    "Apenas a equipe de Suporte pode concluir chamados.", ephemeral=True
-                )
-                return
-            await interaction.response.defer()
+        if escolha == "assumir":
             ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
             if not ticket:
-                await interaction.followup.send("Chamado não encontrado.", ephemeral=True)
+                await interaction.followup.send("Chamado não encontrado para este canal.", ephemeral=True)
                 return
-            success, msg, ticket = await ticket_service.resolve_ticket(
-                ticket_id=ticket.ticket_id, guild_id=interaction.guild.id
+            if ticket.status != Ticket.STATUS_ABERTO:
+                await interaction.followup.send(
+                    f"Este chamado já está `{ticket.status}`.", ephemeral=True
+                )
+                return
+            success, msg, ticket = await ticket_service.assume_ticket(
+                ticket_id=ticket.ticket_id,
+                atendente_id=str(interaction.user.id),
+                guild_id=interaction.guild.id,
             )
             if not success:
                 await interaction.followup.send(f"❌ {msg}", ephemeral=True)
                 return
+            # Libera escrita para o suporte que assumiu
+            try:
+                ow = interaction.channel.overwrites_for(interaction.user)
+                ow.send_messages = True
+                await interaction.channel.set_permissions(interaction.user, overwrite=ow)
+            except Exception as e:
+                logger.warning(f"[Ticket] Erro ao dar permissão ao suporte: {e}")
+            # Troca para a view de atendimento (Concluir + Fechar)
+            new_embed = build_channel_embed(ticket, status="atendimento")
+            await interaction.message.edit(
+                embed=new_embed,
+                view=TicketChannelViewAtendimento(ticket_id=ticket.ticket_id)
+            )
             await post_or_update_card(ticket, interaction.guild, interaction.client)
-            player = interaction.guild.get_member(int(ticket.discord_id))
-            if player:
-                try:
-                    dm_embed = discord.Embed(
-                        title=f"✅ Chamado Resolvido — {ticket.ticket_id}",
-                        description=(
-                            f"Seu chamado na categoria **{ticket.categoria}** foi marcado como **resolvido**.\n"
-                            f"Obrigado! Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
-                        ),
-                        color=discord.Color.green()
-                    )
-                    await player.send(embed=dm_embed)
-                except discord.Forbidden:
-                    pass
-            final_embed = build_channel_embed(ticket, status="resolvido")
-            await interaction.message.edit(embed=final_embed, view=None)
             await interaction.followup.send(
-                f"✅ Chamado `{ticket.ticket_id}` concluído. Canal será deletado em 5 segundos.",
+                f"◀ Você assumiu o chamado `{ticket.ticket_id}`! Pode enviar mensagens neste canal.",
                 ephemeral=True
             )
-            await asyncio.sleep(5)
-            try:
-                await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} resolvido.")
-            except Exception as e:
-                logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
 
-        @discord.ui.button(
-            label="Fechar",
-            style=discord.ButtonStyle.danger,
-            custom_id="channel_close_ticket",
-            emoji="❌"
-        )
-        async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            if not self._is_suporte_or_admin(interaction.user):
-                await interaction.response.send_message(
-                    "Apenas a equipe de Suporte pode fechar chamados.", ephemeral=True
-                )
-                return
-            await interaction.response.defer()
-            ticket = await ticket_service.get_ticket_by_channel_id(interaction.channel.id)
-            if not ticket:
-                await interaction.followup.send("Chamado não encontrado.", ephemeral=True)
-                return
-            success, msg, ticket = await ticket_service.close_ticket(
-                ticket_id=ticket.ticket_id, guild_id=interaction.guild.id
-            )
-            if not success:
-                await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-                return
-            await post_or_update_card(ticket, interaction.guild, interaction.client)
-            player = interaction.guild.get_member(int(ticket.discord_id))
-            if player:
-                try:
-                    dm_embed = discord.Embed(
-                        title=f"Chamado Encerrado — {ticket.ticket_id}",
-                        description=(
-                            f"Seu chamado na categoria **{ticket.categoria}** foi encerrado.\n"
-                            f"Se precisar de mais ajuda, abra um novo ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`."
-                        ),
-                        color=discord.Color.red()
-                    )
-                    await player.send(embed=dm_embed)
-                except discord.Forbidden:
-                    pass
-            final_embed = build_channel_embed(ticket, status="fechado")
-            await interaction.message.edit(embed=final_embed, view=None)
-            await interaction.followup.send(
-                f"✅ Chamado `{ticket.ticket_id}` fechado. Canal será deletado em 5 segundos.",
-                ephemeral=True
-            )
-            await asyncio.sleep(5)
-            try:
-                await interaction.channel.delete(reason=f"Ticket {ticket.ticket_id} fechado.")
-            except Exception as e:
-                logger.warning(f"[Ticket] Erro ao deletar canal: {e}")
+        elif escolha == "fechar":
+            await _do_close(interaction)
 
-    return PostAssumeView()
+
+# ─────────────────────────────────────────────
+# View ATENDIMENTO — Select com Concluir + Fechar
+# Aparece após o Assumir (substitui a view anterior)
+# ─────────────────────────────────────────────
+
+class TicketChannelViewAtendimento(discord.ui.View):
+    """View pós-assumir: Select com Concluir e Fechar."""
+
+    def __init__(self, ticket_id: str = "__persistent__"):
+        super().__init__(timeout=None)
+        self.ticket_id = ticket_id
+
+    @discord.ui.select(
+        cls=discord.ui.Select,
+        placeholder="⚙️ Selecione uma ação...",
+        custom_id="channel_action_atendimento",
+        options=[
+            discord.SelectOption(
+                label="Concluir Chamado",
+                value="concluir",
+                emoji="✅",
+                description="Marca como resolvido e encerra o canal"
+            ),
+            discord.SelectOption(
+                label="Fechar Chamado",
+                value="fechar",
+                emoji="❌",
+                description="Encerra sem marcar como resolvido"
+            ),
+        ]
+    )
+    async def action_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not _is_suporte_or_admin(interaction.user):
+            await interaction.response.send_message(
+                "Apenas a equipe de Suporte pode gerenciar chamados.", ephemeral=True
+            )
+            return
+
+        escolha = select.values[0]
+        await interaction.response.defer()
+
+        if escolha == "concluir":
+            await _do_resolve(interaction)
+        elif escolha == "fechar":
+            await _do_close(interaction)
 
 
 # ─────────────────────────────────────────────
@@ -642,6 +546,13 @@ async def _create_ticket_channel(
 # Aliases persistentes para main.py
 # ─────────────────────────────────────────────
 
+class TicketChannelView(discord.ui.View):
+    """Alias persistente — mantido para compatibilidade com main.py."""
+    def __init__(self, ticket_id: str = "__persistent__"):
+        super().__init__(timeout=None)
+        self.ticket_id = ticket_id
+
+
 class TicketCardView(discord.ui.View):
     """Alias persistente — mantido para compatibilidade com main.py."""
     def __init__(self, ticket_id: str = "__persistent__"):
@@ -650,6 +561,6 @@ class TicketCardView(discord.ui.View):
 
 
 class SupportCardView(discord.ui.View):
-    """Alias persistente — mantido para compatibilidade com main.py. Card sem botões."""
+    """Alias persistente — mantido para compatibilidade com main.py."""
     def __init__(self):
         super().__init__(timeout=None)
