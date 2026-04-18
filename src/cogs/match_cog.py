@@ -1,6 +1,5 @@
 """
 MatchCog — Comandos de partidas.
-Registra também os comandos de texto da match_thread_view.
 """
 import discord
 from discord.ext import commands
@@ -31,7 +30,6 @@ class MatchCog(commands.Cog, name="Partidas"):
         embed = discord.Embed(description=msg, color=THEME_COLOR if success else 0xE74C3C)
         await ctx.reply(embed=embed)
 
-    # ── Cooldown error handler ─────────────────────────────────
     @cancelar.error
     async def cancelar_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.CommandOnCooldown):
@@ -43,31 +41,17 @@ class MatchCog(commands.Cog, name="Partidas"):
         else:
             raise error
 
-    # ── Comandos mediador dentro de thread ──────────────────────
+    # ── Comandos mediador dentro de thread ────────────────────────
     @commands.command(name="menu_partida")
     async def menu_partida(self, ctx: commands.Context):
         from views.match_thread_view import cmd_menu_partida
         await cmd_menu_partida(ctx)
 
-    @commands.command(name="confirmar_pagamento")
-    async def confirmar_pagamento(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_confirmar_pagamento
-        await cmd_confirmar_pagamento(ctx)
-
-    @commands.command(name="iniciar_partida")
-    async def iniciar_partida(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_iniciar_partida
-        await cmd_iniciar_partida(ctx)
-
-    @commands.command(name="winner_team")
-    async def winner_team(self, ctx: commands.Context, team: str = ""):
+    # !wt blue | !wt red — declara vencedor (alias de winner_team)
+    @commands.command(name="wt")
+    async def wt(self, ctx: commands.Context, team: str = ""):
         from views.match_thread_view import cmd_winner_team
         await cmd_winner_team(ctx, team)
-
-    @commands.command(name="prize")
-    async def prize(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_prize
-        await cmd_prize(ctx)
 
     @commands.command(name="cancelar_match")
     @commands.cooldown(rate=1, per=30, type=commands.BucketType.user)
@@ -86,7 +70,7 @@ class MatchCog(commands.Cog, name="Partidas"):
         else:
             raise error
 
-    # ── /perfil ─────────────────────────────────────────────────
+    # ── /perfil ───────────────────────────────────────────────
     @app_commands.command(name="perfil", description="Suas estatísticas de partidas")
     @app_commands.checks.cooldown(rate=1, per=10.0, key=lambda i: i.user.id)
     async def perfil(self, interaction: discord.Interaction):
@@ -121,7 +105,7 @@ class MatchCog(commands.Cog, name="Partidas"):
         else:
             raise error
 
-    # ── /solicitar_analise ─────────────────────────────────────
+    # ── /solicitar_analise ───────────────────────────────────────
     @app_commands.command(name="solicitar_analise", description="Solicita análise de suspeita de hack")
     @app_commands.describe(match_id="ID da partida suspeita", motivo="Comportamento suspeito", evidencia="Link de vídeo/imagem (opcional)")
     @app_commands.checks.cooldown(rate=1, per=60.0, key=lambda i: i.user.id)
