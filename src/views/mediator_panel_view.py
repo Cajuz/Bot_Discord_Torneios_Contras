@@ -11,8 +11,6 @@ THEME_COLOR = 0xFFD54F
 
 
 def create_mediator_panel_embed(info: dict | None = None) -> discord.Embed:
-    total_active = info.get("total_active", 0) if info else 0
-    in_queue     = info.get("in_queue", 0)     if info else 0
 
     embed = discord.Embed(
         title="⚡ Painel de Mediadores",

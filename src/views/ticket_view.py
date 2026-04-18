@@ -11,7 +11,7 @@ from utils.logger import logger
 THEME_COLOR   = 0xFFD54F
 THEME_COLOR_2 = 0xFFA726
 
-CATEGORIAS = ["Bug", "Pagamento", "Dúvida", "Conta", "Partida", "Outro"]
+CATEGORIAS = ["Bug", "Pagamento", "Dúvida"]
 
 
 # ─────────────────────────────────────────────
@@ -31,11 +31,8 @@ def build_support_embed() -> discord.Embed:
         name="📂 Categorias",
         value=(
             "• ❖  Pagamento\n"
-            "• 👤 Conta\n"
-            "• 🎮 Partida\n"
             "• 💥 Bug\n"
             "• ❓ Dúvida\n"
-            "• 📌 Outro"
         ),
         inline=False
     )
