@@ -14,7 +14,7 @@ from utils.logger import logger, log_success
 
 class MatchService:
 
-    # ── Helpers internos ──────────────────────────────────────
+    # ── Helpers internos ────────────────────────────────────────────
 
     def _get_collection(self):
         return db.get_collection("matches")
@@ -29,7 +29,7 @@ class MatchService:
         await col.update_one({"_id": ObjectId(match_id)}, {"$set": fields})
         return await col.find_one({"_id": ObjectId(match_id)})
 
-    # ── Histórico ─────────────────────────────────────────────
+    # ── Histórico ─────────────────────────────────────────────────────
 
     async def _post_history(self, match_doc: dict, outcome: str = "finalizado"):
         try:
@@ -143,7 +143,7 @@ class MatchService:
         embed.timestamp = completed_at
         return embed
 
-    # ── Criação ───────────────────────────────────────────────
+    # ── Criação ─────────────────────────────────────────────────────
 
     async def create_match(
         self,
@@ -169,14 +169,13 @@ class MatchService:
                 "player_ids":                [str(pid) for pid in player_ids],
                 "max_players":               len(player_ids),
                 "mediator_id":               str(mediator_id),
-                "status":                    Match.STATUS_AGUARDANDO_PAGAMENTO,
+                # ─ novo fluxo: inicia direto em aguardando_partida ─
+                "status":                    Match.STATUS_AGUARDANDO_PARTIDA,
                 "thread_id":                 None,
                 "time_blue":                 [],
                 "time_red":                  [],
                 "vencedor":                  None,
                 "winner_id":                 None,
-                "pagamento_confirmado":      False,
-                "premio_entregue_mediador":  False,
                 "premio_confirmado_jogador": False,
                 "cancelled_by":              None,
                 "cancel_reason":             None,
@@ -198,7 +197,7 @@ class MatchService:
             logger.error(f"Erro ao criar partida: {e}")
             raise
 
-    # ── Leitura ───────────────────────────────────────────────
+    # ── Leitura ──────────────────────────────────────────────────────
 
     async def get_match(self, match_id: str) -> Optional[Dict[str, Any]]:
         try:
@@ -260,7 +259,7 @@ class MatchService:
             logger.error(f"Erro ao obter estatísticas do canal {channel_name}: {e}")
             return {"total": 0, "active": 0, "completed": 0, "cancelled": 0}
 
-    # ── Fluxo linear ─────────────────────────────────────────
+    # ── Fluxo linear ───────────────────────────────────────────────
 
     async def update_thread_id(
         self, match_id: str, thread_id: int
@@ -271,45 +270,31 @@ class MatchService:
             logger.error(f"Erro ao atualizar thread_id {match_id}: {e}")
             return None
 
-    async def confirm_payment(self, match_id: str) -> Optional[Dict[str, Any]]:
-        """aguardando_pagamento → aguardando_inicio"""
+    async def iniciar_partida(
+        self,
+        match_id:   str,
+        sala_id:    str,
+        sala_senha: str,
+        modo_jogo:  str = "Normal",
+    ) -> Optional[Dict[str, Any]]:
+        """aguardando_partida → partida_iniciada  (chamado pelo /sala)"""
         try:
             match_doc = await self._find(match_id)
             if not match_doc:
                 return None
-            # ← check direto de status — não depende de can_transition_to()
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PAGAMENTO:
+            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
                 logger.warning(
-                    f"confirm_payment: status inválido '{match_doc.get('status')}' "
-                    f"(esperado: {Match.STATUS_AGUARDANDO_PAGAMENTO})")
+                    f"iniciar_partida: status inválido '{match_doc.get('status')}' "
+                    f"(esperado: {Match.STATUS_AGUARDANDO_PARTIDA})")
                 return None
             updated = await self._update(match_id, {
-                "status":               Match.STATUS_AGUARDANDO_INICIO,
-                "pagamento_confirmado": True,
-            })
-            logger.info(f"💰 Pagamento confirmado: {match_id}")
-            return updated
-        except Exception as e:
-            logger.error(f"Erro ao confirmar pagamento {match_id}: {e}")
-            return None
-
-    async def start_match(self, match_id: str) -> Optional[Dict[str, Any]]:
-        """aguardando_inicio → em_andamento"""
-        try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
-                return None
-            # ← check direto
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_INICIO:
-                logger.warning(
-                    f"start_match: status inválido '{match_doc.get('status')}' "
-                    f"(esperado: {Match.STATUS_AGUARDANDO_INICIO})")
-                return None
-            updated = await self._update(match_id, {
-                "status":     Match.STATUS_EM_ANDAMENTO,
+                "status":     Match.STATUS_PARTIDA_INICIADA,
+                "sala_id":    sala_id,
+                "sala_senha": sala_senha,
+                "modo_jogo":  modo_jogo,
                 "started_at": utcnow(),
             })
-            logger.info(f"▶️ Partida iniciada: {match_id}")
+            logger.info(f"▶️ Partida iniciada via /sala: {match_id}")
             return updated
         except Exception as e:
             logger.error(f"Erro ao iniciar partida {match_id}: {e}")
@@ -322,7 +307,7 @@ class MatchService:
         time_blue: List[int],
         time_red:  List[int],
     ) -> Optional[Dict[str, Any]]:
-        """em_andamento → aguardando_premio"""
+        """partida_iniciada → aguardando_premio  (chamado pelo !wt)"""
         try:
             if vencedor not in ("blue", "red"):
                 logger.error(f"Vencedor inválido: {vencedor}")
@@ -330,11 +315,10 @@ class MatchService:
             match_doc = await self._find(match_id)
             if not match_doc:
                 return None
-            # ← check direto
-            if match_doc.get("status") != Match.STATUS_EM_ANDAMENTO:
+            if match_doc.get("status") != Match.STATUS_PARTIDA_INICIADA:
                 logger.warning(
                     f"set_winner: status inválido '{match_doc.get('status')}' "
-                    f"(esperado: {Match.STATUS_EM_ANDAMENTO})")
+                    f"(esperado: {Match.STATUS_PARTIDA_INICIADA})")
                 return None
             win_ids = time_blue if vencedor == "blue" else time_red
             updated = await self._update(match_id, {
@@ -350,29 +334,10 @@ class MatchService:
             logger.error(f"Erro ao declarar vencedor {match_id}: {e}")
             return None
 
-    async def confirm_prize_delivery(
-        self, match_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Mediador confirma que entregou o prêmio."""
-        try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
-                return None
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PREMIO:
-                logger.warning(
-                    f"confirm_prize_delivery: status inválido '{match_doc.get('status')}'")
-                return None
-            updated = await self._update(match_id, {"premio_entregue_mediador": True})
-            logger.info(f"🎁 Prêmio entregue confirmado pelo mediador: {match_id}")
-            return updated
-        except Exception as e:
-            logger.error(f"Erro ao confirmar entrega de prêmio {match_id}: {e}")
-            return None
-
     async def confirm_prize_received(
         self, match_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Jogador confirma recebimento → finaliza a partida."""
+        """aguardando_premio → finalizado  (botão do jogador vencedor)"""
         try:
             match_doc = await self._find(match_id)
             if not match_doc:
@@ -394,7 +359,7 @@ class MatchService:
             logger.error(f"Erro ao confirmar recebimento de prêmio {match_id}: {e}")
             return None
 
-    # ── Cancelamento ──────────────────────────────────────────
+    # ── Cancelamento ────────────────────────────────────────────────
 
     async def cancel_match(
         self,
@@ -406,13 +371,10 @@ class MatchService:
             match_doc = await self._find(match_id)
             if not match_doc:
                 return None
-            # Não pode cancelar o que já finalizou ou foi cancelado
             if match_doc.get("status") in (
                 Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO
             ):
-                logger.warning(
-                    f"cancel_match: partida {match_id} já encerrada "
-                    f"({match_doc.get('status')})")
+                logger.warning(f"cancel_match: partida já encerrada {match_id}")
                 return None
             updated = await self._update(match_id, {
                 "status":       Match.STATUS_CANCELADO,
@@ -420,8 +382,7 @@ class MatchService:
                 "cancel_reason": reason,
                 "cancelled_at": utcnow(),
             })
-            logger.info(
-                f"🚫 Partida {match_id} cancelada por {cancelled_by} | motivo: {reason}")
+            logger.info(f"❌ Partida cancelada: {match_id}")
             if updated:
                 asyncio.create_task(self._post_history(updated, outcome="cancelado"))
             return updated
@@ -429,28 +390,42 @@ class MatchService:
             logger.error(f"Erro ao cancelar partida {match_id}: {e}")
             return None
 
-    # ── Force (admin) ─────────────────────────────────────────
-
-    async def force_complete(
-        self, match_id: str, admin_id: int = None
+    async def force_finish(
+        self,
+        match_id:  str,
+        vencedor:  str,
+        time_blue: List[int],
+        time_red:  List[int],
+        forced_by: int = None,
     ) -> Optional[Dict[str, Any]]:
+        """Admin força encerramento independente do status atual."""
         try:
+            if vencedor not in ("blue", "red"):
+                return None
             match_doc = await self._find(match_id)
             if not match_doc:
                 return None
+            if match_doc.get("status") in (
+                Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO
+            ):
+                return None
+            win_ids = time_blue if vencedor == "blue" else time_red
             updated = await self._update(match_id, {
-                "status":       Match.STATUS_FINALIZADO,
-                "completed_at": utcnow(),
-                "forced_by":    str(admin_id) if admin_id else None,
-                "cancel_reason": "force_complete_admin",
+                "status":                    Match.STATUS_FINALIZADO,
+                "vencedor":                  vencedor,
+                "winner_id":                 str(win_ids[0]) if win_ids else None,
+                "time_blue":                 [str(p) for p in time_blue],
+                "time_red":                  [str(p) for p in time_red],
+                "premio_confirmado_jogador": True,
+                "completed_at":              utcnow(),
+                "cancelled_by":              str(forced_by) if forced_by else None,
             })
-            log_success(
-                f"⚡ Partida {match_id} forçada para finalizado por admin {admin_id}")
+            log_success(f"⚡ Partida encerrada forçado: {match_id}")
             if updated:
                 asyncio.create_task(self._post_history(updated, outcome="forcado"))
             return updated
         except Exception as e:
-            logger.error(f"Erro ao forçar conclusão {match_id}: {e}")
+            logger.error(f"Erro ao forçar encerramento {match_id}: {e}")
             return None
 
 
