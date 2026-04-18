@@ -10,8 +10,7 @@ from utils.logger import logger
 THEME_COLOR = 0xFFD54F
 
 
-def create_mediator_panel_embed(info: dict | None = None) -> discord.Embed:
-
+def create_mediator_panel_embed() -> discord.Embed:
     embed = discord.Embed(
         title="⚡ Painel de Mediadores",
         description="Gerencie sua presença na fila de mediação.",
@@ -64,7 +63,6 @@ class MediatorPanelView(View):
             pos = await mediator_queue.get_mediator_position(user_id)
             await interaction.response.send_message(
                 f"✅ Você entrou na fila! Posição: **{pos}º**", ephemeral=True)
-            await self._update_panel(interaction)
         else:
             await interaction.response.send_message(
                 "Você já está na fila.", ephemeral=True)
@@ -79,7 +77,6 @@ class MediatorPanelView(View):
         success = await mediator_queue.remove_from_queue(interaction.user.id)
         if success:
             await interaction.response.send_message("✅ Você saiu da fila.", ephemeral=True)
-            await self._update_panel(interaction)
         else:
             await interaction.response.send_message(
                 "Você não está na fila.", ephemeral=True)
@@ -112,11 +109,3 @@ class MediatorPanelView(View):
             embed.add_field(name="Fila atual", value="Nenhum mediador na fila.", inline=False)
         embed.set_footer(text="X1 Frifas — Fila de Mediação")
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    async def _update_panel(self, interaction: discord.Interaction):
-        try:
-            info  = await mediator_queue.get_queue_info()
-            embed = create_mediator_panel_embed(info)
-            await interaction.message.edit(embed=embed)
-        except Exception:
-            pass
