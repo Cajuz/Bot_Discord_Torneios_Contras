@@ -1,5 +1,5 @@
 """
-SupportCog — Sistema de suporte com canal privado por agente.
+SupportCog — Sistema de suporte com canal privado por ticket.
 """
 from __future__ import annotations
 import re
@@ -43,8 +43,9 @@ class SupportCog(commands.Cog, name="Suporte"):
             )
         await ctx.reply(embed=embed)
 
-    # ── !fechar_chamado ────────────────────────────────────────────
+    # ── /rc — renomear canal do ticket ────────────────────────────
 
+<<<<<<< HEAD
     @commands.command(name="fechar_chamado")
     async def fechar_chamado(self, ctx: commands.Context, ticket_id: str):
         from views.ticket_view import post_or_update_card
@@ -179,11 +180,42 @@ class SupportCog(commands.Cog, name="Suporte"):
         agent_ch_name = f"support-{safe_name}-{str(interaction.user.id)[-4:]}"
         channel       = discord.utils.get(interaction.guild.text_channels, name=agent_ch_name)
         if not channel:
+=======
+    @app_commands.command(name="rc", description="Renomeia o canal do ticket com um prefixo de contexto")
+    @app_commands.describe(prefixo="Prefixo descritivo, ex: problema_pix")
+    @app_commands.checks.has_any_role("Support", "Admin")
+    async def rc(self, interaction: discord.Interaction, prefixo: str):
+        """
+        Renomeia o canal atual (deve ser chamado de dentro de um canal suporte-*)
+        para suporte-{prefixo}-{username_do_jogador}.
+        """
+        channel = interaction.channel
+
+        # Verifica se o canal atual é um canal de ticket
+        if not channel.name.startswith("suporte-"):
+>>>>>>> 6905735 (REFATORAÇÂO: Sistema suporte)
             await interaction.response.send_message(
-                f"Seu canal `{agent_ch_name}` não foi encontrado.", ephemeral=True
+                "Este comando deve ser usado dentro de um canal de ticket (`suporte-*`).",
+                ephemeral=True
             )
             return
+<<<<<<< HEAD
         new_name = f"support-{safe_name}-{sufixo.replace(' ', '_')}"[:100]
+=======
+
+        # Busca o ticket pelo channel_id para obter o username do jogador
+        ticket = await ticket_service.get_ticket_by_channel_id(channel.id)
+        if not ticket:
+            await interaction.response.send_message(
+                "Nenhum ticket encontrado para este canal.", ephemeral=True
+            )
+            return
+
+        safe_prefix   = _sanitize_channel_name(prefixo)
+        safe_username = _sanitize_channel_name(ticket.username or str(ticket.discord_id))
+        new_name      = f"suporte-{safe_prefix}-{safe_username}"[:100]
+
+>>>>>>> 6905735 (REFATORAÇÂO: Sistema suporte)
         await channel.edit(name=new_name)
         await interaction.response.send_message(
             f"✅ Canal renomeado para `{new_name}`.", ephemeral=True
@@ -196,12 +228,15 @@ class SupportCog(commands.Cog, name="Suporte"):
         embed = discord.Embed(title="Comandos", color=THEME_COLOR)
         embed.add_field(
             name="Suporte (jogador)",
-            value="`!chamado`  `!fechar_chamado <ID>`",
+            value="`!chamado` — ver chamados abertos",
             inline=False
         )
         embed.add_field(
             name="Suporte (atendente)",
-            value="`!concluir_chamado <ID>`  `!criar_canal_suporte @membro`\n`/renomear_canal <sufixo>`",
+            value=(
+                "Assumir / Fechar: use os botões dentro do canal `suporte-*`\n"
+                "`/rc <prefixo>` — renomeia o canal do ticket com contexto"
+            ),
             inline=False
         )
         embed.add_field(name="Partidas", value="`!cancelar`  `/perfil`",  inline=False)

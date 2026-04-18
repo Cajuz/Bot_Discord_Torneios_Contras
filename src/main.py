@@ -179,7 +179,7 @@ async def on_ready():
         logger.error(f"[SlashCommands] Erro: {e}")
 
     try:
-        from views.ticket_view             import TicketPanelView, TicketCardView, SupportCardView
+        from views.ticket_view import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
         from views.mediator_panel_view     import MediatorPanelView
         from views.quero_ser_mediador_view import PedidoMediadorView
         from views.spam_block_card_view    import SpamBlockCardView
@@ -208,6 +208,7 @@ async def on_ready():
         persistent_views = [
             TicketPanelView(),
             TicketCardView(ticket_id="__persistent__"),
+            TicketChannelView(ticket_id="__persistent__"),
             SupportCardView(),
             MediatorPanelView(),
             PedidoMediadorView(),
