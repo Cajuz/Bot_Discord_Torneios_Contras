@@ -85,6 +85,8 @@ CHAT_INFLUENCERS_CHANNEL   = "chat-influencers"
 DASHBOARD_CHANNEL_NAME     = "dashboard-partidas"
 DASHBOARD_MEDIADORES       = "dashboard-mediadores"
 DASHBOARD_SUPORTE          = "dashboard-suporte"
+DASHBOARD_APOSTAS          = "dashboard-apostas"
+DASHBOARD_ENTRADAS         = "dashboard-entradas"
 DASHBOARD_INFLUENCERS      = "dashboard-influencers"
 RESULTADOS_CHANNEL         = "resultados"
 RANKING_CHANNEL            = "ranking"
@@ -181,7 +183,7 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
     CATEGORY_ANALYTICS: [
         DASHBOARD_CHANNEL_NAME, DASHBOARD_MEDIADORES,
         DASHBOARD_SUPORTE, DASHBOARD_INFLUENCERS,
-        RESULTADOS_CHANNEL, RANKING_CHANNEL,
+        RESULTADOS_CHANNEL, RANKING_CHANNEL,DASHBOARD_APOSTAS, DASHBOARD_ENTRADAS,
     ],
     CATEGORY_STAFF: [
         RATE_LIMIT_CHANNEL_NAME,
