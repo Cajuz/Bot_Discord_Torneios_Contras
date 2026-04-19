@@ -34,8 +34,6 @@ def build_support_embed() -> discord.Embed:
             "• ❖  Pagamento\n"
             "• 👤 Conta\n"
             "• 🎮 Partida\n"
-            "• 💥 Bug\n" \
-            "• ❓ Dúvida\n"
             "• 📌 Outro"
         ),
         inline=False

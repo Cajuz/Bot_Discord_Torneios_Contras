@@ -489,7 +489,7 @@ class ChannelSetupService:
                         file = get_banner_file(ch_config["name"])
 
                         if file:
-                            embed.set_image(url=f"attachment://{file.filename}")
+                            embed.set_thumbnail(url=f"attachment://{file.filename}")
                             await ch.send(embed=embed, view=view, file=file)
                         else:
                             await ch.send(embed=embed, view=view)
