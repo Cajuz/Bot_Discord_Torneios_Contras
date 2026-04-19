@@ -3,8 +3,7 @@ from __future__ import annotations
 import discord
 from utils.logger import logger
 
-
-# ── Cargos ────────────────────────────────────────────────────
+# ── Cargos ────────────────────────────────────────────────
 ADM_ROLE_NAME         = "ADM"
 CONTROLLER_ROLE_NAME  = "Controller"
 SUPPORT_ROLE_NAME     = "Suporte"
@@ -13,6 +12,7 @@ INFLUENCER_ROLE_NAME  = "Influencer"
 MEMBER_ROLE_NAME      = "Membro"
 SPAM_BLOCK_ROLE_NAME  = "Bloqueado"
 VER_TOPICOS_ROLE_NAME = "Ver Tópicos"
+MEDIADOR_ROLE_NAME    = "Mediador"
 
 PROTECTED_ROLES = {
     CONTROLLER_ROLE_NAME,
@@ -22,6 +22,7 @@ PROTECTED_ROLES = {
     SPAM_BLOCK_ROLE_NAME,
     VER_TOPICOS_ROLE_NAME,
     ADM_ROLE_NAME,
+    MEDIADOR_ROLE_NAME,
 }
 
 ALL_ROLES = [
@@ -32,19 +33,20 @@ ALL_ROLES = [
     SUPPORT_ROLE_NAME,
     INFLUENCER_ROLE_NAME,
     SPAM_BLOCK_ROLE_NAME,
+    MEDIADOR_ROLE_NAME,
 ]
 
-# ── Canais — INFORMAÇÕES ──────────────────────────────────────
+# ── Canais — INFORMAÇÕES ─────────────────────────────────────
 REGRAS_CHANNEL            = "🗒️-regras"
 BOAS_VINDAS_CHANNEL       = "👋-boas-vindas"
-AVISOS_CHANNEL            = "🚨-avisos"                    
+AVISOS_CHANNEL            = "🚨-avisos"
 GUIA_JOGADOR_CHANNEL      = "🎮-guia-jogador"
 GUIA_MEDIADOR_CHANNEL     = "⚡-guia-mediador"
 GUIA_SUPORTE_CHANNEL      = "🎫-guia-suporte"
 GUIA_ANALISTA_CHANNEL     = "🔍-guia-analista"
 BLACKLIST_CHANNEL         = "⊘-blacklist"
 
-# ── Canais — SUPORTE ──────────────────────────────────────────
+# ── Canais — SUPORTE ────────────────────────────────────────────
 SOLICITAR_SUPORTE_CHANNEL  = "🎫-solicitar-suporte"
 SUPPORT_CHANNEL_NAME       = SOLICITAR_SUPORTE_CHANNEL
 CHAT_SUPORTE_STAFF_CHANNEL = "chat-suporte"
@@ -52,9 +54,9 @@ PAINEL_SUPORTE_CHANNEL     = "painel-suporte"
 CHAMADOS_CHANNEL_NAME      = "chamados-suporte"
 SUPORTE_ADMIN_CHANNEL      = "suporte-controle"
 
-# ── Canais — MEDIAÇÃO ─────────────────────────────────────────
+# ── Canais — MEDIAÇÃO ───────────────────────────────────────────
 MEDIADOR_PANEL_CHANNEL     = "painel-mediador"
-MEDIADORES_ADMIN_CHANNEL   = "𓍝-mediadores-controle"
+MEDIADORES_ADMIN_CHANNEL   = "𔽝-mediadores-controle"
 MEDIADOR_PIX_CHANNEL       = "❖-cadastra-pix"
 RENOVACAO_CHANNEL          = "⟳-renovacao-mediadores"
 SOLICITACOES_CHANNEL       = "✉-pedido-mediador"
@@ -63,7 +65,7 @@ APROVAR_MEDIADORES_CHANNEL = "✔-aprovar-mediadores"
 HISTORICO_CHANNEL          = "historico-partidas"
 CADASTRO_MEDIADOR_CHANNEL  = "📝-cadastro-mediador"
 
-# ── Canais — ANALISTAS ────────────────────────────────────────
+# ── Canais — ANALISTAS ────────────────────────────────────────────
 SOLICITAR_ANALISE_CHANNEL  = "solicitar-analise"
 CASOS_ANALISAR_CHANNEL     = "casos-analisar"
 PAINEL_ANALISTA_CHANNEL    = "painel-analista"
@@ -73,13 +75,13 @@ ANALISTAS_ADMIN_CHANNEL    = "analistas-controle"
 EXPOSED_CHANNEL_NAME       = "exposed"
 HISTORICO_EXPOSED_CHANNEL  = "historico-exposed"
 
-# ── Canais — COMUNIDADE ───────────────────────────────────────
+# ── Canais — COMUNIDADE ───────────────────────────────────────────
 STATUS_BOT_CHANNEL         = "invites"
 INFLUENCERS_CHANNEL        = "influencers"
 INFLUENCERS_ADMIN_CHANNEL  = "influencers-controle"
 CHAT_INFLUENCERS_CHANNEL   = "chat-influencers"
 
-# ── Canais — ANALYTICS ────────────────────────────────────────
+# ── Canais — ANALYTICS ────────────────────────────────────────────
 DASHBOARD_CHANNEL_NAME     = "dashboard-partidas"
 DASHBOARD_MEDIADORES       = "dashboard-mediadores"
 DASHBOARD_SUPORTE          = "dashboard-suporte"
@@ -89,7 +91,7 @@ DASHBOARD_INFLUENCERS      = "dashboard-influencers"
 RESULTADOS_CHANNEL         = "resultados"
 RANKING_CHANNEL            = "ranking"
 
-# ── Canais — STAFF ────────────────────────────────────────────
+# ── Canais — STAFF ────────────────────────────────────────────────
 RATE_LIMIT_CHANNEL_NAME     = "rate-limit-logs"
 MEMBROS_BLOQUEADOS_CHANNEL  = "⊘-membros-bloqueados"
 LOGS_PARTIDAS_CHANNEL       = "📝-logs-partidas"
@@ -100,10 +102,14 @@ LOGS_CALL_CHANNEL           = "📝-logs-call"
 LOGS_COMMAND_CHANNEL        = "📝-logs-command"
 LOGS_MESSAGE_DELETE_CHANNEL = "📝-logs-message-delete"
 LOGS_TROCA_CARGO_CHANNEL    = "📝-logs-troca-cargo"
-MEDIADORES_AFKS_CHANNEL     = "mediadores-afks"   # ← NOVO
-HEALTH_CHECK_CHANNEL        = "health-check"      # ← adicionado
+MEDIADORES_AFKS_CHANNEL     = "mediadores-afks"
+HEALTH_CHECK_CHANNEL        = "health-check"
 
-# ── Aliases legados ───────────────────────────────────────────
+# ── NOVOS — logs-tests e logs-pagamentos ───────────────────────────
+LOGS_TESTS_CHANNEL      = "logs-tests"       # testes de eventos, debug
+LOGS_PAGAMENTOS_CHANNEL = "logs-pagamentos"  # pagamentos + renovações
+
+# ── Aliases legados ────────────────────────────────────────────────
 CATEGORY_ANALYTICS_NAME      = "📊 | ANALYTICS"
 EXPOSED_CHANNEL              = EXPOSED_CHANNEL_NAME
 RATE_LIMIT_CHANNEL           = RATE_LIMIT_CHANNEL_NAME
@@ -121,7 +127,7 @@ HISTORICO_CARGOS_CHANNEL     = LOGS_TROCA_CARGO_CHANNEL
 INVITE_CHANNEL_NAME          = STATUS_BOT_CHANNEL
 INVITE_CHANNEL               = STATUS_BOT_CHANNEL
 
-# ── Categorias ────────────────────────────────────────────────
+# ── Categorias ──────────────────────────────────────────────────────
 CATEGORY_INFORMACOES = "📋 | INFORMAÇÕES"
 CATEGORY_MOBILE      = "📱 | MOBILE"
 CATEGORY_EMULADOR    = "🖥️ | EMULADOR"
@@ -134,7 +140,7 @@ CATEGORY_COMUNIDADE  = "🏆 | COMUNIDADE"
 CATEGORY_STAFF       = "🔐 | STAFF"
 CATEGORY_LOGS        = "📝 | LOGS"
 
-# ── Estrutura ─────────────────────────────────────────────────
+# ── Estrutura de canais por categoria ─────────────────────────────────
 CHANNEL_STRUCTURE: dict[str, list[str]] = {
     CATEGORY_INFORMACOES: [
         REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL, AVISOS_CHANNEL,
@@ -150,7 +156,6 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         HISTORICO_CHANNEL,
         CADASTRO_MEDIADOR_CHANNEL,
     ],
-    
     CATEGORY_MOBILE:   ["📱1x1-mob", "📱2x2-mob", "📱3x3-mob", "📱4x4-mob"],
     CATEGORY_EMULADOR: ["🖥️1x1-emu", "🖥️2x2-emu", "🖥️3x3-emu", "🖥️4x4-emu"],
     CATEGORY_MISTO:    ["🔀4x4-misto", "🔀3x3-misto", "🔀2x2-misto"],
@@ -190,17 +195,19 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         LOGS_PARTIDAS_CHANNEL, LOGS_MEDIADORES_CHANNEL, LOGS_BOT_CHANNEL_NAME,
         LOGS_COMMAND_CHANNEL, LOGS_MESSAGE_DELETE_CHANNEL, LOGS_PIX_LOG_CHANNEL,
         LOGS_CALL_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
-        ALERTAS_ADM_CHANNEL,   # <-- NOVO: alertas críticos para ADM
+        ALERTAS_ADM_CHANNEL,
+        LOGS_TESTS_CHANNEL,       # ← NOVO: logs de testes / debug
+        LOGS_PAGAMENTOS_CHANNEL,  # ← NOVO: log de pagamentos e renovações
     ],
 }
 
-# ── Canais apenas-leitura para Membro ─────────────────────────
+# ── Canais apenas-leitura para Membro ─────────────────────────────────────
 READ_ONLY_CHANNELS = {
     REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL,
     RESULTADOS_CHANNEL, RANKING_CHANNEL, STATUS_BOT_CHANNEL,
 }
 
-# ── Canais de interação por botão ─────────────────────────────
+# ── Canais de interação por botão ────────────────────────────────────────
 INTERACTION_ONLY_CHANNELS = {
     "📱1x1-mob", "📱2x2-mob", "📱3x3-mob", "📱4x4-mob",
     "🖥️1x1-emu", "🖥️2x2-emu", "🖥️3x3-emu", "🖥️4x4-emu",
@@ -212,50 +219,7 @@ INTERACTION_ONLY_CHANNELS = {
     CADASTRO_MEDIADOR_CHANNEL,
 }
 
-# ── Canais view-only (só bot/ADM postam; roles indicadas só leem) ─
-CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
-    GUIA_JOGADOR_CHANNEL:       [],
-    GUIA_MEDIADOR_CHANNEL:      [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    GUIA_SUPORTE_CHANNEL:       [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    GUIA_ANALISTA_CHANNEL:      [ANALYST_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    AVISOS_CHANNEL:             [],
-    BLACKLIST_CHANNEL:          [],
-    CASOS_ANALISAR_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
-    PAINEL_ANALISTA_CHANNEL:    [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
-    HISTORICO_EXPOSED_CHANNEL:  [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
-    APROVAR_MEDIADORES_CHANNEL: [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    PAINEL_SUPORTE_CHANNEL:     [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    HISTORICO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    FATURAMENTO_CHANNEL:        [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    CADASTRO_MEDIADOR_CHANNEL:  [],
-    DASHBOARD_CHANNEL_NAME:     [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    DASHBOARD_MEDIADORES:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    DASHBOARD_APOSTAS:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    DASHBOARD_ENTRADAS:         [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    DASHBOARD_SUPORTE:          [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    DASHBOARD_INFLUENCERS:      [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
-    RESULTADOS_CHANNEL:         [],
-    RANKING_CHANNEL:            [],
-    MEDIADORES_AFKS_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    ALERTAS_ADM_CHANNEL:        [ADM_ROLE_NAME],   # <-- NOVO: só ADM vê
-    LOGS_CALLS_CHANNEL:         [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_TROCA_PIX_CHANNEL:     [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_DELETES_CHANNEL:       [ADM_ROLE_NAME],
-    LOGS_COMANDOS_CHANNEL:      [ADM_ROLE_NAME],
-    HISTORICO_CARGOS_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_PARTIDAS_CHANNEL:      [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    LOGS_MEDIADORES_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
-    LOGS_BOT_CHANNEL_NAME:      [ADM_ROLE_NAME],
-    LOGS_PIX_LOG_CHANNEL:       [ADM_ROLE_NAME],
-    LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME],
-    LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
-    LOGS_MESSAGE_DELETE_CHANNEL:[ADM_ROLE_NAME],
-    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME],
-    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],     # ← adicionado
-    }
-
-# ── Permissões — canais onde roles VEEM mas NÃO enviam ────────
-# (só ADM_ROLE_NAME e o bot podem postar)
+# ── Canais view-only (só bot/ADM postam) ────────────────────────────────────
 CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     # Analistas
     CASOS_ANALISAR_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
@@ -266,24 +230,32 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     # Suporte
     PAINEL_SUPORTE_CHANNEL:     [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
 
-    # Informações (membros veem, só adm/bot posta)
-    AVISOS_CHANNEL:             [],  # lista vazia = Membro pode ver
+    # Informações
+    AVISOS_CHANNEL:             [],  # Membro pode ver
 
     # Mediação
     HISTORICO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
 
     # Staff
     MEDIADORES_AFKS_CHANNEL:    [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+    HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
 
-    # Logs (todos view-only, adm posta)
-    LOGS_CALL_CHANNEL:          [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
-    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    # Logs — só ADM/Controller vêm
+    LOGS_CALL_CHANNEL:           [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_TROCA_CARGO_CHANNEL:    [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
     LOGS_MESSAGE_DELETE_CHANNEL: [ADM_ROLE_NAME],
-    LOGS_COMMAND_CHANNEL:       [ADM_ROLE_NAME],
-    LOGS_TROCA_CARGO_CHANNEL:   [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_COMMAND_CHANNEL:        [ADM_ROLE_NAME],
+    LOGS_PIX_LOG_CHANNEL:        [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_PARTIDAS_CHANNEL:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+    LOGS_MEDIADORES_CHANNEL:     [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+    LOGS_BOT_CHANNEL_NAME:       [ADM_ROLE_NAME],
+    ALERTAS_ADM_CHANNEL:         [ADM_ROLE_NAME],
+    # NOVOS — logs-tests e logs-pagamentos
+    LOGS_TESTS_CHANNEL:          [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
+    LOGS_PAGAMENTOS_CHANNEL:     [ADM_ROLE_NAME, CONTROLLER_ROLE_NAME],
 }
 
-# ── Canais onde roles podem enviar mensagens ──────────────────
+# ── Canais onde roles podem enviar mensagens ───────────────────────────────
 CHANNEL_PERMISSIONS: dict[str, list[str]] = {
     CHAMADOS_CHANNEL_NAME:      [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     SUPORTE_ADMIN_CHANNEL:      [ADM_ROLE_NAME],
@@ -304,7 +276,7 @@ CHANNEL_PERMISSIONS: dict[str, list[str]] = {
 }
 
 
-# ── PermissionService ─────────────────────────────────────────
+# ── PermissionService ──────────────────────────────────────────────────────
 class PermissionService:
 
     async def get_channel_overwrites(

@@ -35,6 +35,7 @@ class Ticket:
         self.status          = data.get("status", self.STATUS_ABERTO)
         self.atendente_id    = data.get("atendente_id")
         self.card_message_id = data.get("card_message_id")
+        self.channel_id      = data.get("channel_id")          # ID do canal suporte-{username}
         self.opened_at       = data.get("opened_at")
         self.created_at      = data.get("created_at", utcnow())
         self.updated_at      = data.get("updated_at", utcnow())
@@ -63,6 +64,7 @@ class Ticket:
             "status":         self.status,
             "atendente_id":   self.atendente_id,
             "card_message_id": self.card_message_id,
+            "channel_id":     self.channel_id,
             "opened_at":      self.opened_at,
             "created_at":     self.created_at,
             "updated_at":     self.updated_at,
@@ -95,6 +97,7 @@ class Ticket:
             "status":         Ticket.STATUS_ABERTO,
             "atendente_id":   None,
             "card_message_id": None,
+            "channel_id":     None,
             "opened_at":      now,
             "created_at":     now,
             "updated_at":     now,

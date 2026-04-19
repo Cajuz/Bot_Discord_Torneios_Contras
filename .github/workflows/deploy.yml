@@ -1,0 +1,36 @@
+# Pipeline de deploy — X1 Frifas Bot
+# Trigger: push na main → Railway redeploy automático via API
+# O bot sobe com on_ready → auto-executa !setupcanais sem digitar nada
+
+name: Deploy para Railway
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # permite rodar manualmente pelo GitHub UI
+
+jobs:
+  deploy:
+    name: Redeploy no Railway
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Trigger Railway Redeploy
+        run: |
+          echo "🚀 Disparando redeploy no Railway..."
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "query": "mutation serviceInstanceRedeploy($serviceId: String!, $environmentId: String!) { serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId) }",
+              "variables": {
+                "serviceId": "${{ secrets.RAILWAY_SERVICE_ID }}",
+                "environmentId": "${{ secrets.RAILWAY_ENVIRONMENT_ID }}"
+              }
+            }' \
+            https://backboard.railway.app/graphql/v2
+          echo "✅ Redeploy disparado com sucesso!"

@@ -1,4 +1,3 @@
-# channel_setup_service.py
 from __future__ import annotations
 import discord
 from discord import Interaction
@@ -345,7 +344,7 @@ class ChannelSetupService:
         embed = discord.Embed(
             title="📜 Regras do Servidor",
             description=(
-                "Bem-vindo ao servidor X1 Frifas! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
+                "Bem-vindo ao servidor SOLAR E-SPORTS! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
             ),
             color=0xFFD54F,
         )
@@ -408,7 +407,7 @@ class ChannelSetupService:
         """Posta o card fixo de cadastro de mediador com formulário modal."""
         from views.mediator_register_view import MediatorRegisterView
         embed = discord.Embed(
-            title="📋  Cadastro de Mediador — X1 Frifas",
+            title="📋  Cadastro de Mediador — SOLAR E-SPORTS",
             description=(
                 "Preencha o formulário abaixo para cadastrar um novo mediador.\n\n"
                 "**Requisitos**\n"
@@ -419,14 +418,14 @@ class ChannelSetupService:
             ),
             color=0xFFD54F,
         )
-        embed.set_footer(text="X1 Frifas · Apenas ADM/Suporte")
+        embed.set_footer(text="SOLAR E-SPORTS · Apenas ADM/Suporte")
         await self._post_panel(guild, CADASTRO_MEDIADOR_CHANNEL, embed, MediatorRegisterView())
 
     async def setup_blacklist(self, guild: discord.Guild):
         """Posta o painel de verificação de blacklist com botões interativos."""
         from views.blacklist_view import BlacklistCheckView
         embed = discord.Embed(
-            title="🚫  Verificação de Blacklist — X1 Frifas",
+            title="🚫  Verificação de Blacklist — SOLAR E-SPORTS",
             description=(
                 "Verifique se um membro está na blacklist do servidor.\n\n"
                 "🔍 **Verificar Minha Situação** — consulta o seu próprio status\n"
@@ -434,7 +433,7 @@ class ChannelSetupService:
             ),
             color=0x992D22,
         )
-        embed.set_footer(text="X1 Frifas · Blacklist · Consulta disponível para todos")
+        embed.set_footer(text="SOLAR E-SPORTS · Blacklist · Consulta disponível para todos")
         await self._post_panel(guild, BLACKLIST_CHANNEL, embed, BlacklistCheckView())
 
     async def setup_alertas_adm(self, guild: discord.Guild):
@@ -453,7 +452,7 @@ class ChannelSetupService:
             ),
             color=0xFF6B35,
         )
-        embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · X1 Frifas")
+        embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · SOLAR E-SPORTS")
         await self._post_panel(guild, ALERTAS_ADM_CHANNEL, embed, None)
 
     # ══════════════════════════════════════════════════════════
@@ -583,18 +582,18 @@ class ChannelSetupService:
     def _guide_mediator_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Guia do Mediador", color=THEME)
         embed.add_field(name="Fluxo da partida", value=(
-            "1. Fila completa → thread `confirmar-<modo>` criada\n"
-            "2. Jogadores confirmam presença\n"
-            "3. Thread → `pagamento-<modo>`\n"
-            "4. `!confirmar_pagamento` → thread `pagar-<valor>`\n"
-            "5. `!iniciar_partida` → partida começa\n"
-            "6. `!winner_team blue/red` → vencedor declarado\n"
-            "7. `!prize` → confirma entrega do prêmio"
+            "1. A fila completa cria automaticamente a thread da partida\n"
+            "2. Os jogadores confirmam presença na thread\n"
+            "3. O pagamento é validado pelo fluxo da própria partida\n"
+            "4. Quando o status estiver `aguardando_partida`, use `/sala <match_id> <sala_id> <senha>`\n"
+            "5. A sala é publicada na thread e a partida começa\n"
+            "6. Use `!menu_partida` para abrir as ações da partida\n"
+            "7. Use `!wt blue` ou `!wt red` para declarar o vencedor\n"
+            "8. Se necessário, use `!cancelar_match` para cancelar"
         ), inline=False)
         embed.add_field(name="Comandos", value=(
-            "`!menu_partida`  `!confirmar_pagamento`\n"
-            "`!iniciar_partida`  `!winner_team`  `!prize`\n"
-            "`!cancelar_match`  `/silence`"
+            "`/sala`  `/silence`\n"
+            "`!menu_partida`  `!wt blue/red`  `!cancelar_match`"
         ), inline=False)
         embed.add_field(name="Seus canais", value=(
             f"`#{MEDIADOR_PANEL_CHANNEL}` — entrar/sair da fila\n"
@@ -607,15 +606,15 @@ class ChannelSetupService:
         embed = discord.Embed(title="Guia do Suporte", color=THEME)
         embed.add_field(name="Fluxo", value=(
             f"1. Jogador abre ticket em `#{SOLICITAR_SUPORTE_CHANNEL}`\n"
-            f"2. Card aparece em `#{CHAMADOS_CHANNEL_NAME}`\n"
-            "3. Clique **Assumir** → jogador entra no seu canal\n"
-            "4. Atenda no canal `support-<seu-nome>`\n"
-            "5. `!fechar_chamado <ID>` → fecha e remove jogador\n\n"
-            f"💬 Use `#{CHAT_SUPORTE_STAFF_CHANNEL}` para comunicação interna com a equipe."
+            f"2. O bot cria o canal privado `suporte-{{username}}`\n"
+            f"3. A equipe acompanha o histórico em `#{CHAMADOS_CHANNEL_NAME}`\n"
+            "4. No canal do ticket, um Suporte/Admin clica em **✅ Assumir**\n"
+            "5. O ticket vai para atendimento e o responsável passa a responder no canal\n"
+            "6. Ao finalizar, um Suporte/Admin clica em **❌ Fechar**\n"
+            "7. O canal é apagado, o histórico é atualizado e o jogador recebe DM\n\n"
+            f"💬 Use `#{CHAT_SUPORTE_STAFF_CHANNEL}` para comunicação interna da equipe."
         ), inline=False)
-        embed.add_field(name="Comandos", value=(
-            "`!fechar_chamado <ID>`\n`/renomear_canal <sufixo>`"
-        ), inline=False)
+        embed.add_field(name="Comandos", value="`/rc <prefixo>` — renomeia o canal para `suporte-<prefixo>-<username>`", inline=False)
         return embed
 
     def _guide_analyst_embed(self) -> discord.Embed:

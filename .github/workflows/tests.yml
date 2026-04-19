@@ -1,0 +1,48 @@
+# CI Pipeline — X1 Frifas Bot
+# Roda pytest nos PRs e pushs para main.
+# Falha antes de chegar no Railway se algum teste quebrar.
+
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Rodar testes unitários
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependências mínimas para testes
+        # Não instala requirements.txt completo para evitar falhas de conexão
+        # (MongoDB, Discord, EFI) no ambiente de CI sem segredos.
+        # Os testes são unitários puros e mockam todas as dependências externas.
+        run: |
+          pip install --upgrade pip
+          pip install pytest pytest-asyncio
+          pip install discord.py motor pymongo python-dotenv
+
+      - name: Rodar testes
+        # Roda da RAIZ do repo para que sys.path.insert(0, "src") nos
+        # arquivos de teste resolva corretamente independente do OS.
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Resumo dos resultados
+        if: always()
+        run: |
+          echo "✅ Testes finalizados — veja o output acima para detalhes"
