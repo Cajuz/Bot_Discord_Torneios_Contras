@@ -1,18 +1,7 @@
-"""
-influencer_cog.py — F11: Controle de Influencers.
-
-Comandos:
-  /influencer add   — cadastra influencer
-  /influencer remove — remove influencer
-  /influencer stats  — stats do influencer
-  /influencer faturamento — faturamento individual
-  /influencer ranking — ranking geral (Admin)
-"""
 from __future__ import annotations
 import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.logger import logger
 from utils.datetime_utils import utcnow
 
 THEME_COLOR = 0xFFD54F
@@ -23,31 +12,63 @@ class InfluencerGroup(app_commands.Group):
     def __init__(self):
         super().__init__(name="influencer", description="Gestão de influencers")
 
-    @app_commands.command(name="add", description="Cadastra um influencer")
+    @app_commands.command(name="add", description="Cadastra um influencer e gera link de convite do Discord")
     @app_commands.describe(
         membro="Membro do Discord",
-        invite_code="Código do invite (ex: abc123)",
-        comissao="Comissão por membro (R$, padrão 2.00)"
+        canal_convite="Canal usado para gerar o link de convite",
+        comissao="Comissão por membro (R$, padrão 2.00)",
+        link="Link da rede social do influencer (opcional)",
+        max_usos="Máximo de usos do convite (0 = ilimitado)"
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def add(
         self,
         interaction: discord.Interaction,
         membro: discord.Member,
-        invite_code: str,
+        canal_convite: discord.TextChannel,
         comissao: float = 2.00,
+        link: str = "",
+        max_usos: int = 0,
     ):
         await interaction.response.defer(ephemeral=True)
         from services.influencer_service import influencer_service
 
-        await influencer_service.add_influencer(
+        try:
+            invite = await canal_convite.create_invite(
+                max_age=0,
+                max_uses=max(0, max_usos),
+                unique=True,
+                reason=f"Invite criado para influencer {membro}"
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "Não tenho permissão para criar convite nesse canal.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as e:
+            await interaction.followup.send(
+                f"Erro ao criar convite: {e}",
+                ephemeral=True,
+            )
+            return
+
+        ok, msg, saved = await influencer_service.add_influencer(
             discord_id=str(membro.id),
             username=membro.name,
-            invite_code=invite_code,
+            invite_code=invite.code,
+            link=link,
             commission_per_member=comissao,
         )
 
-        # Atribui cargo Influencer
+        if not ok:
+            try:
+                await invite.delete(reason="Rollback: falha ao cadastrar influencer")
+            except Exception:
+                pass
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+
         role = discord.utils.get(interaction.guild.roles, name=INFLUENCER_ROLE)
         if role and role not in membro.roles:
             try:
@@ -56,9 +77,13 @@ class InfluencerGroup(app_commands.Group):
                 pass
 
         embed = discord.Embed(title="Influencer Cadastrado", color=THEME_COLOR)
-        embed.add_field(name="Membro",   value=membro.mention,       inline=True)
-        embed.add_field(name="Invite",   value=f"`{invite_code}`",    inline=True)
-        embed.add_field(name="Comissão", value=f"R$ {comissao:.2f} por membro", inline=False)
+        embed.add_field(name="Membro", value=membro.mention, inline=True)
+        embed.add_field(name="Canal do Invite", value=canal_convite.mention, inline=True)
+        embed.add_field(name="Código", value=f"`{invite.code}`", inline=True)
+        embed.add_field(name="Link do Convite", value=invite.url, inline=False)
+        embed.add_field(name="Comissão", value=f"R$ {comissao:.2f} por membro", inline=True)
+        embed.add_field(name="Máximo de usos", value=("Ilimitado" if max_usos == 0 else f"`{max_usos}`"), inline=True)
+        embed.add_field(name="Link social", value=(saved.get("link") or "Não informado"), inline=False)
         embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -71,7 +96,6 @@ class InfluencerGroup(app_commands.Group):
 
         ok = await influencer_service.remove_influencer(str(membro.id))
 
-        # Remove cargo
         role = discord.utils.get(interaction.guild.roles, name=INFLUENCER_ROLE)
         if role and role in membro.roles:
             try:
@@ -91,7 +115,6 @@ class InfluencerGroup(app_commands.Group):
         from services.influencer_service import influencer_service
 
         target = membro or interaction.user
-        # Não-admin só pode ver o próprio
         if membro and membro.id != interaction.user.id:
             if not interaction.user.guild_permissions.administrator:
                 await interaction.followup.send("Apenas administradores podem ver stats de outros.", ephemeral=True)
@@ -102,73 +125,21 @@ class InfluencerGroup(app_commands.Group):
             await interaction.followup.send(f"{target.mention} não é um influencer cadastrado.", ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title=f"Stats — {target.display_name}",
-            color=THEME_COLOR
-        )
+        embed = discord.Embed(title=f"Stats — {target.display_name}", color=THEME_COLOR)
         embed.set_thumbnail(url=target.display_avatar.url)
         inf = stats["influencer"]
-        embed.add_field(name="Invite",       value=f"`{inf.get('invite_code','—')}`",         inline=True)
-        embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",  inline=True)
-        embed.add_field(name="Partidas deles",   value=f"`{stats['total_matches_played']}`",   inline=True)
-        embed.add_field(name="Volume apostado",  value=f"R$ {stats['total_wagered']:.2f}",     inline=True)
-        embed.add_field(name="Comissão devida",  value=f"R$ {stats['commission_due']:.2f}",    inline=True)
+        invite_url = inf.get("invite_url") or (f"https://discord.gg/{inf.get('invite_code')}" if inf.get("invite_code") else "—")
+        embed.add_field(name="Invite", value=f"`{inf.get('invite_code','—')}`", inline=True)
+        embed.add_field(name="Link do invite", value=invite_url, inline=False)
+        embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`", inline=True)
+        embed.add_field(name="Partidas deles", value=f"`{stats['total_matches_played']}`", inline=True)
+        embed.add_field(name="Volume apostado", value=f"R$ {stats['total_wagered']:.2f}", inline=True)
+        embed.add_field(name="Comissão devida", value=f"R$ {stats['commission_due']:.2f}", inline=True)
         embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="faturamento", description="Relatório de comissão de um influencer")
-    @app_commands.describe(membro="Influencer (Admin) ou vazio para ver o seu")
-    async def faturamento(self, interaction: discord.Interaction, membro: discord.Member = None):
-        await interaction.response.defer(ephemeral=True)
-        from services.influencer_service import influencer_service
 
-        target = membro or interaction.user
-        if membro and membro.id != interaction.user.id:
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.followup.send("Apenas administradores podem ver faturamento de outros.", ephemeral=True)
-                return
-
-        stats = await influencer_service.get_stats(str(target.id), str(interaction.guild_id))
-        if not stats:
-            await interaction.followup.send(f"{target.mention} não é um influencer cadastrado.", ephemeral=True)
-            return
-
-        inf = stats["influencer"]
-        embed = discord.Embed(
-            title=f"Faturamento — {target.display_name}",
-            color=THEME_COLOR
-        )
-        embed.add_field(name="Membros trazidos",  value=f"`{stats['total_members_brought']}`",            inline=True)
-        embed.add_field(name="Comissão/membro",   value=f"R$ {inf.get('commission_per_member',2):.2f}",   inline=True)
-        embed.add_field(name="Total acumulado",   value=f"**R$ {stats['commission_due']:.2f}**",          inline=False)
-        embed.add_field(name="Partidas deles",    value=f"`{stats['total_matches_played']}`",             inline=True)
-        embed.add_field(name="Volume apostado",   value=f"R$ {stats['total_wagered']:.2f}",               inline=True)
-        embed.set_footer(text=f"Cadastrado em {inf.get('created_at','').strftime('%d/%m/%Y') if inf.get('created_at') else '—'}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="ranking", description="Ranking de todos os influencers")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def ranking(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        from services.influencer_service import influencer_service
-
-        rows = await influencer_service.get_ranking(str(interaction.guild_id), limit=10)
-        embed = discord.Embed(title="Ranking de Influencers", color=THEME_COLOR)
-        if not rows:
-            embed.description = "Nenhum influencer cadastrado."
-        else:
-            medals = ["🥇", "🥈", "🥉"]
-            lines  = [
-                f"{medals[i] if i < 3 else f'`{i+1}.`'} **{r['username']}** — "
-                f"`{r['total_members']}` membros | R$ {r['commission']:.2f}"
-                for i, r in enumerate(rows)
-            ]
-            embed.description = "\n".join(lines)
-        embed.set_footer(text=utcnow().strftime("%d/%m/%Y %H:%M UTC"))
-        await interaction.followup.send(embed=embed)
-
-
-class InfluencerCog(commands.Cog, name="Influencer"):
+class InfluencerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.bot.tree.add_command(InfluencerGroup())
