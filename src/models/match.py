@@ -5,21 +5,38 @@ from typing import Optional, Dict, Any, List
 
 class Match:
 
+    # ── Status ────────────────────────────────────────────────
+    STATUS_AGUARDANDO_PARTIDA = 'aguardando_partida'   # mediador entrou, aguardando /sala
+    STATUS_PARTIDA_INICIADA   = 'partida_iniciada'     # /sala usado, jogando
+    STATUS_AGUARDANDO_PREMIO  = 'aguardando_premio'    # !wt declarou vencedor
+    STATUS_FINALIZADO         = 'finalizado'
+    STATUS_CANCELADO          = 'cancelado'
+
+    # legados — mantidos para compatibilidade com registros antigos e testes
     STATUS_AGUARDANDO_PAGAMENTO = 'aguardando_pagamento'
     STATUS_AGUARDANDO_INICIO    = 'aguardando_inicio'
     STATUS_EM_ANDAMENTO         = 'em_andamento'
-    STATUS_AGUARDANDO_PREMIO    = 'aguardando_premio'
-    STATUS_FINALIZADO           = 'finalizado'
-    STATUS_CANCELADO            = 'cancelado'
 
     ACTIVE_STATUSES = [
+        'aguardando_partida',
+        'partida_iniciada',
+        'aguardando_premio',
+        # legados
         'aguardando_pagamento',
         'aguardando_inicio',
         'em_andamento',
-        'aguardando_premio',
     ]
 
+    # FLOW principal (novo)
     FLOW = [
+        'aguardando_partida',
+        'partida_iniciada',
+        'aguardando_premio',
+        'finalizado',
+    ]
+
+    # FLOW legado — usado por can_transition_to para registros antigos
+    FLOW_LEGADO = [
         'aguardando_pagamento',
         'aguardando_inicio',
         'em_andamento',
@@ -35,7 +52,7 @@ class Match:
         self.match_type   = data.get('match_type')
         self.platform     = data.get('platform')
         self.bet_value    = data.get('bet_value')
-        self.gel_type     = data.get('gel_type', 'normal')
+        self.gel_type     = data.get('gel_type') or 'normal'
 
         self.player_ids  = [str(p) for p in data.get('player_ids', [])]
         self.max_players = data.get('max_players', 2)
@@ -44,16 +61,17 @@ class Match:
 
         self.mediator_id = str(data['mediator_id']) if data.get('mediator_id') else None
 
-        self.status    = data.get('status', self.STATUS_AGUARDANDO_PAGAMENTO)
+        self.status    = data.get('status', self.STATUS_AGUARDANDO_PARTIDA)
         self.thread_id = data.get('thread_id')
 
-        self.vencedor  = data.get('vencedor')    # 'blue' | 'red' | None
-        self.winner_id = data.get('winner_id')   # ID do jogador vencedor (para analytics)
+        self.vencedor  = data.get('vencedor')
+        self.winner_id = data.get('winner_id')
         self.proof_url = data.get('proof_url')
 
-        self.pagamento_confirmado      = data.get('pagamento_confirmado', False)
-        self.premio_entregue_mediador  = data.get('premio_entregue_mediador', False)
         self.premio_confirmado_jogador = data.get('premio_confirmado_jogador', False)
+        # legados — mantidos para não quebrar documentos antigos nem testes
+        self.pagamento_confirmado     = data.get('pagamento_confirmado', False)
+        self.premio_entregue_mediador = data.get('premio_entregue_mediador', False)
 
         self.cancelled_by  = str(data['cancelled_by']) if data.get('cancelled_by') else None
         self.cancel_reason = data.get('cancel_reason')
@@ -85,9 +103,10 @@ class Match:
             'vencedor':                   self.vencedor,
             'winner_id':                  self.winner_id,
             'proof_url':                  self.proof_url,
+            'premio_confirmado_jogador':  self.premio_confirmado_jogador,
+            # legados — mantidos para compatibilidade com banco e testes
             'pagamento_confirmado':       self.pagamento_confirmado,
             'premio_entregue_mediador':   self.premio_entregue_mediador,
-            'premio_confirmado_jogador':  self.premio_confirmado_jogador,
             'cancelled_by':               self.cancelled_by,
             'cancel_reason':              self.cancel_reason,
             'created_at':                 self.created_at,
@@ -107,12 +126,16 @@ class Match:
     def can_transition_to(self, new_status: str) -> bool:
         if new_status == self.STATUS_CANCELADO:
             return not self.is_finished()
-        try:
-            current_idx = self.FLOW.index(self.status)
-            new_idx     = self.FLOW.index(new_status)
-            return new_idx == current_idx + 1
-        except ValueError:
-            return False
+        # Tenta no fluxo principal primeiro, depois no legado
+        for flow in (self.FLOW, self.FLOW_LEGADO):
+            try:
+                current_idx = flow.index(self.status)
+                new_idx     = flow.index(new_status)
+                if new_idx == current_idx + 1:
+                    return True
+            except ValueError:
+                continue
+        return False
 
     def get_all_player_ids(self) -> List[str]:
         return list(self.player_ids)

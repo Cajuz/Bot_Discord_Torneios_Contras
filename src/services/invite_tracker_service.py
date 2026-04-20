@@ -1,8 +1,3 @@
-"""
-InviteTrackerService
-Rastreia convites do servidor: quem entrou, por qual link, quem convidou.
-Vincula automaticamente ao influencer quando o invite pertence a um.
-"""
 from __future__ import annotations
 import discord
 from discord.ext import commands
@@ -10,12 +5,10 @@ from typing import Optional
 from utils.logger import logger
 from utils.datetime_utils import utcnow
 
-# Collection unificada — usada por invite_tracker E influencer_service
 INVITE_JOINS_COLLECTION = "invite_joins"
 
 
 class InviteTrackerService:
-
     def __init__(self):
         self.bot: commands.Bot | None = None
         self._cache: dict[int, dict[str, int]] = {}
@@ -49,110 +42,108 @@ class InviteTrackerService:
             return None
 
     async def register_join(self, member: discord.Member, invite: Optional[discord.Invite]):
-        """Salva evento de entrada. Vincula ao influencer se o invite pertencer a um."""
         from config.database import db
 
         invite_code = invite.code if invite else None
-
-        # Verifica se o invite pertence a um influencer
         influencer_id = None
         if invite_code:
-            inf_doc = await db.get_collection("influencers").find_one(
-                {"invite_code": invite_code, "is_active": True}
-            )
+            inf_doc = await db.get_collection("influencers").find_one({"invite_code": invite_code, "is_active": True})
             if inf_doc:
                 influencer_id = inf_doc.get("discord_id")
 
         doc = {
-            "member_id":     str(member.id),
-            "member_name":   member.name,
-            "guild_id":      str(member.guild.id),
-            "invite_code":   invite_code,
-            "inviter_id":    str(invite.inviter.id) if invite and invite.inviter else None,
-            "inviter_name":  invite.inviter.name    if invite and invite.inviter else None,
-            "invite_uses":   invite.uses            if invite else None,
+            "member_id": str(member.id),
+            "member_name": member.name,
+            "guild_id": str(member.guild.id),
+            "invite_code": invite_code,
+            "inviter_id": str(invite.inviter.id) if invite and invite.inviter else None,
+            "inviter_name": invite.inviter.name if invite and invite.inviter else None,
+            "invite_uses": invite.uses if invite else None,
             "influencer_id": influencer_id,
-            "joined_at":     utcnow(),
+            "joined_at": utcnow(),
+            "updated_at": utcnow(),
         }
-
-        # Salva na collection unificada
         await db.get_collection(INVITE_JOINS_COLLECTION).insert_one(doc)
 
-        # Atualiza stats do inviter
-        if invite and invite.inviter:
-            await db.get_collection("invite_stats").update_one(
-                {"discord_id": str(invite.inviter.id), "guild_id": str(member.guild.id)},
-                {
-                    "$inc": {"total_invited": 1},
-                    "$set": {
-                        "username":        invite.inviter.name,
-                        "last_invited_at": utcnow(),
-                    },
-                    "$setOnInsert": {"created_at": utcnow()},
-                },
-                upsert=True
-            )
-
-        # Preenche influencer_id e referred_by no documento do user
         if influencer_id:
             await db.get_collection("users").update_one(
                 {"discord_id": str(member.id)},
-                {"$set": {
-                    "influencer_id": influencer_id,
-                    "referred_by":   invite_code,
-                    "updated_at":    utcnow(),
-                }}
+                {"$set": {"influencer_id": influencer_id, "referred_by": invite_code, "updated_at": utcnow()}}
             )
-            logger.info(f"[InviteTracker] {member.name} vinculado ao influencer {influencer_id}")
+
+    def _build_influencer_join_embed(self, member: discord.Member, invite: Optional[discord.Invite], influencer: Optional[dict], onboarding_status: str, matches_count: int) -> discord.Embed:
+        embed = discord.Embed(title="Convite de Influencer", color=0xFFD54F)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(name="Convidado", value=member.mention, inline=True)
+        embed.add_field(name="Influencer", value=(f"<@{influencer['discord_id']}>" if influencer else "Não identificado"), inline=True)
+        embed.add_field(name="Invite", value=(f"`{invite.code}`" if invite else "`Não identificado`"), inline=True)
+        embed.add_field(name="Onboarding", value=f"`{onboarding_status}`", inline=True)
+        embed.add_field(name="Partidas até agora", value=f"`{matches_count}`", inline=True)
+        if invite and invite.inviter:
+            embed.add_field(name="Criado por", value=invite.inviter.mention, inline=True)
+        embed.set_footer(text=f"ID: {member.id} • Atualizado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
+        return embed
 
     async def post_join_log(self, member: discord.Member, invite: Optional[discord.Invite]):
         from services.channel_service import INVITE_CHANNEL_NAME
+        from services.influencer_service import influencer_service
+        from config.database import db
+
         channel = discord.utils.get(member.guild.text_channels, name=INVITE_CHANNEL_NAME)
         if not channel:
             return
 
+        inf_doc = None
+        if invite:
+            inf_doc = await db.get_collection("influencers").find_one({"invite_code": invite.code, "is_active": True})
+
+        if inf_doc:
+            card_data = await influencer_service.get_invite_card_data(str(member.id), str(member.guild.id))
+            embed = self._build_influencer_join_embed(
+                member,
+                invite,
+                inf_doc,
+                card_data.get("onboarding_status", "pendente") if card_data else "pendente",
+                card_data.get("matches_count", 0) if card_data else 0,
+            )
+            sent = await channel.send(embed=embed)
+            await influencer_service.update_join_card_message(str(member.id), sent.id, channel.id)
+            return
+
         embed = discord.Embed(title="Novo Membro", color=0xFFD54F)
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Membro",   value=member.mention, inline=True)
-        embed.add_field(
-            name="Conta em",
-            value=f"<t:{int(member.created_at.timestamp())}:D>",
-            inline=True
-        )
-
-        if invite:
-            from config.database import db
-            inf_doc = await db.get_collection("influencers").find_one(
-                {"invite_code": invite.code, "is_active": True}
-            )
-            inviter_mention = invite.inviter.mention if invite.inviter else "`Desconhecido`"
-            embed.add_field(name="Invite",        value=f"`{invite.code}`", inline=True)
-            embed.add_field(name="Convidado por", value=inviter_mention,    inline=True)
-            embed.add_field(name="Usos do link",  value=f"`{invite.uses}`", inline=True)
-            if inf_doc:
-                embed.add_field(
-                    name="Influencer",
-                    value=f"<@{inf_doc['discord_id']}>",
-                    inline=True
-                )
-        else:
-            embed.add_field(name="Invite", value="`Não identificado`", inline=True)
-
+        embed.add_field(name="Membro", value=member.mention, inline=True)
+        embed.add_field(name="Invite", value=(f"`{invite.code}`" if invite else "`Não identificado`"), inline=True)
         embed.set_footer(text=f"ID: {member.id} • {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         await channel.send(embed=embed)
 
-    async def get_inviter_stats(self, discord_id: str, guild_id: str) -> dict:
-        from config.database import db
-        doc = await db.get_collection("invite_stats").find_one(
-            {"discord_id": discord_id, "guild_id": guild_id}
-        )
-        return doc or {"total_invited": 0}
+    async def update_invite_card(self, guild: discord.Guild, member_id: str):
+        from services.influencer_service import influencer_service
 
-    async def get_top_inviters(self, guild_id: str, limit: int = 10) -> list[dict]:
-        from config.database import db
-        return await db.get_collection("invite_stats").find(
-            {"guild_id": guild_id}
-        ).sort("total_invited", -1).limit(limit).to_list(limit)
+        card_data = await influencer_service.get_invite_card_data(member_id, str(guild.id))
+        if not card_data or not card_data.get("influencer"):
+            return False
+
+        join_doc = card_data["join_doc"]
+        channel = guild.get_channel(int(join_doc.get("log_channel_id", 0)))
+        if not channel:
+            return False
+
+        try:
+            message = await channel.fetch_message(int(join_doc.get("log_message_id", 0)))
+        except Exception:
+            return False
+
+        member = guild.get_member(int(member_id)) or await guild.fetch_member(int(member_id))
+        embed = self._build_influencer_join_embed(
+            member,
+            None,
+            card_data.get("influencer"),
+            card_data.get("onboarding_status", "pendente"),
+            card_data.get("matches_count", 0),
+        )
+        await message.edit(embed=embed)
+        return True
 
 
 invite_tracker_service = InviteTrackerService()

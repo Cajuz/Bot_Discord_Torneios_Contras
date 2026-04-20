@@ -38,6 +38,7 @@ COGS = [
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
     "cogs.renewal_dashboard_cog",
+    "cogs.alerts_cog",  # fix: estava faltando na lista original
 ]
 
 bot          = create_discord_bot()
@@ -45,10 +46,6 @@ _initialized = False
 
 # ─────────────────────────────────────────────────────────────
 # Servidor HTTP — health check + webhook EFI
-#
-# IMPORTANTE: O Railway injeta automaticamente a variável PORT e
-# bate o healthcheck NESSA porta. Usamos PORT como prioridade,
-# com fallback para API_PORT (8000).
 # ─────────────────────────────────────────────────────────────
 
 async def _start_http_server():
@@ -84,8 +81,6 @@ async def _start_http_server():
     app.router.add_get("/health",       health)
     app.router.add_post("/webhook/efi", efi_webhook)
 
-    # Railway injeta PORT automaticamente — DEVE ser usada para o healthcheck
-    # funcionar. API_PORT é fallback para ambientes locais.
     port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
     runner = web.AppRunner(app)
     await runner.setup()
@@ -115,26 +110,67 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 
 
 # ─────────────────────────────────────────────────────────────
+# Auto Setup — executa !setupcanais automaticamente no startup
+# ─────────────────────────────────────────────────────────────
+
+async def _auto_setup_canais(guild: discord.Guild):
+    """
+    Executa o equivalente ao !setupcanais automaticamente toda vez que o
+    bot inicializa (startup, redeploy, crash+restart).
+    Não precisa de Context — chama o channel_setup_service diretamente.
+    """
+    try:
+        from services.channel_setup_service import channel_setup_service
+        channel_setup_service.bot = bot
+        result = await channel_setup_service.setup_all(guild)
+        log_success(f"[AutoSetup] !setupcanais executado automaticamente: {result}")
+
+        # Notifica no canal alertas-adm que o setup rodou após reinício
+        alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
+        if alertas_ch:
+            embed = discord.Embed(
+                title="🔄 Bot reiniciado — Setup automático concluído",
+                description=(
+                    "O bot foi reiniciado e executou `!setupcanais` automaticamente.\n"
+                    "Todos os painéis e cards foram reconstruídos.\n\n"
+                    f"**Resultado:** {result or 'OK'}"
+                ),
+                color=0x2ECC71,
+                timestamp=utcnow(),
+            )
+            embed.set_footer(text="X1 Frifas · Auto-Setup")
+            await alertas_ch.send(embed=embed)
+    except Exception as e:
+        logger.error(f"[AutoSetup] Erro ao executar setupcanais automático: {e}", exc_info=True)
+        # Tenta notificar o erro no alertas-adm
+        try:
+            alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
+            if alertas_ch:
+                embed = discord.Embed(
+                    title="❌ Bot reiniciado — Erro no setup automático",
+                    description=f"```{e}```",
+                    color=0xE74C3C,
+                    timestamp=utcnow(),
+                )
+                await alertas_ch.send(embed=embed)
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────
 # on_ready
 # ─────────────────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
-    guild = bot.guilds[0]
     global _initialized
     if _initialized:
         logger.warning("[on_ready] Reconexão — pulando reinicialização.")
         return
     _initialized = True
 
+    guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
-
-    for cog in COGS:
-        try:
-            await bot.load_extension(cog)
-            logger.info(f"[Cog] ✅ {cog}")
-        except Exception as e:
-            logger.error(f"[Cog] ❌ {cog}: {e}")
 
     try:
         synced = await bot.tree.sync()
@@ -143,7 +179,7 @@ async def on_ready():
         logger.error(f"[SlashCommands] Erro: {e}")
 
     try:
-        from views.ticket_view             import TicketPanelView, TicketCardView, SupportCardView
+        from views.ticket_view import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
         from views.mediator_panel_view     import MediatorPanelView
         from views.quero_ser_mediador_view import PedidoMediadorView
         from views.spam_block_card_view    import SpamBlockCardView
@@ -172,6 +208,7 @@ async def on_ready():
         persistent_views = [
             TicketPanelView(),
             TicketCardView(ticket_id="__persistent__"),
+            TicketChannelView(ticket_id="__persistent__"),
             SupportCardView(),
             MediatorPanelView(),
             PedidoMediadorView(),
@@ -213,13 +250,16 @@ async def on_ready():
     from services.rate_limit_monitor_service import rate_limit_monitor
     invite_tracker_service.bot = bot
     rate_limit_monitor.bot     = bot
-    for guild in bot.guilds:
-        await invite_tracker_service.cache_guild_invites(guild)
+    for guild_item in bot.guilds:
+        await invite_tracker_service.cache_guild_invites(guild_item)
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
+    # Onboarding — instancia e restaura estado do DB
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
+    if guild:
+        await bot._onboarding_service.restore_state(guild)
 
     try:
         from services.anti_spam_service import init_anti_spam_service
@@ -281,21 +321,37 @@ async def on_ready():
     try:
         from services.anti_spam_service import anti_spam_service
         if anti_spam_service:
-            for guild in bot.guilds:
-                await anti_spam_service.restore_blocked_members(guild)
+            for guild_item in bot.guilds:
+                await anti_spam_service.restore_blocked_members(guild_item)
             logger.info("[AntiSpam] Membros bloqueados restaurados")
     except Exception as e:
         logger.warning(f"[AntiSpam] restore_blocked_members: {e}")
 
     from services.mediator_queue import mediator_queue
-    for guild in bot.guilds:
+    for guild_item in bot.guilds:
         try:
-            await mediator_queue.sync_mediators_by_role(guild, role_name="Controller")
+            await mediator_queue.sync_mediators_by_role(guild_item, role_name="Controller")
         except Exception as e:
             logger.warning(f"[on_ready] Sync mediadores: {e}")
 
     if not set_status.is_running():
         set_status.start()
+
+    # ── Circuit Breaker — injeta bot para notificações em #alertas-adm ──
+    # Precisa ser feito aqui pois o bot só está disponível após on_ready.
+    try:
+        from utils.circuit_breaker import db_circuit_breaker
+        db_circuit_breaker.set_bot(bot)
+        logger.info("[CircuitBreaker] Bot injetado — notificações em #alertas-adm ativas")
+    except Exception as e:
+        logger.warning(f"[CircuitBreaker] Erro ao injetar bot: {e}")
+
+    # ── Auto Setup de canais ─────────────────────────────────────────────
+    # Toda vez que o bot sobe (novo deploy, crash recovery, redeploy)
+    # executa !setupcanais automaticamente — sem precisar digitar nada.
+    # O resultado é notificado em #alertas-adm.
+    if guild:
+        asyncio.create_task(_auto_setup_canais(guild))
 
     log_success("Bot totalmente inicializado!")
 
@@ -472,7 +528,7 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Entrypoint
+# Entrypoint — Cogs carregados ANTES do bot.start()
 # ─────────────────────────────────────────────────────────────
 
 async def main():
@@ -481,9 +537,16 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Sobe o servidor HTTP primeiro (blocking await),
-    # garantindo que /health ja responde ANTES do bot.start().
-    # Em seguida, gather roda bot + keep_alive em paralelo.
+    # Carrega todos os cogs ANTES de iniciar o bot para evitar
+    # race condition no on_ready e garantir que tudo está disponível
+    # desde o primeiro evento, inclusive após reconexão.
+    for cog in COGS:
+        try:
+            await bot.load_extension(cog)
+            logger.info(f"[Cog] ✅ {cog}")
+        except Exception as e:
+            logger.error(f"[Cog] ❌ {cog}: {e}")
+
     await _start_http_server()
     await asyncio.gather(
         start_discord_bot(bot),

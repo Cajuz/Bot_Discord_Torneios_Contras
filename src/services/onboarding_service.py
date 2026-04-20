@@ -1,320 +1,362 @@
+"""
+OnboardingService — Fluxo de entrada de novos membros 100% in-server.
+Sem dependência de DM. Canal temporário privado por usuário.
+"""
 import asyncio
+import re
 import discord
 from typing import Optional
-from datetime import datetime
-from utils.datetime_utils import utcnow
-
 from config.database import db
 from config.rules import ServerRules
 from models.user import User
-from views.rules_view import RulesView
-from services.captcha_service import CaptchaService  
+from utils.datetime_utils import utcnow
 from utils.logger import logger, log_success
 
 
-MEMBER_ROLE_NAME   = "Membro"
-RULES_CHANNEL_NAME = "📜regras"
+MEMBER_ROLE_NAME        = "Membro"
+RULES_CHANNEL_NAME      = "📜regras"
+VERIFY_CATEGORY_NAME    = "✅ Verificação"
+VERIFY_CHANNEL_TIMEOUT  = 600  # 10 minutos
 
 
 class OnboardingService:
 
     def __init__(self, bot: discord.Client):
         self.bot                      = bot
-        self.verification_channel_id: Optional[int] = None
-        self.verified_role_id: Optional[int]        = None
+        self.verified_role_id: Optional[int] = None
+        # Cache rápido — rebuildo do DB no restore_state()
         self._pending_onboarding: set[int] = set()
 
-    def set_verification_channel(self, channel_id: int):
-        self.verification_channel_id = channel_id
+    # ─────────────────────────────────────────────
+    # Restaurar estado no restart
+    # ─────────────────────────────────────────────
 
-    def set_verified_role(self, role_id: int):
-        self.verified_role_id = role_id
+    async def restore_state(self, guild: discord.Guild):
+        """
+        Chamado no on_ready — restaura verified_role_id e _pending_onboarding
+        a partir do DB para garantir resiliência a restarts.
+        """
+        role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+        if role:
+            self.verified_role_id = role.id
+            logger.info(f"[Onboarding] verified_role_id restaurado: {role.id}")
+
+        collection = db.get_collection("users")
+        pendentes  = await collection.find({
+            "has_accepted_rules": False,
+            "is_active":          True,
+            "onboarding_result":  "pendente"
+        }).to_list(None)
+        for doc in pendentes:
+            self._pending_onboarding.add(int(doc["discord_id"]))
+        logger.info(f"[Onboarding] {len(pendentes)} onboardings pendentes restaurados")
 
     # ─────────────────────────────────────────────
-    # Entrada de novo membro
+    # Entrada de novo membro — IN-SERVER
     # ─────────────────────────────────────────────
 
     async def handle_new_member(self, member: discord.Member, is_test: bool = False):
         try:
             if member.id in self._pending_onboarding and not is_test:
-                logger.warning(f"Onboarding já em andamento para {member.name} — ignorando duplicata")
+                logger.warning(f"[Onboarding] Já em andamento para {member.name} — ignorando duplicata")
                 return
 
-            collection = db.get_collection('users')
-            existing   = await collection.find_one({'discord_id': str(member.id)})
+            collection = db.get_collection("users")
+            existing   = await collection.find_one({"discord_id": str(member.id)})
 
-            if existing and existing.get('has_accepted_rules') and not is_test:
+            # Membro retornando com regras já aceitas
+            if existing and existing.get("has_accepted_rules") and not is_test:
                 await self._grant_access(member)
-                try:
-                    rules_channel = discord.utils.get(member.guild.text_channels, name=RULES_CHANNEL_NAME)
-                    if rules_channel:
-                        await rules_channel.send(
-                            f"👋 Bem-vindo de volta, {member.mention}! Acesso restaurado.",
-                            delete_after=30
-                        )
-                except Exception:
-                    pass
-                logger.info(f"Membro {member.name} retornou — acesso concedido")
+                logger.info(f"[Onboarding] {member.name} retornou — acesso restaurado")
                 return
 
+            # Upsert no DB
             if not is_test:
-                if not existing:
-                    user_doc = User.create_document(str(member.id), member.name)
-                    await collection.insert_one(user_doc)
-                else:
-                    await collection.update_one(
-                        {'discord_id': str(member.id)},
-                        {'$set': {
-                            'username':           member.name,
-                            'joined_at':          utcnow(),
-                            'is_active':          True,
-                            'onboarding_result':  'pendente',
-                            'captcha_status':     'pendente',  # ✅ reseta captcha
-                            'has_accepted_rules': False,
-                        }}
-                    )
+                user_doc = {
+                    "discord_id":         str(member.id),
+                    "username":           member.name,
+                    "joined_at":          utcnow(),
+                    "is_active":          True,
+                    "onboarding_result":  "pendente",
+                    "captcha_status":     "pendente",
+                    "has_accepted_rules": False,
+                }
+                await collection.update_one(
+                    {"discord_id": str(member.id)},
+                    {"$set": user_doc},
+                    upsert=True
+                )
 
             self._pending_onboarding.add(member.id)
-            await self._send_rules_dm(member, is_test=is_test)
-            log_success(f"Membro {member.name} — regras enviadas via DM")
+            await self._create_verification_channel(member, is_test=is_test)
+            log_success(f"[Onboarding] Canal de verificação criado para {member.name}")
 
         except Exception as e:
             self._pending_onboarding.discard(member.id)
-            logger.error(f"Erro ao processar novo membro {member.name}: {e}")
+            logger.error(f"[Onboarding] Erro ao processar {member.name}: {e}", exc_info=True)
 
     # ─────────────────────────────────────────────
-    # Envio das regras via DM
+    # Cria canal de verificação privado in-server
     # ─────────────────────────────────────────────
 
-    async def _send_rules_dm(self, member: discord.Member, is_test: bool = False):
+    async def _create_verification_channel(self, member: discord.Member, is_test: bool = False):
+        guild    = member.guild
+        category = discord.utils.get(guild.categories, name=VERIFY_CATEGORY_NAME)
+
+        if not category:
+            category = await guild.create_category(
+                VERIFY_CATEGORY_NAME,
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False)
+                }
+            )
+
+        # Nome sanitizado — evita caracteres problemáticos do Discord
+        safe_name = re.sub(r"[^a-z0-9\-]", "", member.name.lower())[:20] or str(member.id)
+        ch_name   = f"verify-{safe_name}-{str(member.id)[-4:]}"
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            member:             discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+                add_reactions=False
+            ),
+            guild.me:           discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+                manage_messages=True
+            ),
+        }
+
         try:
-            view  = RulesView(self, member, timeout=300, is_test=is_test)
-            embed = ServerRules.get_rules_embed()
+            channel = await guild.create_text_channel(
+                name=ch_name,
+                category=category,
+                overwrites=overwrites,
+                topic=f"Verificação de {member.display_name}"
+            )
+        except discord.Forbidden:
+            logger.error("[Onboarding] Sem permissão para criar canal de verificação")
+            return
+        except discord.HTTPException as e:
+            logger.error(f"[Onboarding] Erro HTTP ao criar canal: {e}")
+            return
 
-            rules_channel = discord.utils.get(member.guild.text_channels, name=RULES_CHANNEL_NAME)
+        from views.rules_view import RulesView
 
-            if not is_test and rules_channel:
-                await rules_channel.send(
-                    f"👋 {member.mention} entrou no servidor!\n"
-                    f"📩 Enviamos as regras na sua **DM** — você tem **5 minutos** para aceitar.",
-                    delete_after=310
-                )
+        embed        = ServerRules.get_rules_embed()
+        view         = RulesView(self, member, channel=channel, timeout=VERIFY_CHANNEL_TIMEOUT, is_test=is_test)
+        message      = await channel.send(
+            content=f"👋 Bem-vindo, {member.mention}! Leia as regras e clique em **Aceitar** para entrar.",
+            embed=embed,
+            view=view
+        )
+        view.message = message
 
-            try:
-                message      = await member.send(embed=embed, view=view)
-                view.message = message
-            except discord.Forbidden:
-                self._pending_onboarding.discard(member.id)
-                logger.warning(f"DM bloqueada para {member.name}")
+        # Auto-cleanup após timeout
+        asyncio.create_task(
+            self._cleanup_verification_channel(channel, member, VERIFY_CHANNEL_TIMEOUT)
+        )
 
-                if is_test:
-                    logger.info(f"[TESTE] DM bloqueada para {member.name} — pulando kick")
-                    return
-
-                if await self._has_member_role(member):
-                    logger.info(f"DM bloqueada mas {member.name} já tem cargo Membro — não kickando")
-                    return
-
-                if rules_channel:
+    async def _cleanup_verification_channel(
+        self, channel: discord.TextChannel, member: discord.Member, delay: int
+    ):
+        await asyncio.sleep(delay + 5)
+        try:
+            if not await self._has_member_role(member):
+                if channel:
                     try:
-                        await rules_channel.send(
-                            f"⚠️ {member.mention} não tem DM aberta e foi removido.\n"
-                            f"Habilite DMs de membros do servidor e entre novamente.",
-                            delete_after=30
+                        await channel.send(
+                            f"⏰ Tempo esgotado, {member.mention}. Você será removido.",
+                            delete_after=5
                         )
                     except Exception:
                         pass
+                    await asyncio.sleep(5)
 
                 await self.kick_member(
                     member,
-                    reason="DM bloqueada — não foi possível enviar as regras",
-                    result='dm_bloqueada'
+                    reason="Não aceitou as regras no prazo",
+                    result="timeout"
                 )
-
-        except Exception as e:
-            self._pending_onboarding.discard(member.id)
-            logger.error(f"Erro ao enviar regras via DM para {member.name}: {e}")
+        except Exception:
+            pass
+        finally:
+            try:
+                await channel.delete(reason="Verificação concluída/expirada")
+            except Exception:
+                pass
 
     # ─────────────────────────────────────────────
-    # Fluxo CAPTCHA ✅ novo
+    # CAPTCHA in-server via botões (sem DM!)
     # ─────────────────────────────────────────────
 
-    async def run_captcha_flow(self, member: discord.Member, is_test: bool = False):
+    async def run_captcha_flow(
+        self, member: discord.Member, channel: discord.TextChannel, is_test: bool = False
+    ):
         """
-        Inicia o fluxo de verificação CAPTCHA após o membro aceitar as regras.
-        Chamado como asyncio.create_task() a partir da RulesView.
+        Executa CAPTCHA diretamente no canal de verificação via botões.
+        Sem digitação, sem DM — rápido e acessível.
         """
-        try:
-            dm_channel = member.dm_channel or await member.create_dm()
-            success, result = await self._run_captcha_loop(member, dm_channel)
+        from views.captcha_button_view import CaptchaButtonView
 
-            collection = db.get_collection('users')
-
-            if success:
-                await collection.update_one(
-                    {'discord_id': str(member.id)},
-                    {'$set': {
-                        'captcha_status': 'aprovado',
-                        'updated_at':     utcnow()
-                    }}
-                )
-                await dm_channel.send(embed=CaptchaService.get_success_embed())
-
-                if is_test:
-                    logger.info(f"[TESTE] CAPTCHA aprovado para {member.name} — pulando grant")
-                    welcome_embed = ServerRules.get_welcome_embed(member)
-                    await dm_channel.send(embed=welcome_embed)
-                    self.clear_pending(member.id)
-                    return
-
-                ok = await self.accept_rules(member)
-                if ok:
-                    welcome_embed = ServerRules.get_welcome_embed(member)
-                    await dm_channel.send(embed=welcome_embed)
-
-            else:
-                # result: 'captcha_timeout' ou 'captcha_falhou'
-                captcha_status = 'timeout' if result == 'captcha_timeout' else 'falhou'
-                await collection.update_one(
-                    {'discord_id': str(member.id)},
-                    {'$set': {
-                        'captcha_status': captcha_status,
-                        'updated_at':     utcnow()
-                    }}
-                )
-
-                if is_test:
-                    logger.info(f"[TESTE] CAPTCHA falhou para {member.name} ({result}) — kick ignorado")
-                    self.clear_pending(member.id)
-                    return
-
-                self._pending_onboarding.discard(member.id)
-                await self.kick_member(
-                    member,
-                    reason=f"Falhou na verificação CAPTCHA ({result})",
-                    result=result
-                )
-
-        except Exception as e:
-            logger.error(f"Erro no captcha_flow de {member.name}: {e}")
-            self._pending_onboarding.discard(member.id)
-
-    async def _run_captcha_loop(
-        self, member: discord.Member, dm_channel: discord.DMChannel
-    ) -> tuple[bool, str]:
-        """
-        Executa o loop de tentativas do CAPTCHA.
-        Retorna (True, 'aprovado') ou (False, 'captcha_falhou'|'captcha_timeout').
-        """
-        for attempt in range(1, CaptchaService.MAX_ATTEMPTS + 1):
-            code         = CaptchaService.generate_code()
-            image_buffer = CaptchaService.generate_image(code)
-            embed        = CaptchaService.get_captcha_embed(attempt, CaptchaService.MAX_ATTEMPTS)
-            file         = discord.File(fp=image_buffer, filename="captcha.png")
-
-            await dm_channel.send(embed=embed, file=file)
-
-            def check(m: discord.Message) -> bool:
-                return (
-                    m.author.id == member.id
-                    and isinstance(m.channel, discord.DMChannel)
-                    and not m.author.bot
-                )
+        for attempt in range(1, 4):
+            view  = CaptchaButtonView(member=member, attempt=attempt)
+            embed = discord.Embed(
+                title="🔐 Verificação Rápida",
+                description=(
+                    f"**{view.question}**\n\n"
+                    f"Clique na resposta correta abaixo.\n\n"
+                    f"🔄 Tentativa **{attempt}/3**"
+                ),
+                color=discord.Color.blue()
+            )
+            msg = await channel.send(embed=embed, view=view)
 
             try:
-                msg = await self.bot.wait_for(
-                    'message',
-                    check=check,
-                    timeout=float(CaptchaService.TIMEOUT_SECS)
-                )
-
-                if msg.content.strip().upper() == code.upper():
-                    return True, 'aprovado'
-
-                # Resposta errada
-                attempts_left = CaptchaService.MAX_ATTEMPTS - attempt
-                if attempts_left > 0:
-                    await dm_channel.send(embed=CaptchaService.get_error_embed(attempts_left))
-                    await asyncio.sleep(1)  # pequena pausa antes do próximo CAPTCHA
-
+                result = await view.wait_result(timeout=60.0)
             except asyncio.TimeoutError:
-                await dm_channel.send(embed=CaptchaService.get_timeout_embed())
-                return False, 'captcha_timeout'
+                await channel.send(embed=discord.Embed(
+                    title="⏰ Tempo Esgotado",
+                    description="Você não respondeu a tempo.",
+                    color=discord.Color.red()
+                ))
+                await self.kick_member(member, reason="CAPTCHA timeout", result="captcha_timeout")
+                return
+            finally:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
 
-        # Esgotou todas as tentativas
-        await dm_channel.send(embed=CaptchaService.get_failed_embed())
-        return False, 'captcha_falhou'
+            if result:
+                await db.get_collection("users").update_one(
+                    {"discord_id": str(member.id)},
+                    {"$set": {"captcha_status": "aprovado", "updated_at": utcnow()}}
+                )
+                if is_test:
+                    logger.info(f"[TESTE] CAPTCHA aprovado para {member.name}")
+                    self.clear_pending(member.id)
+                    return
+                await self.accept_rules(member, channel=channel)
+                return
+            else:
+                if attempt < 3:
+                    await channel.send(
+                        embed=discord.Embed(
+                            title="❌ Errado!",
+                            description=f"Tente novamente. Tentativas restantes: **{3 - attempt}**",
+                            color=discord.Color.orange()
+                        ),
+                        delete_after=5
+                    )
+
+        # Esgotou tentativas
+        await channel.send(embed=discord.Embed(
+            title="🚫 Verificação Falhou",
+            description="Você esgotou todas as tentativas.",
+            color=discord.Color.red()
+        ))
+        await self.kick_member(member, reason="CAPTCHA falhou", result="captcha_falhou")
 
     # ─────────────────────────────────────────────
-    # Aceitar regras (chamado após CAPTCHA aprovado)
+    # Aceitar regras
     # ─────────────────────────────────────────────
 
-    async def accept_rules(self, member: discord.Member) -> bool:
+    async def accept_rules(self, member: discord.Member, channel: discord.TextChannel = None) -> bool:
         try:
-            collection = db.get_collection('users')
-            await collection.update_one(
-                {'discord_id': str(member.id)},
-                {'$set': {
-                    'has_accepted_rules':  True,
-                    'onboarding_result':   'aceito',
-                    'rules_accepted_at':   utcnow(),
-                    'updated_at':          utcnow(),
+            await db.get_collection("users").update_one(
+                {"discord_id": str(member.id)},
+                {"$set": {
+                    "has_accepted_rules": True,
+                    "onboarding_result":  "aceito",
+                    "rules_accepted_at":  utcnow(),
+                    "updated_at":         utcnow(),
                 }},
                 upsert=True
             )
             self._pending_onboarding.discard(member.id)
             await self._grant_access(member)
-            log_success(f"Usuário {member.name} aceitou as regras e passou no CAPTCHA")
+            log_success(f"[Onboarding] {member.name} completou o onboarding!")
+
+            if channel:
+                await channel.send(
+                    embed=discord.Embed(
+                        title="✅ Acesso Liberado!",
+                        description=(
+                            f"Bem-vindo ao servidor, {member.mention}! 🎉\n"
+                            "Você já tem acesso a todos os canais."
+                        ),
+                        color=discord.Color.green()
+                    ),
+                    delete_after=10
+                )
+                await asyncio.sleep(10)
+                try:
+                    await channel.delete(reason="Onboarding concluído")
+                except Exception:
+                    pass
             return True
 
         except Exception as e:
-            logger.error(f"Erro ao processar aceitação de {member.name}: {e}")
+            logger.error(f"[Onboarding] Erro ao aceitar regras de {member.name}: {e}")
             return False
 
     # ─────────────────────────────────────────────
-    # Conceder acesso (cargo Membro)
+    # _grant_access — atribuir cargo Membro
     # ─────────────────────────────────────────────
 
     async def _grant_access(self, member: discord.Member):
         try:
             guild = member.guild
-            role  = None
-
-            if self.verified_role_id:
-                role = guild.get_role(self.verified_role_id)
+            role  = guild.get_role(self.verified_role_id) if self.verified_role_id else None
 
             if not role:
                 role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
 
-            if role:
-                if role not in member.roles:
-                    await member.add_roles(role, reason="Aceitou as regras e passou no CAPTCHA")
-                    logger.info(f"Cargo '{role.name}' atribuído a {member.name}")
-                else:
-                    logger.info(f"Cargo '{role.name}' já estava em {member.name}")
-            else:
-                logger.warning(
-                    f"Cargo '{MEMBER_ROLE_NAME}' não encontrado. "
-                    f"Use !setupcanais para criá-lo."
+            if not role:
+                logger.error(
+                    f"[Onboarding] Cargo '{MEMBER_ROLE_NAME}' não encontrado! "
+                    f"Execute /setupcanais para recriá-lo."
                 )
+                return
 
+            if role not in member.roles:
+                await member.add_roles(role, reason="Onboarding concluído")
+                logger.info(f"[Onboarding] Cargo '{role.name}' ✅ → {member.name}")
+            # Atualiza ID em cache
+            self.verified_role_id = role.id
+
+        except discord.Forbidden:
+            logger.error(f"[Onboarding] Sem permissão para adicionar cargo a {member.name}")
         except Exception as e:
-            logger.error(f"Erro ao conceder acesso a {member.name}: {e}")
+            logger.error(f"[Onboarding] Erro em _grant_access: {e}")
 
     # ─────────────────────────────────────────────
-    # Helpers
+    # kick_member
     # ─────────────────────────────────────────────
 
-    async def _has_member_role(self, member: discord.Member) -> bool:
-        guild = member.guild
-        role  = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-        return role is not None and role in member.roles
+    async def kick_member(self, member: discord.Member, reason: str, result: str = "recusado"):
+        try:
+            if await self._has_member_role(member):
+                logger.warning(f"[Onboarding] kick ignorado — {member.name} já tem cargo Membro")
+                return
+            if getattr(getattr(member, "guild_permissions", None), "administrator", False):
+                logger.warning(f"[Onboarding] kick ignorado — {member.name} é admin")
+                return
 
-    def is_pending_onboarding(self, member_id: int) -> bool:
-        return member_id in self._pending_onboarding
+            await member.kick(reason=reason)
+            await db.get_collection("users").update_one(
+                {"discord_id": str(member.id)},
+                {"$set": {"is_active": False, "onboarding_result": result, "updated_at": utcnow()}}
+            )
+            self._pending_onboarding.discard(member.id)
 
-    def clear_pending(self, member_id: int):
-        self._pending_onboarding.discard(member_id)
+        except discord.Forbidden:
+            logger.error(f"[Onboarding] Sem permissão para kickar {member.name}")
+        except Exception as e:
+            logger.error(f"[Onboarding] Erro kick {member.name}: {e}")
 
     # ─────────────────────────────────────────────
     # Setup do cargo e canal (admin)
@@ -336,7 +378,7 @@ class OnboardingService:
             logger.info(f"Cargo '{MEMBER_ROLE_NAME}' criado")
 
         self.verified_role_id = member_role.id
-        result['role'] = member_role
+        result["role"] = member_role
 
         existing_channel = discord.utils.get(guild.text_channels, name=RULES_CHANNEL_NAME)
         if existing_channel:
@@ -360,7 +402,7 @@ class OnboardingService:
             rules_channel = await guild.create_text_channel(
                 name=RULES_CHANNEL_NAME,
                 overwrites=overwrites,
-                topic="Leia as regras e aguarde a DM para entrar no servidor.",
+                topic="Leia as regras para entrar no servidor.",
                 reason="Canal de regras — onboarding"
             )
             logger.info(f"Canal '{RULES_CHANNEL_NAME}' criado")
@@ -372,59 +414,20 @@ class OnboardingService:
 
         rules_embed = ServerRules.get_rules_embed()
         info_embed  = discord.Embed(
-            title="📩 Como funciona o acesso",
+            title="📋 Como funciona o acesso",
             description=(
-                "**1.** Ao entrar no servidor, você receberá uma **DM** com os botões de aceitar/recusar.\n"
-                "**2.** Você tem **5 minutos** para responder.\n"
-                "**3.** Se aceitar → você receberá um **CAPTCHA** para verificação.\n"
-                "**4.** Se passar no CAPTCHA → recebe o cargo **Membro** e acessa todos os canais.\n"
-                "**5.** Se recusar ou não responder → será removido automaticamente.\n\n"
-                "⚠️ **Certifique-se de ter as DMs abertas para membros deste servidor!**"
+                "**1.** Ao entrar, você recebe um **canal privado** de verificação.\n"
+                "**2.** Leia as regras e clique em **Aceitar**.\n"
+                "**3.** Responda um **CAPTCHA rápido** (clique no botão correto).\n"
+                "**4.** Pronto! Você recebe o cargo **Membro** e acessa todos os canais.\n"
+                "**5.** Se não responder em **10 minutos**, será removido automaticamente."
             ),
             color=discord.Color.gold()
         )
         await rules_channel.send(embeds=[rules_embed, info_embed])
 
-        result['channel'] = rules_channel
+        result["channel"] = rules_channel
         return result
-
-    # ─────────────────────────────────────────────
-    # Kick
-    # ─────────────────────────────────────────────
-
-    async def kick_member(
-        self,
-        member: discord.Member,
-        reason: str,
-        result: str = 'recusado'
-    ):
-        try:
-            if await self._has_member_role(member):
-                logger.warning(f"kick_member ignorado — {member.name} já tem cargo Membro")
-                return
-
-            if getattr(getattr(member, 'guild_permissions', None), 'administrator', False):
-                logger.warning(f"kick_member ignorado — {member.name} é administrador")
-                return
-
-            await member.kick(reason=reason)
-
-            collection = db.get_collection('users')
-            await collection.update_one(
-                {'discord_id': str(member.id)},
-                {'$set': {
-                    'is_active':         False,
-                    'onboarding_result': result,
-                    'updated_at':        utcnow()
-                }}
-            )
-            self._pending_onboarding.discard(member.id)
-            logger.info(f"Membro {member.name} removido ({result}): {reason}")
-
-        except discord.Forbidden:
-            logger.error(f"Sem permissão para kickar {member.name}")
-        except Exception as e:
-            logger.error(f"Erro ao remover {member.name}: {e}")
 
     # ─────────────────────────────────────────────
     # Stats
@@ -432,9 +435,23 @@ class OnboardingService:
 
     async def get_user_stats(self, discord_id: str) -> Optional[User]:
         try:
-            collection = db.get_collection('users')
-            user_doc   = await collection.find_one({'discord_id': discord_id})
+            collection = db.get_collection("users")
+            user_doc   = await collection.find_one({"discord_id": discord_id})
             return User(user_doc) if user_doc else None
         except Exception as e:
             logger.error(f"Erro ao buscar usuário {discord_id}: {e}")
             return None
+
+    # ─────────────────────────────────────────────
+    # Helpers
+    # ─────────────────────────────────────────────
+
+    async def _has_member_role(self, member: discord.Member) -> bool:
+        role = discord.utils.get(member.guild.roles, name=MEMBER_ROLE_NAME)
+        return role is not None and role in member.roles
+
+    def is_pending_onboarding(self, member_id: int) -> bool:
+        return member_id in self._pending_onboarding
+
+    def clear_pending(self, member_id: int):
+        self._pending_onboarding.discard(member_id)

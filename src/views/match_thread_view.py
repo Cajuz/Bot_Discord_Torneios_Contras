@@ -11,9 +11,9 @@ from services.match_service import match_service
 from utils.logger import logger
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 async def _get_match_by_thread(thread_id: int) -> Optional[dict]:
     col = db.get_collection("matches")
@@ -53,14 +53,14 @@ def _base_name(thread_name: str) -> str:
 
 
 def _calc_values(bet_value: float) -> dict:
-    taxa             = bet_value * 0.25
+    taxa              = bet_value * 0.25
     total_por_jogador = bet_value + taxa
-    premio           = bet_value * 2
+    premio            = bet_value * 2
     return {
-        "bet":              bet_value,
-        "taxa":             taxa,
+        "bet":               bet_value,
+        "taxa":              taxa,
         "total_por_jogador": total_por_jogador,
-        "premio":           premio,
+        "premio":            premio,
     }
 
 
@@ -76,7 +76,6 @@ async def _post_log(
 
 
 def _try_return_to_pool(channel):
-    """Dispara return_to_pool_after_match de forma segura, sem bloquear."""
     try:
         from services.thread_reuse_service import thread_reuse_service
         if thread_reuse_service and isinstance(channel, discord.Thread):
@@ -92,9 +91,9 @@ def _try_return_to_pool(channel):
         logger.warning(f"[ThreadPool] Erro ao devolver thread ao pool: {e}")
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # Embeds públicos
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 def embed_match_created(match: dict) -> discord.Embed:
     vals      = _calc_values(match["bet_value"])
@@ -134,7 +133,7 @@ def embed_match_created(match: dict) -> discord.Embed:
         ),
         inline=False
     )
-    embed.set_footer(text="Mediador: use !menu_partida para ver o painel de controle.")
+    embed.set_footer(text="Aguardando mediador usar /sala para iniciar a partida.")
     return embed
 
 
@@ -146,15 +145,15 @@ def embed_prize_instructions(match: dict) -> discord.Embed:
     winners  = "\n".join(f"• <@{uid}>" for uid in ids) or "—"
 
     embed = discord.Embed(
-        title="🏆 Partida Finalizada — Instruções do Prêmio",
+        title="🏆 Time Vencedor Declarado!",
         description=f"**Vencedor:** {label}\n{winners}",
         color=discord.Color.green()
     )
     embed.add_field(
-        name="💰 Pagamento do Prêmio",
+        name="💰 Prêmio",
         value=(
             f"O **mediador** deve pagar **R$ {vals['premio']:.2f}** via PIX ao(s) vencedor(es).\n\n"
-            f"Após enviar, use `!prize` no tópico."
+            f"Após receber, clique no botão abaixo para confirmar e **fechar a partida**."
         ),
         inline=False
     )
@@ -169,9 +168,9 @@ def embed_prize_instructions(match: dict) -> discord.Embed:
     return embed
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # PrizeConfirmView
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 class PrizeConfirmView(discord.ui.View):
     def __init__(self, match_id: str, winner_players: List, winner_team: str):
@@ -233,13 +232,12 @@ class PrizeConfirmView(discord.ui.View):
             )
             await interaction.channel.send(embed=embed)
 
-        # ✅ SEMPRE devolve ao pool — independente do caminho
         _try_return_to_pool(interaction.channel)
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # Comandos de texto — mediador e ADM
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 async def cmd_menu_partida(ctx):
     """!menu_partida — envia painel informativo via DM ao mediador."""
@@ -268,9 +266,8 @@ async def cmd_menu_partida(ctx):
         description=(
             f"**Status atual:** `{status}`\n\n"
             "**Comandos disponíveis na thread:**\n"
-            "`!confirmar_pagamento` — confirma recebimento dos pagamentos\n"
-            "`!winner_team blue` ou `!winner_team red` — declara o vencedor\n"
-            "`!prize` — confirma entrega do prêmio\n"
+            "`/sala` — informa ID e senha da sala (inicia a partida)\n"
+            "`!wt blue` ou `!wt red` — declara o vencedor\n"
             "`!cancelar_match` — cancela a partida"
         ),
         color=discord.Color.blurple()
@@ -299,99 +296,8 @@ async def cmd_menu_partida(ctx):
     await ctx.message.delete()
 
 
-async def cmd_confirmar_pagamento(ctx):
-    """!confirmar_pagamento — mediador confirma recebimento dos pagamentos."""
-    if not isinstance(ctx.channel, discord.Thread):
-        await ctx.message.delete()
-        return
-
-    match = await _get_match_by_thread(ctx.channel.id)
-    if not match:
-        await ctx.message.delete()
-        return
-
-    if not _is_mediator(ctx, match):
-        await ctx.message.delete()
-        return
-
-    if match.get("pagamento_confirmado"):
-        try:
-            await ctx.author.send("✅ Pagamento já confirmado anteriormente.")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    result = await match_service.confirm_payment(str(match["_id"]))
-    if not result:
-        try:
-            await ctx.author.send(
-                f"❌ Transição inválida. Status atual: `{match.get('status')}`")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    await _update_thread_name(
-        ctx.channel, _base_name(ctx.channel.name), "Pagamento Confirmado")
-    await ctx.message.delete()
-    await _post_log(
-        ctx.channel,
-        "✅ Pagamento Confirmado",
-        f"<@{match['mediator_id']}> confirmou o recebimento dos pagamentos.\n"
-        "A partida pode ser iniciada!",
-        discord.Color.green()
-    )
-
-
-async def cmd_iniciar_partida(ctx):
-    """!iniciar_partida — mediador inicia a partida."""
-    if not isinstance(ctx.channel, discord.Thread):
-        await ctx.message.delete()
-        return
-
-    match = await _get_match_by_thread(ctx.channel.id)
-    if not match:
-        await ctx.message.delete()
-        return
-
-    if not _is_mediator(ctx, match):
-        await ctx.message.delete()
-        return
-
-    if not match.get("pagamento_confirmado"):
-        try:
-            await ctx.author.send(
-                "❌ Confirme o pagamento primeiro com `!confirmar_pagamento`.")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    result = await match_service.start_match(str(match["_id"]))
-    if not result:
-        try:
-            await ctx.author.send(
-                f"❌ Transição inválida. Status atual: `{match.get('status')}`")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    await _update_thread_name(
-        ctx.channel, _base_name(ctx.channel.name), "Em Andamento ▶️")
-    await ctx.message.delete()
-    await _post_log(
-        ctx.channel,
-        "▶️ Partida Iniciada!",
-        "A partida começou! Boa sorte a todos! 🎮\n\n"
-        "Ao finalizar use `!winner_team blue` ou `!winner_team red`.",
-        discord.Color.blue()
-    )
-
-
 async def cmd_winner_team(ctx, team: str):
-    """!winner_team blue|red — mediador declara o vencedor."""
+    """!wt blue|red — mediador declara o vencedor e dispara botão de confirmação."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -400,7 +306,7 @@ async def cmd_winner_team(ctx, team: str):
     if team not in ("blue", "red"):
         try:
             await ctx.author.send(
-                "❌ Use: `!winner_team blue` ou `!winner_team red`")
+                "❌ Use: `!wt blue` ou `!wt red`")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
@@ -412,6 +318,16 @@ async def cmd_winner_team(ctx, team: str):
         return
 
     if not _is_mediator(ctx, match):
+        await ctx.message.delete()
+        return
+
+    if match.get("status") != Match.STATUS_PARTIDA_INICIADA:
+        try:
+            await ctx.author.send(
+                f"❌ A partida ainda não foi iniciada via `/sala`. "
+                f"Status atual: `{match.get('status')}`")
+        except discord.Forbidden:
+            pass
         await ctx.message.delete()
         return
 
@@ -427,7 +343,7 @@ async def cmd_winner_team(ctx, team: str):
     if not result:
         try:
             await ctx.author.send(
-                f"❌ Transição inválida. Status atual: `{match.get('status')}`")
+                f"❌ Erro ao declarar vencedor. Status atual: `{match.get('status')}`")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
@@ -438,90 +354,24 @@ async def cmd_winner_team(ctx, team: str):
     mentions = " ".join(f"<@{uid}>" for uid in win_ids)
 
     await _update_thread_name(
-        ctx.channel, _base_name(ctx.channel.name), f"Vencedor: {label}")
+        ctx.channel, _base_name(ctx.channel.name), f"Aguardando Prêmio 🏆")
     await ctx.message.delete()
 
-    embed_log = discord.Embed(
-        title="🏆 Time Vencedor Declarado!",
-        description=f"**{label}** venceu a partida!\n\n{mentions}",
-        color=discord.Color.gold()
-    )
-    embed_log.add_field(
-        name="Vencedor(es)",
-        value="\n".join(f"• <@{uid}>" for uid in win_ids) or "—",
-        inline=False
-    )
-    await ctx.channel.send(embed=embed_log)
-    await ctx.channel.send(embed=embed_prize_instructions({**match, "vencedor": team}))
-
-
-async def cmd_prize(ctx):
-    """!prize — mediador confirma que entregou o prêmio."""
-    if not isinstance(ctx.channel, discord.Thread):
-        await ctx.message.delete()
-        return
-
-    match = await _get_match_by_thread(ctx.channel.id)
-    if not match:
-        await ctx.message.delete()
-        return
-
-    if not _is_mediator(ctx, match):
-        await ctx.message.delete()
-        return
-
-    if match.get("status") != Match.STATUS_AGUARDANDO_PREMIO:
-        try:
-            await ctx.author.send(
-                f"❌ Use `!winner_team` primeiro. Status: `{match.get('status')}`")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    if match.get("premio_entregue_mediador"):
-        try:
-            await ctx.author.send("✅ Prêmio já marcado como entregue.")
-        except discord.Forbidden:
-            pass
-        await ctx.message.delete()
-        return
-
-    result = await match_service.confirm_prize_delivery(str(match["_id"]))
-    if not result:
-        await ctx.message.delete()
-        return
-
-    vencedor = match.get("vencedor", "blue")
-    win_ids  = match.get("time_blue" if vencedor == "blue" else "time_red", [])
-    label    = "🔵 Time Blue" if vencedor == "blue" else "🔴 Time Red"
-    vals     = _calc_values(match["bet_value"])
-    mentions = " ".join(f"<@{uid}>" for uid in win_ids)
-
-    await ctx.message.delete()
-
-    embed_pub = discord.Embed(
-        title="🎁 Prêmio Enviado!",
-        description=(
-            f"O mediador <@{match['mediator_id']}> confirmou o envio!\n\n"
-            f"**{label}** — R$ {vals['premio']:.2f} via PIX\n\n"
-            f"{mentions}\n\n"
-            "**Confirme o recebimento** clicando no botão abaixo."
-        ),
-        color=discord.Color.green()
-    )
-    embed_pub.add_field(
-        name="⚠️ ATENÇÃO",
-        value="🚫 **PROIBIDO:** Inter, Neon, PagBank\n✅ Apenas PIX",
-        inline=False
+    # Embed de vencedor + instruções do prêmio
+    await ctx.channel.send(
+        embed=embed_prize_instructions({**match, "vencedor": team})
     )
 
+    # Botão para o vencedor confirmar recebimento e fechar a partida
     prize_view = PrizeConfirmView(
         match_id=str(match["_id"]),
         winner_players=win_ids,
-        winner_team=vencedor
+        winner_team=team
     )
-    await ctx.channel.send(content=mentions, embed=embed_pub, view=prize_view)
+    await ctx.channel.send(
+        content=f"🏆 {mentions} — confirme o recebimento do prêmio!",
+        view=prize_view
+    )
 
 
 async def cmd_cancelar_match(ctx, reason: str = None):
@@ -569,13 +419,12 @@ async def cmd_cancelar_match(ctx, reason: str = None):
         discord.Color.red()
     )
 
-    # ✅ Devolve thread ao pool após cancelamento
     _try_return_to_pool(ctx.channel)
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # View persistente para registro no on_ready
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 class MatchThreadView(discord.ui.View):
     """Stub persistente — registrada no on_ready para sobreviver a reinicializações."""

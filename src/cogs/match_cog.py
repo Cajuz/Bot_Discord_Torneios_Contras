@@ -1,6 +1,5 @@
 """
 MatchCog — Comandos de partidas.
-Registra também os comandos de texto da match_thread_view.
 """
 import discord
 from discord.ext import commands
@@ -24,45 +23,56 @@ class MatchCog(commands.Cog, name="Partidas"):
 
     # ── !cancelar ──────────────────────────────────────────────
     @commands.command(name="cancelar")
+    @commands.cooldown(rate=1, per=15, type=commands.BucketType.user)
     async def cancelar(self, ctx: commands.Context):
         from services.match_queue_service import match_queue_service
         success, msg = await match_queue_service.cancel_match_for_user(str(ctx.author.id))
         embed = discord.Embed(description=msg, color=THEME_COLOR if success else 0xE74C3C)
         await ctx.reply(embed=embed)
 
-    # ── Comandos mediador dentro de thread ──────────────────────
+    @cancelar.error
+    async def cancelar_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            embed = discord.Embed(
+                description=f"⏳ Aguarde `{error.retry_after:.0f}s` para usar `!cancelar` novamente.",
+                color=0xE74C3C,
+            )
+            await ctx.reply(embed=embed, delete_after=8)
+        else:
+            raise error
+
+    # ── Comandos mediador dentro de thread ────────────────────────
     @commands.command(name="menu_partida")
     async def menu_partida(self, ctx: commands.Context):
         from views.match_thread_view import cmd_menu_partida
         await cmd_menu_partida(ctx)
 
-    @commands.command(name="confirmar_pagamento")
-    async def confirmar_pagamento(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_confirmar_pagamento
-        await cmd_confirmar_pagamento(ctx)
-
-    @commands.command(name="iniciar_partida")
-    async def iniciar_partida(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_iniciar_partida
-        await cmd_iniciar_partida(ctx)
-
-    @commands.command(name="winner_team")
-    async def winner_team(self, ctx: commands.Context, team: str = ""):
+    # !wt blue | !wt red — declara vencedor (alias de winner_team)
+    @commands.command(name="wt")
+    async def wt(self, ctx: commands.Context, team: str = ""):
         from views.match_thread_view import cmd_winner_team
         await cmd_winner_team(ctx, team)
 
-    @commands.command(name="prize")
-    async def prize(self, ctx: commands.Context):
-        from views.match_thread_view import cmd_prize
-        await cmd_prize(ctx)
-
     @commands.command(name="cancelar_match")
+    @commands.cooldown(rate=1, per=30, type=commands.BucketType.user)
     async def cancelar_match(self, ctx: commands.Context, *, reason: str = None):
         from views.match_thread_view import cmd_cancelar_match
         await cmd_cancelar_match(ctx, reason)
 
-    # ── /perfil ─────────────────────────────────────────────────
+    @cancelar_match.error
+    async def cancelar_match_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            embed = discord.Embed(
+                description=f"⏳ Aguarde `{error.retry_after:.0f}s` para usar `!cancelar_match` novamente.",
+                color=0xE74C3C,
+            )
+            await ctx.reply(embed=embed, delete_after=8)
+        else:
+            raise error
+
+    # ── /perfil ───────────────────────────────────────────────
     @app_commands.command(name="perfil", description="Suas estatísticas de partidas")
+    @app_commands.checks.cooldown(rate=1, per=10.0, key=lambda i: i.user.id)
     async def perfil(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         from config.database import db
@@ -85,9 +95,20 @@ class MatchCog(commands.Cog, name="Partidas"):
             )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    # ── /solicitar_analise ─────────────────────────────────────
+    @perfil.error
+    async def perfil_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(
+                f"⏳ Aguarde `{error.retry_after:.0f}s` para usar `/perfil` novamente.",
+                ephemeral=True,
+            )
+        else:
+            raise error
+
+    # ── /solicitar_analise ───────────────────────────────────────
     @app_commands.command(name="solicitar_analise", description="Solicita análise de suspeita de hack")
     @app_commands.describe(match_id="ID da partida suspeita", motivo="Comportamento suspeito", evidencia="Link de vídeo/imagem (opcional)")
+    @app_commands.checks.cooldown(rate=1, per=60.0, key=lambda i: i.user.id)
     async def solicitar_analise(
         self, interaction: discord.Interaction,
         match_id: str, motivo: str, evidencia: str = ""
@@ -120,6 +141,16 @@ class MatchCog(commands.Cog, name="Partidas"):
         except Exception as e:
             logger.error(f"[solicitar_analise] {e}")
             await interaction.followup.send("Erro ao criar solicitação.", ephemeral=True)
+
+    @solicitar_analise.error
+    async def solicitar_analise_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(
+                f"⏳ Aguarde `{error.retry_after:.0f}s` para solicitar outra análise.",
+                ephemeral=True,
+            )
+        else:
+            raise error
 
 
 async def setup(bot: commands.Bot):
