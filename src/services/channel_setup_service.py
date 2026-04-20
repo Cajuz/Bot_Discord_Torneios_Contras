@@ -222,24 +222,23 @@ class ChannelSetupService:
 
     async def setup_pix_logs(self, guild: discord.Guild):
         from views.pix_log import build_pix_log_embed
-        await self._post_panel(guild, LOGS_PIX_LOG_CHANNEL, build_pix_log_embed(), None, clear=False)
+        await self._post_panel(guild, LOGS_PIX_LOG_CHANNEL, build_pix_log_embed(), None, clear=False, once=True)
 
     async def setup_troca_cargo_logs(self, guild: discord.Guild):
         from views.log_troca_cargo import build_troca_cargo_log_embed
-        await self._post_panel(guild, LOGS_TROCA_CARGO_CHANNEL, build_troca_cargo_log_embed(), None, clear=False)
+        await self._post_panel(guild, LOGS_TROCA_CARGO_CHANNEL, build_troca_cargo_log_embed(), None, clear=False, once=True)
 
     async def setup_call_logs(self, guild: discord.Guild):
         from views.log_call import build_call_log_embed
-        await self._post_panel(guild, LOGS_CALL_CHANNEL, build_call_log_embed(), None, clear=False)
+        await self._post_panel(guild, LOGS_CALL_CHANNEL, build_call_log_embed(), None, clear=False, once=True)
 
     async def setup_command_logs(self, guild: discord.Guild):
         from views.log_comand import build_command_log_embed
-        await self._post_panel(guild, LOGS_COMMAND_CHANNEL, build_command_log_embed(), None, clear=False)
+        await self._post_panel(guild, LOGS_COMMAND_CHANNEL, build_command_log_embed(), None, clear=False, once=True)
 
     async def setup_delete_logs(self, guild: discord.Guild):
         from views.log_delete import build_message_delete_embed
-        await self._post_panel(guild, LOGS_MESSAGE_DELETE_CHANNEL, build_message_delete_embed(), None, clear=False)
-
+        await self._post_panel(guild, LOGS_MESSAGE_DELETE_CHANNEL, build_message_delete_embed(), None, clear=False, once=True)
     async def setup_influencers(self, guild: discord.Guild):
         from views.extra_panels import (
             build_influencer_member_embed, InfluencerMemberView,
@@ -349,8 +348,9 @@ class ChannelSetupService:
             color=0xFFD54F,
         )
         embed.set_footer(text="Respeite as regras para manter a comunidade saudável!")
-        await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(),    RulesView(self, self.member))
+        await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(), None)
 
+        
     async def setup_avisos(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📢 Avisos",
@@ -527,6 +527,7 @@ class ChannelSetupService:
         embed: discord.Embed,
         view: discord.ui.View | None,
         clear: bool = True,
+        once: bool = False,
     ):
         ch = discord.utils.get(guild.text_channels, name=channel_name)
         if not ch:
@@ -534,6 +535,11 @@ class ChannelSetupService:
             return
         if clear:
             await self._clear_bot_messages(ch)
+        if once:
+            async for msg in ch.history(limit=20):
+                if msg.author == guild.me and msg.embeds and msg.embeds[0].title == embed.title:
+                    logger.info(f"[ChannelSetup] Painel já existe (modo once): #{channel_name}")
+                    return
         try:
             await ch.send(embed=embed, view=view)
             logger.info(f"[ChannelSetup] Painel postado: #{channel_name}")
