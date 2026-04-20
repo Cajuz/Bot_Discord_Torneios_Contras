@@ -17,13 +17,13 @@ class RulesView(View):
         onboarding_service=None,
         member: discord.Member = None,
         channel: discord.TextChannel = None,
-        timeout: float = 300,
+        timeout: float = None,          # ← CORRIGIDO: era 300, agora None (persistente por padrão)
         is_test: bool = False,
     ):
         super().__init__(timeout=timeout)
         self.onboarding_service = onboarding_service
         self.member             = member
-        self.channel            = channel   # ← canal de verificação para o CAPTCHA
+        self.channel            = channel
         self.message: Optional[discord.Message] = None
         self.is_test            = is_test
         self._processed         = False
@@ -70,7 +70,6 @@ class RulesView(View):
         )
         await interaction.followup.send(embed=captcha_notice)
 
-        # Resolve o canal: usa self.channel (preferencial) ou o canal da interação
         target_channel = self.channel or interaction.channel
 
         asyncio.create_task(
@@ -166,7 +165,7 @@ class ConfirmationView(View):
         onboarding_service=None,
         member: discord.Member = None,
         parent_view: RulesView = None,
-        timeout: float = 60,
+        timeout: float = None,          # ← CORRIGIDO: era 60, agora None (persistente por padrão)
         is_test: bool = False,
     ):
         super().__init__(timeout=timeout)
