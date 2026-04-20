@@ -38,7 +38,8 @@ COGS = [
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
     "cogs.renewal_dashboard_cog",
-    "cogs.alerts_cog",  # fix: estava faltando na lista original
+    "cogs.alerts_cog",
+    "cogs.moderation_cog",
 ]
 
 bot          = create_discord_bot()
@@ -515,7 +516,7 @@ async def on_app_command_error(interaction, error):
 async def set_status():
     statuses = [
         discord.Activity(type=discord.ActivityType.watching,  name="as filas de partidas"),
-        discord.Activity(type=discord.ActivityType.playing,   name="X1 Frifas"),
+        discord.Activity(type=discord.ActivityType.playing,   name="SOLAR E-SPORTS"),
         discord.Activity(type=discord.ActivityType.listening, name="os mediadores"),
         discord.Activity(type=discord.ActivityType.watching,  name=f"{len(bot.guilds)} servidor(es)"),
     ]
@@ -532,7 +533,7 @@ async def before_set_status():
 # ─────────────────────────────────────────────────────────────
 
 async def main():
-    logger.info("Iniciando X1 Frifas Bot...")
+    logger.info("Iniciando Solar Bot...")
     await db.connect()
     log_success("MongoDB conectado!")
     set_bot(bot)

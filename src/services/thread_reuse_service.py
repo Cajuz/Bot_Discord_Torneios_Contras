@@ -75,17 +75,84 @@ class ThreadReuseService:
     # ── Devolução ao pool ────────────────────────────────────────
 
     async def return_to_pool_after_match(self, thread: discord.Thread):
+        """
+        Sequência garantida:
+          1. Arquiva o log HTML/ZIP em #logs-partidas (ANTES de apagar mensagens)
+          2. Aguarda POOL_RETURN_DELAY segundos
+          3. Limpa e devolve a thread ao pool
+        """
         try:
+            # 1. Gera o log da thread ANTES de qualquer limpeza
+            await self._archive_thread_log(thread)
+
+            # 2. Aguarda o delay configurado
             await asyncio.sleep(POOL_RETURN_DELAY)
+
+            # 3. Limpa mensagens, remove membros, arquiva e salva no pool
             await self._clean_and_archive(thread, reason="match_finalizado")
+
         except Exception as e:
-            logger.error(f"[ThreadPool] return_to_pool_after_match erro {thread.id}: {e}", exc_info=True)
+            logger.error(
+                f"[ThreadPool] return_to_pool_after_match erro {thread.id}: {e}",
+                exc_info=True,
+            )
 
     async def return_to_pool_empty(self, thread: discord.Thread):
         try:
             await self._clean_and_archive(thread, reason="queue_expirada")
         except Exception as e:
             logger.error(f"[ThreadPool] return_to_pool_empty erro {thread.id}: {e}", exc_info=True)
+
+    # ── Log da thread (integração com thread_log_service) ────────
+
+    async def _archive_thread_log(self, thread: discord.Thread):
+        """Busca o match vinculado à thread e chama thread_log_service.archive_thread()."""
+        try:
+            from services.thread_log_service import get_thread_log_service
+            log_svc = get_thread_log_service()
+            if not log_svc:
+                logger.warning(f"[ThreadPool] thread_log_service não inicializado — log ignorado para thread {thread.id}")
+                return
+
+            match_doc = await self._get_match_for_thread(thread.id)
+            if not match_doc:
+                logger.warning(f"[ThreadPool] Nenhum match encontrado para thread {thread.id} — log ignorado")
+                return
+
+            logger.info(f"[ThreadPool] Gerando log para match {match_doc.get('_id')} (thread {thread.id})")
+            await log_svc.archive_thread(thread, match_doc)
+
+        except Exception as e:
+            logger.error(f"[ThreadPool] _archive_thread_log erro thread {thread.id}: {e}", exc_info=True)
+
+    async def _get_match_for_thread(self, thread_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Tenta encontrar o match via active_threads (match_id) e depois na collection matches.
+        Fallback: busca direta em matches por thread_id.
+        """
+        try:
+            # Caminho 1: via active_threads (tem match_id salvo)
+            col_active = db.get_collection("active_threads")
+            active_doc = await col_active.find_one({"thread_id": thread_id})
+            if active_doc and active_doc.get("match_id"):
+                from bson import ObjectId
+                col_matches = db.get_collection("matches")
+                match_doc = await col_matches.find_one(
+                    {"_id": ObjectId(active_doc["match_id"])}
+                )
+                if match_doc:
+                    return match_doc
+
+            # Caminho 2: fallback direto por thread_id
+            col_matches = db.get_collection("matches")
+            match_doc = await col_matches.find_one({"thread_id": thread_id})
+            if not match_doc:
+                match_doc = await col_matches.find_one({"thread_id": str(thread_id)})
+            return match_doc
+
+        except Exception as e:
+            logger.error(f"[ThreadPool] _get_match_for_thread erro thread {thread_id}: {e}")
+            return None
 
     # ── Atualização de match ativo ───────────────────────────────
 
@@ -181,10 +248,10 @@ class ThreadReuseService:
             pool_by_channel[cid] = pool_by_channel.get(cid, 0) + 1
 
         return {
-            "pool_total":     pool_total,
-            "active_matches": active_matches,
-            "live_discord":   live_discord,
-            "margem":         margem,
+            "pool_total":      pool_total,
+            "active_matches":  active_matches,
+            "live_discord":    live_discord,
+            "margem":          margem,
             "pool_by_channel": pool_by_channel,
         }
 
@@ -284,7 +351,10 @@ class ThreadReuseService:
                 logger.warning(f"[ThreadPool] Canal pai não encontrado para thread {thread.id}")
 
         except Exception as e:
-            logger.error(f"[ThreadPool] _clean_and_archive erro thread {thread.id}: {e}", exc_info=True)
+            logger.error(
+                f"[ThreadPool] _clean_and_archive erro thread {thread.id}: {e}",
+                exc_info=True,
+            )
 
     async def _count_live_threads(self, guild: discord.Guild) -> int:
         try:
@@ -292,7 +362,7 @@ class ThreadReuseService:
             return len(result)
         except Exception as e:
             logger.warning(f"[ThreadPool] active_threads falhou: {e}, usando estimativa conservadora")
-            return SAFE_ACTIVE_LIMIT  # fallback conservador
+            return SAFE_ACTIVE_LIMIT
 
 
 # ── Singleton ────────────────────────────────────────────────────
