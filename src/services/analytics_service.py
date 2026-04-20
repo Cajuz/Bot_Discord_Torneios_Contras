@@ -284,11 +284,10 @@ class MediatorsDashboardView(discord.ui.View):
 
 
 class PlayersDashboardView(discord.ui.View):
-    def __init__(self, service: "AnalyticsService", period_key: str = "monthly"):
+    def __init__(self, service: "AnalyticsService", period_key: str = "weekly"):
         super().__init__(timeout=None)
         self.service = service
         self.period_key = period_key
-        self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
         self.btn_monthly._period_key = "monthly"
         self._sync_styles()
@@ -309,18 +308,14 @@ class PlayersDashboardView(discord.ui.View):
         self.period_key = period_key
         self._sync_styles()
         await interaction.response.defer()
-        embed, file = await self.service._render_players_dashboard(period_key)
-        await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
+        embed = await self.service._render_players_dashboard(period_key)
+        await interaction.edit_original_response(embed=embed, attachments=[], view=self)
 
-    @discord.ui.button(label="Hoje",      style=discord.ButtonStyle.secondary, custom_id="players_daily")
-    async def btn_daily(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._update_period(interaction, "daily")
-
-    @discord.ui.button(label="Semanal",   style=discord.ButtonStyle.secondary, custom_id="players_weekly")
+    @discord.ui.button(label="7 dias",    style=discord.ButtonStyle.primary,   custom_id="players_weekly")
     async def btn_weekly(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._update_period(interaction, "weekly")
 
-    @discord.ui.button(label="Mensal",    style=discord.ButtonStyle.primary,   custom_id="players_monthly")
+    @discord.ui.button(label="30 dias",   style=discord.ButtonStyle.secondary, custom_id="players_monthly")
     async def btn_monthly(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._update_period(interaction, "monthly")
 
@@ -788,7 +783,7 @@ class AnalyticsService:
 
     # ── Dashboard: Jogadores ──────────────────────────────────────────────────
 
-    async def _render_players_dashboard(self, period_key: str = "monthly") -> tuple[discord.Embed, discord.File]:
+    async def _render_players_dashboard(self, period_key: str = "weekly") -> discord.Embed:
         cfg   = MATCH_PERIODS[period_key]
         col   = db.get_collection("matches")
         now   = utcnow()
@@ -807,32 +802,8 @@ class AnalyticsService:
             {"$limit": AnalyticsConfig.TOP_PLAYERS},
         ], AnalyticsConfig.TOP_PLAYERS)
 
-        labels = [f"{i + 1}." for i in range(len(top))]
         totals = [row["total"] for row in top]
         wrs    = [(row["wins"] / row["total"] * 100) if row["total"] else 0 for row in top]
-
-        fig, ax1 = plt.subplots(figsize=(13, 6), facecolor=BG_COLOR)
-        _style_axis(ax1)
-        if top:
-            x = np.arange(len(labels))
-            ax1.bar(x, totals, color=GOLD, alpha=0.88)
-            ax1.set_xticks(x)
-            ax1.set_xticklabels(labels, color=MUTED, fontsize=10)
-            ax1.set_ylabel("Partidas", color=MUTED, fontsize=9)
-            ax1.set_xlabel("Posicao no ranking", color=MUTED, fontsize=9)
-            ax1.set_title("Top jogadores por partidas", color=TEXT_COLOR, fontsize=11, fontweight="bold")
-            ax2 = ax1.twinx()
-            ax2.plot(x, wrs, color=TEAL, marker="o", linewidth=2)
-            ax2.tick_params(colors=MUTED, labelsize=8)
-            for spine in ax2.spines.values():
-                spine.set_color(GRID_COLOR)
-            ax2.set_ylim(0, max(100, max(wrs) + 10 if wrs else 100))
-            ax2.set_ylabel("Win rate (%)", color=MUTED, fontsize=8)
-        else:
-            ax1.text(0.5, 0.5, "Nenhuma partida disputada", color=MUTED,
-                     ha="center", va="center", transform=ax1.transAxes)
-
-        _add_fig_header(fig, f"Top Jogadores - {cfg['embed_label']}")
 
         total_partidas = sum(totals)
         top_wr         = max(wrs) if wrs else 0
@@ -841,11 +812,10 @@ class AnalyticsService:
         for i, row in enumerate(top):
             icon = medals[i] if i < 3 else f"`{i + 1}.`"
             lines.append(
-                f"{icon} <@{row['_id']}> - `{row['total']}` partidas | WR:`{_pct(row['wins'], row['total'])}` | {_brl(row.get('vol', 0))}"
+                f"{icon} <@{row['_id']}> — `{row['total']}` partidas | WR: `{_pct(row['wins'], row['total'])}` | {_brl(row.get('vol', 0))}"
             )
 
-        file  = discord.File(_save_figure(fig), filename="players_dashboard.png")
-        embed = discord.Embed(title=f"Top Jogadores - {cfg['embed_label']}", color=THEME)
+        embed = discord.Embed(title=f"Top Jogadores — {cfg['embed_label']}", color=THEME)
         embed.description = "\n".join(lines) if lines else "Nenhuma partida disputada ainda."
         embed.add_field(name="Jogadores ativos", value=f"`{len(top)}`",       inline=True)
         embed.add_field(name="Partidas",         value=f"`{total_partidas}`", inline=True)
@@ -853,15 +823,33 @@ class AnalyticsService:
         embed.add_field(name="Maior volume",
                         value=f"**{_brl(max((row.get('vol', 0) for row in top), default=0))}**",
                         inline=True)
-        embed.set_image(url="attachment://players_dashboard.png")
-        embed.set_footer(text=f"Atualizado {now.strftime('%d/%m/%Y %H:%M')} UTC | matplotlib [players_dashboard]")
-        return embed, file
+        embed.set_footer(text=f"Atualizado {now.strftime('%d/%m/%Y %H:%M')} UTC | [players_dashboard]")
+        return embed
 
     async def _players(self, guild: discord.Guild):
-        period_key  = "monthly"
-        embed, file = await self._render_players_dashboard(period_key)
+        period_key  = "weekly"
+        embed       = await self._render_players_dashboard(period_key)
         view        = PlayersDashboardView(self, period_key=period_key)
-        await self._post_dashboard(guild, "ranking", "players_dashboard", embed, file, view)
+        ch = discord.utils.get(guild.text_channels, name="ranking")
+        if not ch:
+            return
+        try:
+            target = None
+            async for message in ch.history(limit=50):
+                if message.author != guild.me or not message.embeds:
+                    continue
+                footer = message.embeds[0].footer.text if message.embeds[0].footer else ""
+                if "[players_dashboard]" in footer:
+                    target = message
+                    break
+            if target:
+                await target.edit(embed=embed, attachments=[], view=view)
+            else:
+                await ch.send(embed=embed, view=view)
+        except discord.Forbidden:
+            logger.warning("[Analytics] Sem permissao em #ranking")
+        except Exception as e:
+            logger.warning(f"[Analytics] #ranking: {e}")
 
     # ── Dashboard: Suporte ────────────────────────────────────────────────────
 
@@ -1160,19 +1148,22 @@ class AnalyticsService:
         top_val       = val_agg[0]["_id"] if val_agg else 0
         top_val_count = val_agg[0]["c"]   if val_agg else 0
 
-        # Mediador mais frequente → busca username pelo discord_id
+        # Mediador mais frequente: busca no periodo, fallback para todos os tempos
         med_agg = await _safe_aggregate(col, [
             {"$match": {**query, "mediator_id": {"$ne": None}}},
             {"$group": {"_id": "$mediator_id", "c": {"$sum": 1}}},
             {"$sort": {"c": -1}},
             {"$limit": 1},
         ], 1)
+        if not med_agg:
+            med_agg = await _safe_aggregate(col, [
+                {"$match": {"mediator_id": {"$ne": None}}},
+                {"$group": {"_id": "$mediator_id", "c": {"$sum": 1}}},
+                {"$sort": {"c": -1}},
+                {"$limit": 1},
+            ], 1)
         top_med_id    = med_agg[0]["_id"] if med_agg else None
         top_med_count = med_agg[0]["c"]   if med_agg else 0
-        top_med_name  = None
-        if top_med_id:
-            med_doc      = await mediators.find_one({"discord_id": str(top_med_id)})
-            top_med_name = med_doc.get("username") if med_doc else None
 
         # Série temporal
         group_expr = {"$dateToString": {"format": cfg["bucket_format"], "date": "$created_at"}}
@@ -1294,20 +1285,20 @@ class AnalyticsService:
         ax.set_xticks(x)
         ax.set_xticklabels(x_labels, rotation=40, ha="right", color=MUTED, fontsize=9)
         ax.set_ylabel("Membros", color=MUTED, fontsize=9)
-        ax.set_title("Histórico de Entradas e Saidas dos Membros", color=TEXT_COLOR, fontsize=11, fontweight="bold")
+        ax.set_title("Member Joins and Leaves History", color=TEXT_COLOR, fontsize=11, fontweight="bold")
         ax.legend(facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, fontsize=8, framealpha=0.7)
 
         sign = lambda n: f"+{n}" if n >= 0 else str(n)
         _add_fig_header(
             fig,
-            "Entradas e Saidas de Membros do servidor",
+            "Join and Leave Members Server Stats",
             f"Hoje: {sign(net_hoje)} (+{joins_hoje}, -{leaves_hoje})  |  "
             f"7 dias: {sign(net_7d)} (+{joins_7d}, -{leaves_7d})  |  "
             f"30 dias: {sign(net_30d)} (+{joins_30d}, -{leaves_30d})",
         )
 
         file  = discord.File(_save_figure(fig), filename="membros_mov_dashboard.png")
-        embed = discord.Embed(title="Entradas e Saidas de Membros do servidor", color=THEME)
+        embed = discord.Embed(title="Join and Leave Members Server Stats", color=THEME)
         embed.add_field(name="Hoje",          value=f"`{sign(net_hoje)}` (+{joins_hoje}, -{leaves_hoje})", inline=True)
         embed.add_field(name="Ultimos 7d",    value=f"`{sign(net_7d)}` (+{joins_7d}, -{leaves_7d})",       inline=True)
         embed.add_field(name="Ultimos 30d",   value=f"`{sign(net_30d)}` (+{joins_30d}, -{leaves_30d})",    inline=True)

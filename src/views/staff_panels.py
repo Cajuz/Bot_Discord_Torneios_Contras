@@ -52,8 +52,6 @@ def build_mediador_pessoal_embed(info: dict | None = None) -> discord.Embed:
         ),
         color=THEME
     )
-    embed.add_field(name="Na fila agora", value=f"`{in_queue}`",     inline=True)
-    embed.add_field(name="Ativos hoje",   value=f"`{total_active}`", inline=True)
     embed.set_footer(text="Apenas Controllers podem mediar partidas")
     return embed
 
