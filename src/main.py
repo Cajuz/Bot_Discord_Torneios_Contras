@@ -34,6 +34,7 @@ COGS = [
     "cogs.analyst_cog",
     "cogs.invite_cog",
     "cogs.influencer_cog",
+    "cogs.influencer_live_cog",
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
     "cogs.renewal_dashboard_cog",
@@ -192,9 +193,27 @@ async def _ensure_db_indexes():
             "created_at", expireAfterSeconds=_30_dias, background=True
         )
 
+        # ── influencer_live_rooms ────────────────────────────────
+        await db.get_collection("influencer_live_rooms").create_index(
+            [("influencer_id", 1), ("guild_id", 1)],
+            unique=True, background=True,
+        )
+
+        # ── influencer_live_queues ───────────────────────────────
+        await db.get_collection("influencer_live_queues").create_index(
+            [("influencer_id", 1), ("guild_id", 1)],
+            unique=True, background=True,
+        )
+
+        # ── mediator_live_queues ─────────────────────────────────
+        await db.get_collection("mediator_live_queues").create_index(
+            "guild_id", unique=True, background=True,
+        )
+
         logger.info(
-            "[DB] Índices garantidos: active_threads, thread_pool, matches(sparse) "
-            "| TTL 30 dias ativo em todas as collections"
+            "[DB] Índices garantidos: active_threads, thread_pool, matches(sparse), "
+            "influencer_live_rooms, influencer_live_queues, mediator_live_queues "
+            "| TTL 30 dias ativo"
         )
     except Exception as e:
         logger.warning(f"[DB] _ensure_db_indexes: {e}")
@@ -247,6 +266,10 @@ async def on_ready():
         from cogs.renewal_dashboard_cog    import ContractPanelView
         from services.faturamento_mediador import RelatorioGeralView
         from services.match_queue_service  import ConfirmationView
+        # Influencer Live
+        from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
+        from views.influencer_live_match_view import ContraConfirmView, ContraResultView
+        from views.influencer_live_admin_view import InfluencerLiveAdminView
 
         persistent_views = [
             TicketPanelView(),
@@ -277,6 +300,12 @@ async def on_ready():
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
+            # Influencer Live
+            ContraRoomView(influencer_id=0, guild_id=0),
+            ControllerLivePanelView(),
+            ContraConfirmView(match_id="__persistent__", challenger_id=0, influencer_id=0),
+            ContraResultView(match_id="__persistent__", influencer_id=0, challenger_id=0, guild_id=0),
+            InfluencerLiveAdminView(),
         ]
 
         for view in persistent_views:

@@ -10,7 +10,7 @@ from utils.logger import logger, log_success
 from services.channel_service import (
     BLACKLIST_CHANNEL, CHANNEL_STRUCTURE, ALL_ROLES,
     GUIA_JOGADOR_CHANNEL, GUIA_MEDIADOR_CHANNEL, GUIA_SUPORTE_CHANNEL, REGRAS_CHANNEL, SUPORTE_ADMIN_CHANNEL,
-    GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL,AVISOS_CHANNEL,
+    GUIA_SUPORTE_CHANNEL, GUIA_ANALISTA_CHANNEL, AVISOS_CHANNEL,
     # Suporte
     SOLICITAR_SUPORTE_CHANNEL, SUPPORT_CHANNEL_NAME,
     CHAMADOS_CHANNEL_NAME, CHAT_SUPORTE_STAFF_CHANNEL,
@@ -32,26 +32,32 @@ from services.channel_service import (
     CHAT_ANALISTAS_CHANNEL,
     # Comunidade
     INFLUENCERS_CHANNEL, INFLUENCERS_ADMIN_CHANNEL,
-    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL,LOGS_COMMAND_CHANNEL,
-    FATURAMENTO_CHANNEL,LOGS_PIX_LOG_CHANNEL,LOGS_CALL_CHANNEL,LOGS_MESSAGE_DELETE_CHANNEL,
-    LOGS_TROCA_CARGO_CHANNEL,MEDIADORES_AFKS_CHANNEL,HEALTH_CHECK_CHANNEL,    # ← adicionado
+    SUPORTE_ADMIN_CHANNEL, STATUS_BOT_CHANNEL, LOGS_COMMAND_CHANNEL,
+    FATURAMENTO_CHANNEL, LOGS_PIX_LOG_CHANNEL, LOGS_CALL_CHANNEL,
+    LOGS_MESSAGE_DELETE_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
+    MEDIADORES_AFKS_CHANNEL, HEALTH_CHECK_CHANNEL,
+    # Influencer Live
+    CATEGORY_CONTRAS, MEDIADOR_LIVE_PANEL_CHANNEL,
+    CONTROLLER_LIVE_ROLE_NAME,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
 from config.database import db
 
+
 THEME = 0xFFD54F
 ALERTAS_ADM_CHANNEL = "alertas-adm"
 
 
+
 class ChannelSetupService:
 
-    def __init__(self,db ):
+    def __init__(self, db):
         self.bot: discord.Client | None = None
         self.member: discord.Member | None = None
         self.db = db
 
-    
+
     # ══════════════════════════════════════════════════════════
     # ENTRY POINT
     # ══════════════════════════════════════════════════════════
@@ -64,7 +70,6 @@ class ChannelSetupService:
         await self.setup_match_cards(guild)
         await self.setup_dashboards(guild)
         await self.setup_faturamento(guild)
-        # Dashboard de contratos — delega ao RenewalDashboardCog se disponível
         await self._setup_painel_contratos(guild)
         log_success(f"[ChannelSetup] Setup completo em {guild.name}")
         return f"Servidor **{guild.name}** configurado com sucesso."
@@ -83,11 +88,13 @@ class ChannelSetupService:
         except Exception as e:
             logger.error(f"[ChannelSetup] _setup_painel_contratos erro: {e}")
 
+
     # ══════════════════════════════════════════════════════════
     # ROLES
     # ══════════════════════════════════════════════════════════
 
     async def setup_roles(self, guild: discord.Guild) -> dict[str, discord.Role]:
+        """Cria todos os cargos listados em ALL_ROLES (incluindo Controller Live)."""
         existing = {r.name: r for r in guild.roles}
         roles = {}
         for name in ALL_ROLES:
@@ -98,6 +105,7 @@ class ChannelSetupService:
                 roles[name] = role
                 logger.info(f"[ChannelSetup] Cargo criado: {name}")
         return roles
+
 
     # ══════════════════════════════════════════════════════════
     # CATEGORIAS E CANAIS
@@ -125,6 +133,7 @@ class ChannelSetupService:
                     await guild.create_text_channel(ch_name, category=category, overwrites=ow)
                     logger.info(f"[ChannelSetup] Canal criado: #{ch_name}")
 
+
     # ══════════════════════════════════════════════════════════
     # GUIAS
     # ══════════════════════════════════════════════════════════
@@ -144,12 +153,12 @@ class ChannelSetupService:
             await ch.send(embed=embed)
             logger.info(f"[ChannelSetup] Guia postado: #{ch_name}")
 
+
     # ══════════════════════════════════════════════════════════
     # PAINÉIS — ORQUESTRADOR
     # ══════════════════════════════════════════════════════════
 
     async def setup_all_panels(self, guild: discord.Guild):
-        # Painéis base
         await self.setup_suporte(guild)
         await self.setup_mediador(guild)
         await self.setup_analise(guild)
@@ -164,7 +173,6 @@ class ChannelSetupService:
         await self.setup_delete_logs(guild)
         await self.setup_troca_cargo_logs(guild)
         await self.setup_health_check(guild)
-        # Painéis novos
         await self.setup_avisos(guild)
         await self.regras(guild)
         await self.setup_aprovar_mediadores(guild)
@@ -173,7 +181,9 @@ class ChannelSetupService:
         await self.setup_cadastro_mediador(guild)
         await self.setup_blacklist(guild)
         await self.setup_alertas_adm(guild)
+        await self.setup_mediador_live_panel(guild)
         logger.info("[ChannelSetup] Todos os painéis postados")
+
 
     # ══════════════════════════════════════════════════════════
     # PAINÉIS BASE
@@ -239,6 +249,7 @@ class ChannelSetupService:
     async def setup_delete_logs(self, guild: discord.Guild):
         from views.log_delete import build_message_delete_embed
         await self._post_panel(guild, LOGS_MESSAGE_DELETE_CHANNEL, build_message_delete_embed(), None, clear=False, once=True)
+
     async def setup_influencers(self, guild: discord.Guild):
         from views.extra_panels import (
             build_influencer_member_embed, InfluencerMemberView,
@@ -335,22 +346,14 @@ class ChannelSetupService:
         except Exception as e:
             logger.warning(f"[ChannelSetup] Dashboards: {e}")
 
+
     # ══════════════════════════════════════════════════════════
     # PAINÉIS NOVOS
     # ══════════════════════════════════════════════════════════
 
     async def regras(self, guild: discord.Guild):
-        embed = discord.Embed(
-            title="📜 Regras do Servidor",
-            description=(
-                "Bem-vindo ao servidor SOLAR E-SPORTS! Para garantir uma experiência positiva para todos, pedimos que leia e siga as regras abaixo:\n\n"
-            ),
-            color=0xFFD54F,
-        )
-        embed.set_footer(text="Respeite as regras para manter a comunidade saudável!")
         await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(), None)
 
-        
     async def setup_avisos(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📢 Avisos",
@@ -404,7 +407,6 @@ class ChannelSetupService:
         await self._post_panel(guild, MEDIADORES_AFKS_CHANNEL, embed, None)
 
     async def setup_cadastro_mediador(self, guild: discord.Guild):
-        """Posta o card fixo de cadastro de mediador com formulário modal."""
         from views.mediator_register_view import MediatorRegisterView
         embed = discord.Embed(
             title="📋  Cadastro de Mediador — SOLAR E-SPORTS",
@@ -422,7 +424,6 @@ class ChannelSetupService:
         await self._post_panel(guild, CADASTRO_MEDIADOR_CHANNEL, embed, MediatorRegisterView())
 
     async def setup_blacklist(self, guild: discord.Guild):
-        """Posta o painel de verificação de blacklist com botões interativos."""
         from views.blacklist_view import BlacklistCheckView
         embed = discord.Embed(
             title="🚫  Verificação de Blacklist — SOLAR E-SPORTS",
@@ -437,7 +438,6 @@ class ChannelSetupService:
         await self._post_panel(guild, BLACKLIST_CHANNEL, embed, BlacklistCheckView())
 
     async def setup_alertas_adm(self, guild: discord.Guild):
-        """Posta o painel informativo no canal #alertas-adm."""
         from utils.datetime_utils import utcnow
         embed = discord.Embed(
             title="🔔 Central de Alertas — ADM",
@@ -454,6 +454,32 @@ class ChannelSetupService:
         )
         embed.set_footer(text=f"Configurado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · SOLAR E-SPORTS")
         await self._post_panel(guild, ALERTAS_ADM_CHANNEL, embed, None)
+
+    async def setup_mediador_live_panel(self, guild: discord.Guild):
+        """
+        Posta o painel fixo do Controller Live no canal #painel-mediador-live.
+        Apenas mediadores com cargo Controller Live enxergam este canal.
+        """
+        from views.influencer_live_view import ControllerLivePanelView
+
+        embed = discord.Embed(
+            title="⚔️ Painel Controller Live",
+            description=(
+                "Bem-vindo ao painel exclusivo dos **Controllers Live**.\n\n"
+                "**Como funciona:**\n"
+                "1. Entre na fila abaixo para ficar disponível nas salas dos influencers\n"
+                "2. Quando um desafio começar você será notificado automaticamente\n"
+                "3. Acesse o canal `contra-<influencer>` e gerencie a partida\n\n"
+                "Use os botões abaixo para entrar ou sair da fila."
+            ),
+            color=0xE91E63,
+        )
+        embed.set_footer(
+            text="SOLAR E-SPORTS · Controller Live · Apenas leitura — painel gerado automaticamente"
+        )
+        await self._post_panel(guild, MEDIADOR_LIVE_PANEL_CHANNEL, embed, ControllerLivePanelView())
+        logger.info("[ChannelSetup] Painel Controller Live postado")
+
 
     # ══════════════════════════════════════════════════════════
     # MATCH CARDS
@@ -482,8 +508,6 @@ class ChannelSetupService:
                             channel_name=ch_config["name"],
                             bet_value=value,
                             guild=guild,
-
-                        
                         )
                         file = get_banner_file(ch_config["name"])
 
@@ -496,6 +520,7 @@ class ChannelSetupService:
                         logger.error(f"[ChannelSetup] Erro em #{ch_config['name']}: {e}")
                 logger.info(
                     f"[ChannelSetup] {len(ChannelsConfig.BET_VALUES)} cards postados: #{ch_config['name']}")
+
 
     # ══════════════════════════════════════════════════════════
     # HELPERS
@@ -556,6 +581,7 @@ class ChannelSetupService:
         ch = await guild.create_text_channel(name, category=category)
         logger.info(f"[ChannelSetup] Canal criado on-demand: #{name}")
         return ch
+
 
     # ══════════════════════════════════════════════════════════
     # EMBEDS DE GUIA
