@@ -4,7 +4,6 @@ import asyncio
 import os
 import random
 from datetime import datetime, timezone
-from discord import Interaction
 
 import discord
 from discord.ext import commands, tasks
@@ -21,7 +20,7 @@ from config.database         import db
 from config.discord_bot      import create_discord_bot, start_discord_bot, set_bot
 from utils.logger             import logger, log_success
 from utils.datetime_utils     import utcnow
-from utils.retry              import with_retry, on_rate_limit
+from utils.retry              import on_rate_limit
 from services.channel_service import RATE_LIMIT_CHANNEL_NAME, ADM_ROLE_NAME, PROTECTED_ROLES
 
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -44,6 +43,17 @@ COGS = [
 
 bot          = create_discord_bot()
 _initialized = False
+
+# ─────────────────────────────────────────────────────────────
+# Logs — instanciados dentro do on_ready para evitar chamadas
+# de API antes do bot estar conectado ao Discord
+# ─────────────────────────────────────────────────────────────
+
+_troca_cargo_log = None
+_call_log        = None
+_command_log     = None
+_delete_log      = None
+
 
 # ─────────────────────────────────────────────────────────────
 # Servidor HTTP — health check + webhook EFI
@@ -215,11 +225,18 @@ async def _ensure_db_indexes():
 
 @bot.event
 async def on_ready():
-    global _initialized
+    global _initialized, _troca_cargo_log, _call_log, _command_log, _delete_log
+
     if _initialized:
         logger.warning("[on_ready] Reconexão — pulando reinicialização.")
         return
     _initialized = True
+
+    # ── Instancia logs aqui — bot já está conectado ──────────
+    _troca_cargo_log = Troca_cargo(bot)
+    _call_log        = CallLog(bot)
+    _command_log     = CommandLog(bot)
+    _delete_log      = MessageDeleteLog(bot)
 
     guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
@@ -293,7 +310,7 @@ async def on_ready():
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
-            # Onboarding
+            # Onboarding — timeout=None já corrigido no rules_view.py
             RulesView(),
             RulesConfirmationView(),
             # Influencer Live
@@ -436,12 +453,6 @@ async def on_member_join(member: discord.Member):
         await svc.handle_new_member(member)
 
 
-_troca_cargo_log = Troca_cargo(bot)
-_call_log        = CallLog(bot)
-_command_log     = CommandLog(bot)
-_delete_log      = MessageDeleteLog(bot)
-
-
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     if before.roles == after.roles:
@@ -458,8 +469,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         return
 
     try:
-        guild    = after.guild
-        adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
+        guild = after.guild
 
         async for entry in guild.audit_logs(
             limit=5,
@@ -493,8 +503,11 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
         log_ch = discord.utils.get(guild.text_channels, name=LOGS_TROCA_CARGO_CHANNEL)
         if log_ch:
-            embed = discord.Embed(title="⚠️ Tentativa de Auto-Atribuição de Cargo",
-                                  color=0xE74C3C, timestamp=utcnow())
+            embed = discord.Embed(
+                title="⚠️ Tentativa de Auto-Atribuição de Cargo",
+                color=0xE74C3C,
+                timestamp=utcnow(),
+            )
             embed.add_field(name="Membro",   value=f"{after.mention} (`{after.id}`)", inline=True)
             embed.add_field(name="Cargo(s)", value=role_names,                        inline=True)
             embed.set_footer(text="Bot removeu automaticamente")
@@ -509,6 +522,8 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 @bot.event
 async def on_voice_state_update(member, before, after):
     logger.info(f"[VOICE] Evento detectado: {member}")
+    if _call_log is None:
+        return
     if not before.channel and after.channel:
         await _call_log.on_enter(member, after.channel)
     elif before.channel and not after.channel:
@@ -518,6 +533,8 @@ async def on_voice_state_update(member, before, after):
 @bot.event
 async def on_command(ctx):
     logger.info(f"[COMMAND] Detectado: {ctx.command}")
+    if _command_log is None:
+        return
     args = " ".join(ctx.message.content.split()[1:])
     await _command_log.send_command_log(ctx.author, str(ctx.command), args, ctx.channel)
 
@@ -525,7 +542,7 @@ async def on_command(ctx):
 @bot.event
 async def on_message_delete(message: discord.Message):
     logger.info(f"[DELETE] Detectado: {message.author}")
-    if message.author.bot:
+    if message.author.bot or _delete_log is None:
         return
     await _delete_log.send_delete_log(message)
 
