@@ -187,53 +187,6 @@ class AdminCog(commands.Cog, name="Admin"):
         await msg.edit(content="✅ Painéis de contratos atualizados.")
 
     # ─────────────────────────────────────────
-    # MODERAÇÃO
-    # ─────────────────────────────────────────
-
-    @commands.command(name="bloquear")
-    @commands.has_permissions(manage_messages=True)
-    async def bloquear(self, ctx: commands.Context, member: discord.Member, *, motivo: str = "Bloqueado manualmente"):
-        """Bloqueia um membro por spam/abuso (adiciona cargo de bloqueado)."""
-        from config.anti_spam_config import AntiSpamConfig
-        from config.database import db
-        blocked_role = discord.utils.get(ctx.guild.roles, name=AntiSpamConfig.SPAM_BLOCK_ROLE_NAME)
-        if not blocked_role:
-            blocked_role = await ctx.guild.create_role(name=AntiSpamConfig.SPAM_BLOCK_ROLE_NAME)
-        await member.add_roles(blocked_role, reason=motivo)
-        await db.get_collection("users").update_one(
-            {"discord_id": str(member.id)},
-            {"$set": {"spam_blocked": True, "spam_blocked_at": utcnow(), "spam_block_reason": motivo}},
-            upsert=True
-        )
-        await ctx.reply(f"✅ {member.mention} bloqueado. Motivo: *{motivo}*")
-
-    @commands.command(name="desbloquear")
-    @commands.has_permissions(manage_messages=True)
-    async def desbloquear(self, ctx: commands.Context, member: discord.Member):
-        """Remove o bloqueio de um membro."""
-        from config.anti_spam_config import AntiSpamConfig
-        from config.database import db
-        blocked_role = discord.utils.get(ctx.guild.roles, name=AntiSpamConfig.SPAM_BLOCK_ROLE_NAME)
-        if blocked_role and blocked_role in member.roles:
-            await member.remove_roles(blocked_role)
-        await db.get_collection("users").update_one(
-            {"discord_id": str(member.id)},
-            {"$set": {"spam_blocked": False, "spam_unblocked_at": utcnow(),
-                      "spam_unblocked_by": str(ctx.author.id)}}
-        )
-        await ctx.reply(f"✅ {member.mention} desbloqueado.")
-
-    @commands.command(name="limpar")
-    @commands.has_permissions(manage_messages=True)
-    async def limpar(self, ctx: commands.Context, quantidade: int = 10):
-        """Apaga N mensagens do canal atual (máx. 100)."""
-        if not 1 <= quantidade <= 100:
-            await ctx.reply("Informe um valor entre 1 e 100.")
-            return
-        deleted = await ctx.channel.purge(limit=quantidade + 1)
-        await ctx.send(f"🧹 {len(deleted) - 1} mensagens removidas.", delete_after=5)
-
-    # ─────────────────────────────────────────
     # OPERACIONAL
     # ─────────────────────────────────────────
 
@@ -271,11 +224,9 @@ class AdminCog(commands.Cog, name="Admin"):
             )
             embed.set_thumbnail(url=target.display_avatar.url)
 
-            # Tags de status
             if s.tags:
                 embed.add_field(name="Status", value="  ".join(s.tags), inline=False)
 
-            # Partidas
             embed.add_field(
                 name="🎮 Partidas",
                 value=(
@@ -286,7 +237,6 @@ class AdminCog(commands.Cog, name="Admin"):
                 inline=True,
             )
 
-            # Financeiro
             embed.add_field(
                 name="💰 Financeiro",
                 value=(
@@ -296,7 +246,6 @@ class AdminCog(commands.Cog, name="Admin"):
                 inline=True,
             )
 
-            # Blacklist
             if s.na_blacklist:
                 embed.add_field(
                     name="🚫 Blacklist",
@@ -310,7 +259,6 @@ class AdminCog(commands.Cog, name="Admin"):
             else:
                 embed.add_field(name="✅ Blacklist", value="Não está na blacklist.", inline=False)
 
-            # Mediador
             if s.e_mediador:
                 embed.add_field(
                     name="🎖️ Contrato",
@@ -322,7 +270,6 @@ class AdminCog(commands.Cog, name="Admin"):
                     inline=True,
                 )
 
-            # Suporte
             if s.tickets_abertos or s.tickets_fechados:
                 embed.add_field(
                     name="🎫 Tickets",
@@ -330,7 +277,6 @@ class AdminCog(commands.Cog, name="Admin"):
                     inline=True,
                 )
 
-            # Spam
             if s.spam_bloqueado:
                 embed.add_field(
                     name="🔇 Bloqueio Anti-Spam",
@@ -443,8 +389,11 @@ class AdminCog(commands.Cog, name="Admin"):
             inline=False,
         )
         embed.add_field(
-            name="🚫 Moderação",
-            value="`!bloquear @m motivo`  `!desbloquear @m`  `!limpar <n>`",
+            name="🚫 Moderação (slash)",
+            value=(
+                "`/aviso`  `/ban`  `/kick`  `/timeout`  `/untimeout`\n"
+                "`/unban`  `/warn`  `/silence`  `/bloquear`  `/desbloquear`  `/limpar`"
+            ),
             inline=False,
         )
         embed.add_field(
@@ -454,7 +403,7 @@ class AdminCog(commands.Cog, name="Admin"):
         )
         embed.add_field(
             name="👥 Mediadores → mediator_cog",
-            value="`!addmediador @m`  `!removemediador @m`  `!fila`  `/silence @m`",
+            value="`!addmediador @m`  `!removemediador @m`  `!fila`",
             inline=False,
         )
         embed.add_field(

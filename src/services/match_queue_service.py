@@ -7,7 +7,6 @@ from datetime import timedelta
 from typing import Optional, Dict
 from discord import Interaction
 import discord
-import discord
 from config.database import db
 from models.queue import MatchQueue
 from models.match import Match
@@ -16,6 +15,7 @@ from services.match_service import match_service
 from utils.datetime_utils import utcnow
 from utils.logger import logger
 
+
 THEME_COLOR  = 0xFFD54F
 THEME_COLOR2 = 0xFFA726
 
@@ -23,8 +23,10 @@ THEME_COLOR2 = 0xFFA726
 def _thread_name_confirmar(queue: MatchQueue) -> str:
     return f"confirmar-{queue.channel_name}_{queue.bet_value:.0f}_reais"[:100]
 
+
 def _thread_name_pagamento(queue: MatchQueue) -> str:
     return f"pagamento-{queue.channel_name}_{queue.bet_value:.0f}_reais"[:100]
+
 
 def _thread_name_pagar(queue: MatchQueue) -> str:
     return f"pagar-{queue.bet_value:.0f}_reais"[:100]
@@ -33,9 +35,10 @@ def _thread_name_pagar(queue: MatchQueue) -> str:
 class MatchQueueService:
 
     def __init__(self):
-        self.active_queues:         Dict[str, MatchQueue]      = {}
-        self._queue_locks:          Dict[str, asyncio.Lock]    = {}
-        self._match_creation_locks: Dict[str, asyncio.Lock]    = {}  # ← asyncio.Lock, não bool
+        self.active_queues:         Dict[str, MatchQueue]   = {}
+        self._queue_locks:          Dict[str, asyncio.Lock] = {}
+        self._match_creation_locks: Dict[str, asyncio.Lock] = {}
+        self._cancelled_queues:     set[str]                = set()
 
     def get_queue_key(self, channel_name: str, bet_value: float, gel_type: str) -> str:
         return f"{channel_name}_{bet_value}_{gel_type}"
@@ -50,12 +53,18 @@ class MatchQueueService:
             self._match_creation_locks[queue_id] = asyncio.Lock()
         return self._match_creation_locks[queue_id]
 
-    # ── Fila interna sem lock (chamada dentro de contextos já lockados) ──
+    def _cancel_countdown(self, queue_id: str):
+        self._cancelled_queues.add(str(queue_id))
+
+    def _is_countdown_cancelled(self, queue_id: str) -> bool:
+        return str(queue_id) in self._cancelled_queues
+
+    def _clear_cancelled(self, queue_id: str):
+        self._cancelled_queues.discard(str(queue_id))
 
     async def _get_or_create_queue_unsafe(
         self, channel_name: str, bet_value: float, gel_type: str, max_players: int
     ) -> MatchQueue:
-        """Versão sem lock — deve ser chamada apenas dentro de um contexto já lockado."""
         collection = db.get_collection("match_queues")
         queue_data = await collection.find_one({
             "channel_name": channel_name, "bet_value": bet_value,
@@ -87,7 +96,6 @@ class MatchQueueService:
     ) -> tuple[bool, MatchQueue, str]:
         queue_key = self.get_queue_key(channel_name, bet_value, gel_type)
         async with self._get_lock(queue_key):
-            # ← usa versão sem lock para evitar deadlock
             queue = await self._get_or_create_queue_unsafe(
                 channel_name, bet_value, gel_type, max_players)
             if player_id in queue.players:
@@ -103,7 +111,7 @@ class MatchQueueService:
     async def remove_player_from_queue(
         self, channel_name: str, bet_value: float, gel_type: str, player_id: int
     ) -> tuple[bool, Optional[MatchQueue]]:
-        queue_key  = self.get_queue_key(channel_name, bet_value, gel_type)
+        queue_key = self.get_queue_key(channel_name, bet_value, gel_type)
         async with self._get_lock(queue_key):
             collection = db.get_collection("match_queues")
             queue_data = await collection.find_one({
@@ -128,8 +136,6 @@ class MatchQueueService:
             ic  = len(q_i.players) if q_i else 0
             locked_gel = gel_type if locked else None
             embed = create_match_queue_embed(channel.name, bet_value, nc, ic, locked_gel)
-    
-            # ← view sem argumentos — contexto vem do embed
             view  = MatchQueueView(
                 channel_name=channel.name,
                 bet_value=bet_value,
@@ -171,12 +177,17 @@ class MatchQueueService:
                 await self._set_card_locked(channel, queue.bet_value, queue.gel_type, locked=False)
                 return
 
+            await self._purge_thread_messages(confirm_thread)
+
             queue.thread_id = confirm_thread.id
             queue.guild_id  = guild.id
             await self._save_queue(queue)
 
+            queue_id = str(queue._id)
+            self._clear_cancelled(queue_id)
+
             embed   = self._build_confirmation_embed(queue, time_blue, time_red, remaining=300)
-            view    = ConfirmationView(queue_id=str(queue._id), service=self, bot=bot,
+            view    = ConfirmationView(queue_id=queue_id, service=self, bot=bot,
                                        time_blue=time_blue, time_red=time_red)
             mentions = " ".join(f"<@{uid}>" for uid in players)
             message  = await confirm_thread.send(content=mentions, embed=embed, view=view)
@@ -192,6 +203,16 @@ class MatchQueueService:
             )
         except Exception as e:
             logger.error(f"[Queue] Erro ao iniciar confirmação: {e}", exc_info=True)
+
+    async def _purge_thread_messages(self, thread: discord.Thread):
+        try:
+            to_delete = [msg async for msg in thread.history(limit=200)]
+            if len(to_delete) >= 2:
+                await thread.delete_messages(to_delete)
+            elif len(to_delete) == 1:
+                await to_delete[0].delete()
+        except discord.HTTPException as e:
+            logger.warning(f"[Queue] Erro ao limpar mensagens da thread {thread.id}: {e}")
 
     def _build_confirmation_embed(self, queue, time_blue, time_red, remaining):
         blue_str = "\n".join(
@@ -211,7 +232,7 @@ class MatchQueueService:
                 f"**Valor:** R$ {queue.bet_value:.2f} | "
                 f"**GEL:** {queue.gel_type.capitalize()}\n\n"
                 f"Confirmações: **{confirmed}/{total}** — Tempo: {mins}:{secs:02d}\n"
-                f"**Queue-ID:** `{queue._id}`"  # ← necessário para o fallback do ConfirmationView
+                f"**Queue-ID:** `{queue._id}`"
             ),
             color=THEME_COLOR2
         )
@@ -229,7 +250,10 @@ class MatchQueueService:
         for elapsed in range(5, total + 1, 5):
             await asyncio.sleep(5)
 
-            # Verifica se criação já está em andamento
+            if self._is_countdown_cancelled(queue_id):
+                self._clear_cancelled(queue_id)
+                return
+
             match_lock = self._get_match_lock(queue_id)
             if match_lock.locked():
                 return
@@ -239,12 +263,11 @@ class MatchQueueService:
             if not queue_data:
                 return
             queue = MatchQueue.from_dict(queue_data)
-            if queue.status == MatchQueue.STATUS_MATCHED:
+            if queue.status in (MatchQueue.STATUS_MATCHED, MatchQueue.STATUS_EXPIRED):
                 return
 
             if queue.all_confirmed():
                 async with self._get_match_lock(queue_id):
-                    # Re-verifica dentro do lock
                     queue_data = await collection.find_one({"_id": queue._id})
                     if not queue_data or MatchQueue.from_dict(queue_data).status == MatchQueue.STATUS_MATCHED:
                         return
@@ -260,7 +283,9 @@ class MatchQueueService:
             except Exception:
                 pass
 
-        await self._expire_queue(queue, bot, channel, message, confirm_thread)
+        if not self._is_countdown_cancelled(queue_id):
+            await self._expire_queue(queue, bot, channel, message, confirm_thread)
+        self._clear_cancelled(queue_id)
 
     async def add_confirmation(
         self, queue, player_id, bot, channel, confirm_thread, message, time_blue, time_red
@@ -327,7 +352,7 @@ class MatchQueueService:
             except Exception:
                 pass
 
-            mediator_member  = guild.get_member(mediator_id)
+            mediator_member = guild.get_member(mediator_id)
             blue_str = "\n".join(f"✅ <@{uid}>" for uid in time_blue) or "—"
             red_str  = "\n".join(f"✅ <@{uid}>" for uid in time_red)  or "—"
 
@@ -337,13 +362,13 @@ class MatchQueueService:
                     f"**Modo:** `{queue.channel_name.upper()}` | "
                     f"**Valor:** R$ {queue.bet_value:.2f}\n"
                     f"**Mediador:** "
-                    f"{mediator_member.mention if mediator_member else f'<@{mediator_id}>'}"
+                    f"{mediator_member.mention if mediator_member else f'<@{mediator_id}>'}",
                 ),
                 color=discord.Color.green()
             )
-            confirmed_embed.add_field(name="Time Blue",     value=blue_str,          inline=True)
-            confirmed_embed.add_field(name="Time Red",      value=red_str,           inline=True)
-            confirmed_embed.add_field(name="ID da Partida", value=f"`{match_id}`",   inline=False)
+            confirmed_embed.add_field(name="Time Blue",     value=blue_str,        inline=True)
+            confirmed_embed.add_field(name="Time Red",      value=red_str,         inline=True)
+            confirmed_embed.add_field(name="ID da Partida", value=f"`{match_id}`", inline=False)
             confirmed_embed.set_footer(text="O mediador confirmará o pagamento para iniciar")
             try:
                 await conf_msg.edit(embed=confirmed_embed, view=None)
@@ -372,6 +397,8 @@ class MatchQueueService:
             await confirm_thread.send(f"❌ Erro ao criar partida: {e}")
 
     async def _expire_queue(self, queue, bot, channel, message, confirm_thread=None):
+        self._cancel_countdown(str(queue._id))
+
         queue.status = MatchQueue.STATUS_EXPIRED
         await self._save_queue(queue)
         not_confirmed = queue.pending_confirmations()
@@ -403,8 +430,7 @@ class MatchQueueService:
             await asyncio.sleep(10)
             try:
                 from services.thread_reuse_service import thread_reuse_service
-                asyncio.create_task(
-                    thread_reuse_service.return_to_pool_empty(confirm_thread))
+                asyncio.create_task(thread_reuse_service.return_to_pool_empty(confirm_thread))
             except Exception as e:
                 logger.warning(f"[Queue] Erro ao devolver thread ao pool: {e}")
 
@@ -454,10 +480,6 @@ class MatchQueueService:
         self._queue_locks.pop(queue_key, None)
 
 
-# ─────────────────────────────────────────────
-# ConfirmationView — persistent com custom_id fixo
-# ─────────────────────────────────────────────
-
 class ConfirmationView(discord.ui.View):
 
     def __init__(
@@ -478,9 +500,6 @@ class ConfirmationView(discord.ui.View):
         self.conf_msg  = conf_msg
 
     def _parse_queue_id(self, interaction: discord.Interaction) -> str:
-        """Extrai queue_id do embed quando instância é __persistent__."""
-        if self.queue_id != "__persistent__":
-            return self.queue_id
         try:
             embed = interaction.message.embeds[0]
             desc  = embed.description or ""
@@ -489,15 +508,36 @@ class ConfirmationView(discord.ui.View):
                     return line.split("`")[1].strip()
         except Exception:
             pass
-        return self.queue_id
+        if self.queue_id != "__persistent__":
+            return self.queue_id
+        return ""
+
+    def _parse_teams(self, interaction: discord.Interaction) -> tuple[list, list]:
+        if self.time_blue and self.time_red:
+            return self.time_blue, self.time_red
+        try:
+            embed = interaction.message.embeds[0]
+            blue_field = next((f for f in embed.fields if "Blue" in f.name), None)
+            red_field  = next((f for f in embed.fields if "Red"  in f.name), None)
+            import re
+            def extract_ids(field_value: str) -> list:
+                return [int(m) for m in re.findall(r"<@(\d+)>", field_value or "")]
+            time_blue = extract_ids(blue_field.value) if blue_field else []
+            time_red  = extract_ids(red_field.value)  if red_field  else []
+            return time_blue, time_red
+        except Exception:
+            return [], []
 
     @discord.ui.button(
         label="Confirmar", style=discord.ButtonStyle.green,
-        custom_id="confirm_match_btn", emoji="✔"   # ← custom_id fixo
+        custom_id="confirm_match_btn", emoji="✔"
     )
     async def btn_confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId
         queue_id = self._parse_queue_id(interaction)
+        if not queue_id:
+            await interaction.response.send_message("Esta fila não existe mais.", ephemeral=True)
+            return
 
         collection = db.get_collection("match_queues")
         try:
@@ -521,6 +561,9 @@ class ConfirmationView(discord.ui.View):
         if queue.status == MatchQueue.STATUS_MATCHED:
             await interaction.response.send_message("Partida já criada!", ephemeral=True)
             return
+        if queue.status == MatchQueue.STATUS_EXPIRED:
+            await interaction.response.send_message("Esta fila expirou.", ephemeral=True)
+            return
 
         parent_channel = (
             interaction.channel.parent
@@ -528,9 +571,7 @@ class ConfirmationView(discord.ui.View):
             else interaction.channel
         )
 
-        # Reconstrói time_blue e time_red do embed se não disponíveis
-        time_blue = self.time_blue or list(queue.players)[:1]
-        time_red  = self.time_red  or list(queue.players)[1:]
+        time_blue, time_red = self._parse_teams(interaction)
 
         await self.service.add_confirmation(
             queue=queue, player_id=interaction.user.id, bot=self.bot or interaction.client,
@@ -542,11 +583,14 @@ class ConfirmationView(discord.ui.View):
 
     @discord.ui.button(
         label="Recusar", style=discord.ButtonStyle.red,
-        custom_id="decline_match_btn", emoji="✖"   # ← custom_id fixo
+        custom_id="decline_match_btn", emoji="✖"
     )
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId
         queue_id = self._parse_queue_id(interaction)
+        if not queue_id:
+            await interaction.response.send_message("Esta fila não existe mais.", ephemeral=True)
+            return
 
         collection = db.get_collection("match_queues")
         try:
@@ -565,17 +609,24 @@ class ConfirmationView(discord.ui.View):
                 "Você não está nesta partida.", ephemeral=True)
             return
 
+        if queue.status in (MatchQueue.STATUS_MATCHED, MatchQueue.STATUS_EXPIRED):
+            await interaction.response.send_message(
+                "Esta fila já foi encerrada.", ephemeral=True)
+            return
+
         parent_channel = (
             interaction.channel.parent
             if hasattr(interaction.channel, "parent")
             else interaction.channel
         )
 
+        await interaction.response.send_message("Você recusou a partida.", ephemeral=True)
+        self.service._cancel_countdown(queue_id)
         await self.service.remove_player_from_queue(
             queue.channel_name, queue.bet_value, queue.gel_type, interaction.user.id)
-        await interaction.response.send_message("Você recusou a partida.", ephemeral=True)
         await self.service._expire_queue(
-            queue, self.bot or interaction.client, parent_channel, None, interaction.channel)
+            queue, self.bot or interaction.client, parent_channel,
+            self.conf_msg or interaction.message, interaction.channel)
 
 
 match_queue_service = MatchQueueService()
