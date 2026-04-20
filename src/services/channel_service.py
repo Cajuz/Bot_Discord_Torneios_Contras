@@ -3,16 +3,19 @@ from __future__ import annotations
 import discord
 from utils.logger import logger
 
+
 # ── Cargos ────────────────────────────────────────────────
-ADM_ROLE_NAME         = "ADM"
-CONTROLLER_ROLE_NAME  = "Controller"
-SUPPORT_ROLE_NAME     = "Suporte"
-ANALYST_ROLE_NAME     = "Analista"
-INFLUENCER_ROLE_NAME  = "Influencer"
-MEMBER_ROLE_NAME      = "Membro"
-SPAM_BLOCK_ROLE_NAME  = "Bloqueado"
-VER_TOPICOS_ROLE_NAME = "Ver Tópicos"
-MEDIADOR_ROLE_NAME    = "Mediador"
+ADM_ROLE_NAME              = "ADM"
+CONTROLLER_ROLE_NAME       = "Controller"
+SUPPORT_ROLE_NAME          = "Suporte"
+ANALYST_ROLE_NAME          = "Analista"
+INFLUENCER_ROLE_NAME       = "Influencer"
+MEMBER_ROLE_NAME           = "Membro"
+SPAM_BLOCK_ROLE_NAME       = "Bloqueado"
+VER_TOPICOS_ROLE_NAME      = "Ver Tópicos"
+MEDIADOR_ROLE_NAME         = "Mediador"
+CONTROLLER_LIVE_ROLE_NAME  = "Controller Live"   # ← novo cargo — modo contra
+
 
 PROTECTED_ROLES = {
     CONTROLLER_ROLE_NAME,
@@ -23,7 +26,9 @@ PROTECTED_ROLES = {
     VER_TOPICOS_ROLE_NAME,
     ADM_ROLE_NAME,
     MEDIADOR_ROLE_NAME,
+    CONTROLLER_LIVE_ROLE_NAME,   # ← protegido
 }
+
 
 ALL_ROLES = [
     MEMBER_ROLE_NAME,
@@ -34,7 +39,9 @@ ALL_ROLES = [
     INFLUENCER_ROLE_NAME,
     SPAM_BLOCK_ROLE_NAME,
     MEDIADOR_ROLE_NAME,
+    CONTROLLER_LIVE_ROLE_NAME,   # ← incluído no setup
 ]
+
 
 # ── Canais — INFORMAÇÕES ─────────────────────────────────────
 REGRAS_CHANNEL            = "🗒️-regras"
@@ -46,6 +53,7 @@ GUIA_SUPORTE_CHANNEL      = "🎫-guia-suporte"
 GUIA_ANALISTA_CHANNEL     = "🔍-guia-analista"
 BLACKLIST_CHANNEL         = "⊘-blacklist"
 
+
 # ── Canais — SUPORTE ────────────────────────────────────────────
 SOLICITAR_SUPORTE_CHANNEL  = "🎫-solicitar-suporte"
 SUPPORT_CHANNEL_NAME       = SOLICITAR_SUPORTE_CHANNEL
@@ -54,6 +62,7 @@ CHAMADOS_CHANNEL_NAME      = "chamados-suporte"
 SUPORTE_ADMIN_CHANNEL      = "suporte-controle"
 # PAINEL_SUPORTE_CHANNEL removido (canal deletado)
 
+
 # ── Canais — MEDIAÇÃO ───────────────────────────────────────────
 MEDIADOR_PANEL_CHANNEL     = "painel-mediador"
 MEDIADORES_ADMIN_CHANNEL   = "𔽝-mediadores-controle"
@@ -61,9 +70,9 @@ MEDIADOR_PIX_CHANNEL       = "❖-cadastra-pix"
 RENOVACAO_CHANNEL          = "⟳-renovacao-mediadores"
 SOLICITACOES_CHANNEL       = "✉-pedido-mediador"
 FATURAMENTO_CHANNEL        = "faturamento-mediadores"
-# APROVAR_MEDIADORES_CHANNEL removido (canal deletado)
 HISTORICO_CHANNEL          = "historico-partidas"
 CADASTRO_MEDIADOR_CHANNEL  = "📝-cadastro-mediador"
+
 
 # ── Canais — ANALISTAS ────────────────────────────────────────────
 SOLICITAR_ANALISE_CHANNEL  = "solicitar-analise"
@@ -75,12 +84,13 @@ ANALISTAS_ADMIN_CHANNEL    = "analistas-controle"
 EXPOSED_CHANNEL_NAME       = "exposed"
 HISTORICO_EXPOSED_CHANNEL  = "historico-exposed"
 
+
 # ── Canais — COMUNIDADE ───────────────────────────────────────────
-# CONVITES_CHANNEL removido (canal deletado)
 INFLUENCERS_CHANNEL        = "influencers"
 INFLUENCERS_ADMIN_CHANNEL  = "influencers-controle"
 CHAT_INFLUENCERS_CHANNEL   = "chat-influencers"
 RANKING_CHANNEL            = "ranking"
+
 
 # ── Canais — ANALYTICS ────────────────────────────────────────────
 DASHBOARD_CHANNEL_NAME     = "dashboard-partidas"
@@ -89,7 +99,7 @@ DASHBOARD_SUPORTE          = "dashboard-suporte"
 DASHBOARD_INFLUENCERS      = "dashboard-influencers"
 DASHBOARD_APOSTAS          = "dashboard-apostas"
 DASHBOARD_ENTRADAS         = "dashboard-entradas"
-# RESULTADOS_CHANNEL removido (canal deletado)
+
 
 # ── Canais — STAFF ────────────────────────────────────────────────
 RATE_LIMIT_CHANNEL_NAME     = "rate-limit-logs"
@@ -107,6 +117,12 @@ HEALTH_CHECK_CHANNEL        = "health-check"
 LOGS_TESTS_CHANNEL          = "logs-tests"
 LOGS_PAGAMENTOS_CHANNEL     = "logs-pagamentos"
 
+
+# ── Canais — CONTRAS (Influencer Live) ────────────────────────────
+CATEGORY_CONTRAS             = "⚔️| CONTRAS"
+MEDIADOR_LIVE_PANEL_CHANNEL  = "painel-mediador-live"
+
+
 # ── Aliases legados ────────────────────────────────────────────────
 CATEGORY_ANALYTICS_NAME      = "📊 | ANALYTICS"
 EXPOSED_CHANNEL              = EXPOSED_CHANNEL_NAME
@@ -122,7 +138,6 @@ LOGS_DELETES_CHANNEL         = LOGS_MESSAGE_DELETE_CHANNEL
 LOGS_COMANDOS_CHANNEL        = LOGS_COMMAND_CHANNEL
 ALERTAS_ADM_CHANNEL          = "alertas-adm"
 HISTORICO_CARGOS_CHANNEL     = LOGS_TROCA_CARGO_CHANNEL
-# Aliases de canais removidos — mantidos como constante para referências legadas
 CONVITES_CHANNEL             = "convites"              # canal deletado
 INVITE_CHANNEL_NAME          = CONVITES_CHANNEL        # alias legado
 INVITE_CHANNEL               = CONVITES_CHANNEL        # alias legado
@@ -130,6 +145,7 @@ STATUS_BOT_CHANNEL           = HEALTH_CHECK_CHANNEL    # alias legado → health
 PAINEL_SUPORTE_CHANNEL       = "painel-suporte"        # canal deletado
 APROVAR_MEDIADORES_CHANNEL   = "✔-aprovar-mediadores"  # canal deletado
 RESULTADOS_CHANNEL           = "resultados"            # canal deletado
+
 
 # ── Categorias ──────────────────────────────────────────────────────
 CATEGORY_INFORMACOES = "📋 | INFORMAÇÕES"
@@ -143,6 +159,7 @@ CATEGORY_ANALYTICS   = "📊 | ANALYTICS"
 CATEGORY_COMUNIDADE  = "🏆 | COMUNIDADE"
 CATEGORY_STAFF       = "🔐 | STAFF"
 CATEGORY_LOGS        = "📝 | LOGS"
+
 
 # ── Estrutura de canais por categoria ─────────────────────────────────
 CHANNEL_STRUCTURE: dict[str, list[str]] = {
@@ -158,7 +175,6 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         RENOVACAO_CHANNEL, FATURAMENTO_CHANNEL,
         HISTORICO_CHANNEL,
         CADASTRO_MEDIADOR_CHANNEL,
-        # ✔-aprovar-mediadores removido
     ],
     CATEGORY_MOBILE:   ["📱1x1-mob", "📱2x2-mob", "📱3x3-mob", "📱4x4-mob"],
     CATEGORY_EMULADOR: ["🖥️1x1-emu", "🖥️2x2-emu", "🖥️3x3-emu", "🖥️4x4-emu"],
@@ -168,7 +184,6 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         CHAMADOS_CHANNEL_NAME,
         CHAT_SUPORTE_STAFF_CHANNEL,
         SUPORTE_ADMIN_CHANNEL,
-        # painel-suporte removido
     ],
     CATEGORY_ANALISTAS: [
         SOLICITAR_ANALISE_CHANNEL,
@@ -180,18 +195,15 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         HISTORICO_EXPOSED_CHANNEL,
     ],
     CATEGORY_COMUNIDADE: [
-        # convites removido
         INFLUENCERS_CHANNEL,
         INFLUENCERS_ADMIN_CHANNEL,
         CHAT_INFLUENCERS_CHANNEL,
         RANKING_CHANNEL,
-        # resultados removido
     ],
     CATEGORY_ANALYTICS: [
         DASHBOARD_CHANNEL_NAME, DASHBOARD_MEDIADORES,
         DASHBOARD_SUPORTE, DASHBOARD_INFLUENCERS,
         DASHBOARD_APOSTAS, DASHBOARD_ENTRADAS,
-        # resultados e ranking removidos desta categoria
     ],
     CATEGORY_STAFF: [
         RATE_LIMIT_CHANNEL_NAME,
@@ -207,13 +219,20 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         LOGS_TESTS_CHANNEL,
         LOGS_PAGAMENTOS_CHANNEL,
     ],
+    # Canais contra-* são criados/destruídos dinamicamente pelo influencer_live_room_service.
+    # Apenas o painel fixo do Controller Live entra na estrutura estática.
+    CATEGORY_CONTRAS: [
+        MEDIADOR_LIVE_PANEL_CHANNEL,
+    ],
 }
+
 
 # ── Canais apenas-leitura para todos (Membro + demais) ────────────────────
 READ_ONLY_CHANNELS = {
     REGRAS_CHANNEL, BOAS_VINDAS_CHANNEL,
-    AVISOS_CHANNEL,   # todos leem apenas
+    AVISOS_CHANNEL,
 }
+
 
 # ── Canais de interação por botão ────────────────────────────────────────
 INTERACTION_ONLY_CHANNELS = {
@@ -222,12 +241,13 @@ INTERACTION_ONLY_CHANNELS = {
     "🔀4x4-misto", "🔀3x3-misto", "🔀2x2-misto",
     SOLICITAR_SUPORTE_CHANNEL,
     BLACKLIST_CHANNEL,
-    RANKING_CHANNEL,   # Membro interage com botões
+    RANKING_CHANNEL,
 }
+
 
 # ── Canais view-only (só bot/ADM postam, cargos listados apenas leem) ─────
 CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
-    # Guias — visíveis por cargo específico, sem envio
+    # Guias
     GUIA_JOGADOR_CHANNEL:       [MEMBER_ROLE_NAME, ADM_ROLE_NAME],
     GUIA_MEDIADOR_CHANNEL:      [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     GUIA_SUPORTE_CHANNEL:       [SUPPORT_ROLE_NAME, ADM_ROLE_NAME],
@@ -238,7 +258,7 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     PAINEL_ANALISTA_CHANNEL:    [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
     HISTORICO_EXPOSED_CHANNEL:  [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
 
-    # Mediação — apenas ADM
+    # Mediação
     HISTORICO_CHANNEL:          [ADM_ROLE_NAME],
     RENOVACAO_CHANNEL:          [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     SOLICITACOES_CHANNEL:       [MEMBER_ROLE_NAME, ADM_ROLE_NAME],
@@ -248,7 +268,7 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     MEDIADORES_AFKS_CHANNEL:    [ADM_ROLE_NAME],
     HEALTH_CHECK_CHANNEL:       [ADM_ROLE_NAME],
 
-    # Logs — TODOS apenas ADM
+    # Logs
     LOGS_CALL_CHANNEL:           [ADM_ROLE_NAME],
     LOGS_TROCA_CARGO_CHANNEL:    [ADM_ROLE_NAME],
     LOGS_MESSAGE_DELETE_CHANNEL: [ADM_ROLE_NAME],
@@ -260,29 +280,33 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     ALERTAS_ADM_CHANNEL:         [ADM_ROLE_NAME],
     LOGS_TESTS_CHANNEL:          [ADM_ROLE_NAME],
     LOGS_PAGAMENTOS_CHANNEL:     [ADM_ROLE_NAME],
+
+    # Contras — painel fixo do Controller Live (só lê, bot posta)
+    MEDIADOR_LIVE_PANEL_CHANNEL: [CONTROLLER_LIVE_ROLE_NAME, ADM_ROLE_NAME],
 }
+
 
 # ── Canais onde roles podem enviar mensagens ───────────────────────────────
 CHANNEL_PERMISSIONS: dict[str, list[str]] = {
     # Suporte
-    CHAMADOS_CHANNEL_NAME:      [SUPPORT_ROLE_NAME, ADM_ROLE_NAME],           # Suporte + ADM
+    CHAMADOS_CHANNEL_NAME:      [SUPPORT_ROLE_NAME, ADM_ROLE_NAME],
     SUPORTE_ADMIN_CHANNEL:      [ADM_ROLE_NAME],
     CHAT_SUPORTE_STAFF_CHANNEL: [SUPPORT_ROLE_NAME, CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
 
     # Mediação
-    MEDIADOR_PANEL_CHANNEL:     [ADM_ROLE_NAME],                              # só bot + ADM
+    MEDIADOR_PANEL_CHANNEL:     [ADM_ROLE_NAME],
     MEDIADORES_ADMIN_CHANNEL:   [ADM_ROLE_NAME],
-    MEDIADOR_PIX_CHANNEL:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],        # Controller + ADM
-    CADASTRO_MEDIADOR_CHANNEL:  [ADM_ROLE_NAME],                              # só ADM
+    MEDIADOR_PIX_CHANNEL:       [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
+    CADASTRO_MEDIADOR_CHANNEL:  [ADM_ROLE_NAME],
 
     # Analistas
-    SOLICITAR_ANALISE_CHANNEL:  [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],        # Controller + ADM
+    SOLICITAR_ANALISE_CHANNEL:  [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
     ANALISTAS_ADMIN_CHANNEL:    [ADM_ROLE_NAME],
-    EXPOSED_CHANNEL_NAME:       [ADM_ROLE_NAME],                              # só bot + ADM
+    EXPOSED_CHANNEL_NAME:       [ADM_ROLE_NAME],
     CHAT_ANALISTAS_CHANNEL:     [ANALYST_ROLE_NAME, ADM_ROLE_NAME],
 
     # Comunidade
-    INFLUENCERS_CHANNEL:        [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],        # Influencer + ADM
+    INFLUENCERS_CHANNEL:        [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
     INFLUENCERS_ADMIN_CHANNEL:  [ADM_ROLE_NAME],
     CHAT_INFLUENCERS_CHANNEL:   [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
 
@@ -303,7 +327,6 @@ class PermissionService:
         overwrites  = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
 
         if channel_name in INTERACTION_ONLY_CHANNELS:
-            # canais de jogo e ranking: Membro vê e interage via botão
             target = member_role or guild.default_role
             overwrites[target] = discord.PermissionOverwrite(
                 read_messages=True,
@@ -314,7 +337,6 @@ class PermissionService:
                 overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
 
         elif channel_name in READ_ONLY_CHANNELS:
-            # regras, boas-vindas, avisos: todos leem, ninguém envia
             target = member_role or guild.default_role
             overwrites[target] = discord.PermissionOverwrite(
                 read_messages=True, send_messages=False)
@@ -322,7 +344,6 @@ class PermissionService:
                 overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
 
         elif channel_name in CHANNEL_VIEW_ONLY:
-            # cargos listados veem mas não enviam
             viewers = CHANNEL_VIEW_ONLY[channel_name]
             for role_name in viewers:
                 role = roles.get(role_name) or discord.utils.get(guild.roles, name=role_name)
@@ -333,14 +354,12 @@ class PermissionService:
         else:
             perms = CHANNEL_PERMISSIONS.get(channel_name)
             if perms is None:
-                # fallback: Membro só lê
                 target = member_role or guild.default_role
                 overwrites[target] = discord.PermissionOverwrite(
                     read_messages=True, send_messages=False)
                 if member_role:
                     overwrites[guild.default_role] = discord.PermissionOverwrite(read_messages=False)
             elif perms == []:
-                # só bot posta (regras, boas-vindas)
                 if member_role:
                     overwrites[member_role] = discord.PermissionOverwrite(
                         read_messages=True, send_messages=False)
@@ -369,10 +388,27 @@ class PermissionService:
         restricted_cats = {
             CATEGORY_STAFF, CATEGORY_LOGS, CATEGORY_ANALYTICS,
             CATEGORY_ANALISTAS, CATEGORY_MEDIACAO,
+            CATEGORY_CONTRAS,
         }
         if category_name in restricted_cats:
-            return {guild.default_role: discord.PermissionOverwrite(
+            overwrites = {guild.default_role: discord.PermissionOverwrite(
                 read_messages=False, send_messages=False)}
+
+            if category_name == CATEGORY_CONTRAS:
+                # Controller Live enxerga a categoria inteira
+                cl_role = roles.get(CONTROLLER_LIVE_ROLE_NAME) or discord.utils.get(
+                    guild.roles, name=CONTROLLER_LIVE_ROLE_NAME)
+                if cl_role:
+                    overwrites[cl_role] = discord.PermissionOverwrite(
+                        read_messages=True, send_messages=False)
+                # Membro precisa ver a categoria para acessar os canais contra-*
+                member_role = roles.get(MEMBER_ROLE_NAME)
+                if member_role:
+                    overwrites[member_role] = discord.PermissionOverwrite(
+                        read_messages=True, send_messages=False)
+
+            return overwrites
+
         member_role = roles.get(MEMBER_ROLE_NAME)
         base = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
         if member_role:
@@ -391,6 +427,105 @@ class PermissionService:
         self, channel: discord.TextChannel, member: discord.Member
     ):
         await channel.set_permissions(member, overwrite=None)
+
+    async def get_contra_channel_overwrites(
+        self,
+        guild: discord.Guild,
+        influencer: discord.Member,
+        roles: dict | None = None,
+    ) -> dict:
+        """
+        Permissões para canais contra-<username> na categoria ⚔️| CONTRAS.
+
+        Quem vê e pode interagir:
+          - Membro          → lê + usa botões (send=False, use_app_commands=True)
+          - Influencer      → lê + envia (dono da sala)
+          - Controller Live → lê + envia (mediador live)
+          - ADM / Bot       → controle total
+          - @everyone       → bloqueado
+        """
+        roles      = roles or {r.name: r for r in guild.roles}
+        overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
+
+        member_role = roles.get(MEMBER_ROLE_NAME)
+        if member_role:
+            overwrites[member_role] = discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=False,
+                use_application_commands=True,
+            )
+
+        # Influencer dono da sala
+        overwrites[influencer] = discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+        )
+
+        cl_role = roles.get(CONTROLLER_LIVE_ROLE_NAME) or discord.utils.get(
+            guild.roles, name=CONTROLLER_LIVE_ROLE_NAME)
+        if cl_role:
+            overwrites[cl_role] = discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+            )
+
+        # Bot e ADM
+        overwrites[guild.me] = discord.PermissionOverwrite(
+            read_messages=True, send_messages=True, manage_messages=True)
+        adm_role = roles.get(ADM_ROLE_NAME) or discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
+        if adm_role:
+            overwrites[adm_role] = discord.PermissionOverwrite(
+                read_messages=True, send_messages=True,
+                manage_messages=True, manage_channels=True)
+
+        return overwrites
+
+    async def create_contra_channel(
+        self,
+        guild: discord.Guild,
+        influencer: discord.Member,
+    ) -> discord.TextChannel:
+        """
+        Cria o canal contra-<username> na categoria ⚔️| CONTRAS.
+        Retorna o canal criado (ou o existente se já existir).
+        """
+        channel_name = f"contra-{influencer.display_name.lower().replace(' ', '-')}"
+        existing     = discord.utils.get(guild.text_channels, name=channel_name)
+        if existing:
+            logger.info(f"[ChannelService] Canal já existe: #{channel_name}")
+            return existing
+
+        category = discord.utils.get(guild.categories, name=CATEGORY_CONTRAS)
+        if not category:
+            roles    = {r.name: r for r in guild.roles}
+            cat_ow   = await self.get_category_overwrites(guild, CATEGORY_CONTRAS, roles)
+            category = await guild.create_category(CATEGORY_CONTRAS, overwrites=cat_ow)
+            logger.info(f"[ChannelService] Categoria criada: {CATEGORY_CONTRAS}")
+
+        roles      = {r.name: r for r in guild.roles}
+        overwrites = await self.get_contra_channel_overwrites(guild, influencer, roles)
+        channel    = await guild.create_text_channel(
+            channel_name, category=category, overwrites=overwrites
+        )
+        logger.info(f"[ChannelService] Canal contra criado: #{channel_name}")
+        return channel
+
+    async def delete_contra_channel(
+        self,
+        guild: discord.Guild,
+        channel_name: str,
+    ) -> bool:
+        """
+        Remove o canal contra-<username> quando a sala é desativada.
+        Retorna True se deletado, False se não encontrado.
+        """
+        ch = discord.utils.get(guild.text_channels, name=channel_name)
+        if not ch:
+            logger.warning(f"[ChannelService] Canal não encontrado para deletar: #{channel_name}")
+            return False
+        await ch.delete(reason="Sala Influencer Live desativada")
+        logger.info(f"[ChannelService] Canal contra deletado: #{channel_name}")
+        return True
 
 
 permission_service = PermissionService()
