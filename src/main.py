@@ -6,7 +6,6 @@ import random
 from datetime import datetime, timezone
 from discord import Interaction
 
-
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
@@ -152,23 +151,51 @@ async def _auto_setup_canais(guild: discord.Guild):
 
 
 # ─────────────────────────────────────────────────────────────
-# Garante índices únicos no MongoDB (thread pool)
+# Garante índices + TTL no MongoDB
 # ─────────────────────────────────────────────────────────────
 
 async def _ensure_db_indexes():
     """
-    Cria índices únicos nas collections críticas para evitar
-    DuplicateKeyError em race conditions do ThreadReuseService.
+    Cria índices únicos e TTL nas collections críticas.
     Idempotente — pode ser chamado toda vez que o bot sobe.
+
+    TTL de 30 dias: apaga documentos automaticamente após
+    2592000 segundos contados a partir de 'created_at'.
+    Requisito: created_at deve ser datetime UTC (não string).
     """
+    _30_dias = 60 * 60 * 24 * 30  # 2_592_000 segundos
+
     try:
+        # ── active_threads ──────────────────────────────────────
         await db.get_collection("active_threads").create_index(
             "thread_id", unique=True, background=True
         )
+        await db.get_collection("active_threads").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        # ── thread_pool ─────────────────────────────────────────
         await db.get_collection("thread_pool").create_index(
             "thread_id", unique=True, background=True
         )
-        logger.info("[DB] Índices únicos garantidos: active_threads, thread_pool")
+        await db.get_collection("thread_pool").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        # ── matches ─────────────────────────────────────────────
+        # sparse=True: ignora documentos com thread_id: null,
+        # evitando E11000 duplicate key ao criar partidas sem thread ainda.
+        await db.get_collection("matches").create_index(
+            "thread_id", unique=True, sparse=True, background=True
+        )
+        await db.get_collection("matches").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        logger.info(
+            "[DB] Índices garantidos: active_threads, thread_pool, matches(sparse) "
+            "| TTL 30 dias ativo em todas as collections"
+        )
     except Exception as e:
         logger.warning(f"[DB] _ensure_db_indexes: {e}")
 
@@ -305,7 +332,6 @@ async def on_ready():
     try:
         from services.thread_reuse_service import init_thread_reuse_service
         svc = init_thread_reuse_service(bot)
-        # ✅ CORRIGIDO: garante índices únicos ao inicializar o serviço
         await svc.ensure_indexes()
         logger.info("[ThreadReuse] Serviço inicializado + índices garantidos")
     except Exception as e:
@@ -548,7 +574,7 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # ✅ CORRIGIDO: garante índices únicos ANTES de iniciar o bot
+    # Garante índices únicos + TTL ANTES de iniciar o bot
     await _ensure_db_indexes()
 
     for cog in COGS:
