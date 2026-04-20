@@ -156,14 +156,6 @@ async def _auto_setup_canais(guild: discord.Guild):
 # ─────────────────────────────────────────────────────────────
 
 async def _ensure_db_indexes():
-    """
-    Cria índices únicos e TTL nas collections críticas.
-    Idempotente — pode ser chamado toda vez que o bot sobe.
-
-    TTL de 30 dias: apaga documentos automaticamente após
-    2592000 segundos contados a partir de 'created_at'.
-    Requisito: created_at deve ser datetime UTC (não string).
-    """
     _30_dias = 60 * 60 * 24 * 30  # 2_592_000 segundos
 
     try:
@@ -184,8 +176,6 @@ async def _ensure_db_indexes():
         )
 
         # ── matches ─────────────────────────────────────────────
-        # sparse=True: ignora documentos com thread_id: null,
-        # evitando E11000 duplicate key ao criar partidas sem thread ainda.
         await db.get_collection("matches").create_index(
             "thread_id", unique=True, sparse=True, background=True
         )
@@ -241,35 +231,38 @@ async def on_ready():
         logger.error(f"[SlashCommands] Erro: {e}")
 
     try:
-        from views.ticket_view import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
-        from views.mediator_panel_view     import MediatorPanelView
-        from views.quero_ser_mediador_view import PedidoMediadorView
-        from views.spam_block_card_view    import SpamBlockCardView
-        from views.match_queue_view        import MatchQueueView
-        from views.match_thread_view       import MatchThreadView
-        from views.health_check_view       import HealthCheckView
-        from views.analyst_views           import (
+        from views.ticket_view              import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
+        from views.mediator_panel_view      import MediatorPanelView
+        from views.quero_ser_mediador_view  import PedidoMediadorView
+        from views.spam_block_card_view     import SpamBlockCardView
+        from views.match_queue_view         import MatchQueueView
+        from views.match_thread_view        import MatchThreadView
+        from views.health_check_view        import HealthCheckView
+        from views.analyst_views            import (
             AnalystCaseView, AnalystDecisionView,
             ExposedPanelView, AnalisePanelView,
         )
-        from views.extra_panels            import (
+        from views.extra_panels             import (
             RenovacaoPanelView, PixPanelView,
             InfluencerMemberView, InfluencerAdminView,
         )
-        from views.staff_panels            import (
+        from views.staff_panels             import (
             MediadorPessoalView, MediadorAdminView,
             AnalistaPessoalView, AnalistaAdminView,
             SuporteAdminView,
         )
-        from views.blacklist_view          import BlacklistCheckView
-        from views.mediator_register_view  import MediatorRegisterView
-        from cogs.renewal_dashboard_cog    import ContractPanelView
-        from services.faturamento_mediador import RelatorioGeralView
-        from services.match_queue_service  import ConfirmationView
+        from views.blacklist_view           import BlacklistCheckView
+        from views.mediator_register_view   import MediatorRegisterView
+        from cogs.renewal_dashboard_cog     import ContractPanelView
+        from services.faturamento_mediador  import RelatorioGeralView
+        from services.match_queue_service   import ConfirmationView
+        # Onboarding
+        from views.rules_view               import RulesView, ConfirmationView as RulesConfirmationView
         # Influencer Live
         from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
         from views.influencer_live_match_view import ContraConfirmView, ContraResultView
         from views.influencer_live_admin_view import InfluencerLiveAdminView
+        from views.live_contra_setup_view     import LiveContraSetupView
 
         persistent_views = [
             TicketPanelView(),
@@ -300,12 +293,16 @@ async def on_ready():
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
+            # Onboarding
+            RulesView(),
+            RulesConfirmationView(),
             # Influencer Live
             ContraRoomView(influencer_id=0, guild_id=0),
             ControllerLivePanelView(),
             ContraConfirmView(match_id="__persistent__", challenger_id=0, influencer_id=0),
             ContraResultView(match_id="__persistent__", influencer_id=0, challenger_id=0, guild_id=0),
             InfluencerLiveAdminView(),
+            LiveContraSetupView(),
         ]
 
         for view in persistent_views:
@@ -603,7 +600,6 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Garante índices únicos + TTL ANTES de iniciar o bot
     await _ensure_db_indexes()
 
     for cog in COGS:

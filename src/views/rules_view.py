@@ -8,20 +8,22 @@ from utils.logger import logger
 
 class RulesView(View):
     """
-    View com botões de aceitar/recusar — enviada na DM após entrar no servidor.
-    is_test=True: não kicca no timeout, apenas edita a mensagem.
+    View com botões de aceitar/recusar — enviada no canal de verificação in-server.
+    is_test=True: não kicka no timeout, apenas edita a mensagem.
     """
 
     def __init__(
         self,
-        onboarding_service,
-        member: discord.Member,
+        onboarding_service=None,
+        member: discord.Member = None,
+        channel: discord.TextChannel = None,
         timeout: float = 300,
         is_test: bool = False,
     ):
         super().__init__(timeout=timeout)
         self.onboarding_service = onboarding_service
         self.member             = member
+        self.channel            = channel   # ← canal de verificação para o CAPTCHA
         self.message: Optional[discord.Message] = None
         self.is_test            = is_test
         self._processed         = False
@@ -34,7 +36,7 @@ class RulesView(View):
         custom_id="accept_rules"
     )
     async def accept_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.member.id:
+        if self.member and interaction.user.id != self.member.id:
             await interaction.response.send_message(
                 "❌ Apenas o novo membro pode aceitar as regras!", ephemeral=True
             )
@@ -46,7 +48,6 @@ class RulesView(View):
 
         await interaction.response.defer()
 
-        # Marca como processado e para o timer das regras
         self._processed = True
         self.stop()
 
@@ -58,22 +59,29 @@ class RulesView(View):
             except Exception:
                 pass
 
-        # Avisa que o CAPTCHA vem a seguir
         captcha_notice = discord.Embed(
             title="📋 Regras Aceitas!",
             description=(
-                "Ótimo! Para finalizar seu acesso, você precisará passar por uma **verificação CAPTCHA**.\n\n"
+                "Ótimo! Para finalizar seu acesso, você precisará passar por uma "
+                "**verificação CAPTCHA**.\n\n"
                 "⬇️ O CAPTCHA será enviado logo abaixo..."
             ),
             color=discord.Color.blue()
         )
         await interaction.followup.send(embed=captcha_notice)
 
-        # Inicia o fluxo CAPTCHA de forma assíncrona (não bloqueia o handler)
+        # Resolve o canal: usa self.channel (preferencial) ou o canal da interação
+        target_channel = self.channel or interaction.channel
+
         asyncio.create_task(
-            self.onboarding_service.run_captcha_flow(self.member, is_test=self.is_test)
+            self.onboarding_service.run_captcha_flow(
+                self.member or interaction.user,
+                target_channel,
+                is_test=self.is_test,
+            )
         )
-        logger.info(f"Usuário {self.member.name} aceitou as regras — CAPTCHA iniciado")
+        member_name = self.member.name if self.member else str(interaction.user)
+        logger.info(f"[Onboarding] {member_name} aceitou as regras — CAPTCHA iniciado")
 
     # ── Recusar ──────────────────────────────────────────────────
 
@@ -83,7 +91,7 @@ class RulesView(View):
         custom_id="decline_rules"
     )
     async def decline_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.member.id:
+        if self.member and interaction.user.id != self.member.id:
             await interaction.response.send_message(
                 "❌ Esta ação não é para você!", ephemeral=True
             )
@@ -97,7 +105,7 @@ class RulesView(View):
 
         confirmation_view = ConfirmationView(
             onboarding_service=self.onboarding_service,
-            member=self.member,
+            member=self.member or interaction.user,
             parent_view=self,
             timeout=60,
             is_test=self.is_test,
@@ -133,19 +141,21 @@ class RulesView(View):
                     pass
 
             if self.is_test:
-                logger.info(f"[TESTE] Timeout de regras para {self.member.name} — kick ignorado")
-                self.onboarding_service.clear_pending(self.member.id)
+                logger.info(f"[TESTE] Timeout de regras para {getattr(self.member, 'name', '?')} — kick ignorado")
+                if self.onboarding_service and self.member:
+                    self.onboarding_service.clear_pending(self.member.id)
                 return
 
-            await self.onboarding_service.kick_member(
-                self.member,
-                reason="Não aceitou as regras dentro do tempo limite (5 min)",
-                result='timeout'
-            )
-            logger.warning(f"Usuário {self.member.name} removido por timeout nas regras")
+            if self.onboarding_service and self.member:
+                await self.onboarding_service.kick_member(
+                    self.member,
+                    reason="Não aceitou as regras dentro do tempo limite (5 min)",
+                    result="timeout"
+                )
+                logger.warning(f"[Onboarding] {self.member.name} removido por timeout nas regras")
 
         except Exception as e:
-            logger.error(f"Erro no timeout das regras: {e}")
+            logger.error(f"[Onboarding] Erro no timeout das regras: {e}")
 
 
 class ConfirmationView(View):
@@ -153,9 +163,9 @@ class ConfirmationView(View):
 
     def __init__(
         self,
-        onboarding_service,
-        member: discord.Member,
-        parent_view: RulesView,
+        onboarding_service=None,
+        member: discord.Member = None,
+        parent_view: RulesView = None,
         timeout: float = 60,
         is_test: bool = False,
     ):
@@ -174,13 +184,13 @@ class ConfirmationView(View):
         custom_id="back_to_rules"
     )
     async def back_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.member.id:
+        if self.member and interaction.user.id != self.member.id:
             await interaction.response.send_message(
                 "❌ Esta ação não é para você!", ephemeral=True
             )
             return
 
-        if self.parent_view._processed:
+        if self.parent_view and self.parent_view._processed:
             await interaction.response.send_message(
                 "✅ Sua resposta já foi processada.", ephemeral=True
             )
@@ -197,13 +207,14 @@ class ConfirmationView(View):
             except Exception:
                 pass
 
-        for item in self.parent_view.children:
-            item.disabled = False
-        if self.parent_view.message:
-            try:
-                await self.parent_view.message.edit(view=self.parent_view)
-            except Exception:
-                pass
+        if self.parent_view:
+            for item in self.parent_view.children:
+                item.disabled = False
+            if self.parent_view.message:
+                try:
+                    await self.parent_view.message.edit(view=self.parent_view)
+                except Exception:
+                    pass
 
         await interaction.followup.send(
             "📜 Leia as regras novamente e tome sua decisão.", ephemeral=True
@@ -217,7 +228,7 @@ class ConfirmationView(View):
         custom_id="leave_server"
     )
     async def leave_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.member.id:
+        if self.member and interaction.user.id != self.member.id:
             await interaction.response.send_message(
                 "❌ Esta ação não é para você!", ephemeral=True
             )
@@ -225,8 +236,9 @@ class ConfirmationView(View):
 
         await interaction.response.defer()
 
-        self.parent_view._processed = True
-        self.parent_view.stop()
+        if self.parent_view:
+            self.parent_view._processed = True
+            self.parent_view.stop()
         self.stop()
 
         try:
@@ -238,16 +250,19 @@ class ConfirmationView(View):
             pass
 
         if self.is_test:
-            logger.info(f"[TESTE] {self.member.name} recusou — kick ignorado")
-            self.onboarding_service.clear_pending(self.member.id)
+            member_name = getattr(self.member, "name", "?")
+            logger.info(f"[TESTE] {member_name} recusou — kick ignorado")
+            if self.onboarding_service and self.member:
+                self.onboarding_service.clear_pending(self.member.id)
             return
 
-        await self.onboarding_service.kick_member(
-            self.member,
-            reason="Recusou as regras do servidor",
-            result='recusado'
-        )
-        logger.info(f"Usuário {self.member.name} recusou as regras e foi removido")
+        if self.onboarding_service and self.member:
+            await self.onboarding_service.kick_member(
+                self.member,
+                reason="Recusou as regras do servidor",
+                result="recusado"
+            )
+            logger.info(f"[Onboarding] {self.member.name} recusou as regras e foi removido")
 
     # ── Timeout da ConfirmationView ──────────────────────────────
 
@@ -261,7 +276,7 @@ class ConfirmationView(View):
                 except Exception:
                     pass
 
-            if not self.parent_view._processed:
+            if self.parent_view and not self.parent_view._processed:
                 for item in self.parent_view.children:
                     item.disabled = False
                 if self.parent_view.message:
@@ -270,4 +285,4 @@ class ConfirmationView(View):
                     except Exception:
                         pass
         except Exception as e:
-            logger.error(f"Erro no timeout da ConfirmationView: {e}")
+            logger.error(f"[Onboarding] Erro no timeout da ConfirmationView: {e}")
