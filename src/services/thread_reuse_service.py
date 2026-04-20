@@ -22,6 +22,20 @@ class ThreadReuseService:
     def __init__(self, bot: discord.Client):
         self.bot = bot
 
+    # ── Índices únicos — chamado 1x no init ─────────────────────
+    async def ensure_indexes(self):
+        """Garante índices únicos nas collections para evitar duplicatas."""
+        try:
+            await db.get_collection("active_threads").create_index(
+                "thread_id", unique=True
+            )
+            await db.get_collection("thread_pool").create_index(
+                "thread_id", unique=True
+            )
+            logger.info("[ThreadPool] Índices únicos garantidos em active_threads e thread_pool")
+        except Exception as e:
+            logger.warning(f"[ThreadPool] ensure_indexes: {e}")
+
     # ── Ponto de entrada ────────────────────────────────────────
 
     async def get_or_create_thread(
@@ -82,15 +96,9 @@ class ThreadReuseService:
           3. Limpa e devolve a thread ao pool
         """
         try:
-            # 1. Gera o log da thread ANTES de qualquer limpeza
             await self._archive_thread_log(thread)
-
-            # 2. Aguarda o delay configurado
             await asyncio.sleep(POOL_RETURN_DELAY)
-
-            # 3. Limpa mensagens, remove membros, arquiva e salva no pool
             await self._clean_and_archive(thread, reason="match_finalizado")
-
         except Exception as e:
             logger.error(
                 f"[ThreadPool] return_to_pool_after_match erro {thread.id}: {e}",
@@ -103,35 +111,26 @@ class ThreadReuseService:
         except Exception as e:
             logger.error(f"[ThreadPool] return_to_pool_empty erro {thread.id}: {e}", exc_info=True)
 
-    # ── Log da thread (integração com thread_log_service) ────────
+    # ── Log da thread ────────────────────────────────────────────
 
     async def _archive_thread_log(self, thread: discord.Thread):
-        """Busca o match vinculado à thread e chama thread_log_service.archive_thread()."""
         try:
             from services.thread_log_service import get_thread_log_service
             log_svc = get_thread_log_service()
             if not log_svc:
                 logger.warning(f"[ThreadPool] thread_log_service não inicializado — log ignorado para thread {thread.id}")
                 return
-
             match_doc = await self._get_match_for_thread(thread.id)
             if not match_doc:
                 logger.warning(f"[ThreadPool] Nenhum match encontrado para thread {thread.id} — log ignorado")
                 return
-
             logger.info(f"[ThreadPool] Gerando log para match {match_doc.get('_id')} (thread {thread.id})")
             await log_svc.archive_thread(thread, match_doc)
-
         except Exception as e:
             logger.error(f"[ThreadPool] _archive_thread_log erro thread {thread.id}: {e}", exc_info=True)
 
     async def _get_match_for_thread(self, thread_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Tenta encontrar o match via active_threads (match_id) e depois na collection matches.
-        Fallback: busca direta em matches por thread_id.
-        """
         try:
-            # Caminho 1: via active_threads (tem match_id salvo)
             col_active = db.get_collection("active_threads")
             active_doc = await col_active.find_one({"thread_id": thread_id})
             if active_doc and active_doc.get("match_id"):
@@ -142,14 +141,11 @@ class ThreadReuseService:
                 )
                 if match_doc:
                     return match_doc
-
-            # Caminho 2: fallback direto por thread_id
             col_matches = db.get_collection("matches")
             match_doc = await col_matches.find_one({"thread_id": thread_id})
             if not match_doc:
                 match_doc = await col_matches.find_one({"thread_id": str(thread_id)})
             return match_doc
-
         except Exception as e:
             logger.error(f"[ThreadPool] _get_match_for_thread erro thread {thread_id}: {e}")
             return None
@@ -179,7 +175,6 @@ class ThreadReuseService:
                 )
                 await asyncio.sleep(1)
                 await thread.edit(archived=True)
-
                 fresh = await channel.guild.fetch_channel(thread.id)
                 if isinstance(fresh, discord.Thread) and fresh.archived:
                     await self._save_to_pool(thread, channel)
@@ -257,9 +252,6 @@ class ThreadReuseService:
 
     # ── Internos ─────────────────────────────────────────────────
 
-    async def _check_slowmode(self, channel: discord.TextChannel) -> int:
-        return getattr(channel, "slowmode_delay", 0) or 0
-
     async def _get_from_pool(self, channel: discord.TextChannel) -> Optional[discord.Thread]:
         col = db.get_collection("thread_pool")
         doc = await col.find_one({"channel_id": channel.id})
@@ -282,27 +274,69 @@ class ThreadReuseService:
         return thread
 
     async def _save_to_pool(self, thread: discord.Thread, channel: discord.TextChannel):
+        """Salva thread no pool com proteção contra DuplicateKeyError."""
         col = db.get_collection("thread_pool")
-        await col.update_one(
-            {"thread_id": thread.id},
-            {"$set": {"thread_id": thread.id, "channel_id": channel.id, "saved_at": utcnow()}},
-            upsert=True,
-        )
+        try:
+            await col.update_one(
+                {"thread_id": thread.id},
+                {"$set": {"thread_id": thread.id, "channel_id": channel.id, "saved_at": utcnow()}},
+                upsert=True,
+            )
+        except Exception as e:
+            if "11000" in str(e) or "duplicate" in str(e).lower():
+                logger.warning(
+                    f"[ThreadPool] _save_to_pool: thread {thread.id} já existe no pool "
+                    f"(duplicate key), atualizando sem upsert..."
+                )
+                try:
+                    await col.update_one(
+                        {"thread_id": thread.id},
+                        {"$set": {"channel_id": channel.id, "saved_at": utcnow()}},
+                    )
+                except Exception as e2:
+                    logger.error(f"[ThreadPool] _save_to_pool fallback erro: {e2}")
+            else:
+                logger.error(f"[ThreadPool] _save_to_pool erro inesperado: {e}", exc_info=True)
 
     async def _mark_active(self, thread: discord.Thread, channel: discord.TextChannel):
+        """Marca thread como ativa com proteção contra DuplicateKeyError (race condition)."""
         col = db.get_collection("active_threads")
         now = utcnow()
-        await col.update_one(
-            {"thread_id": thread.id},
-            {"$set": {
-                "thread_id":  thread.id,
-                "channel_id": channel.id,
-                "match_id":   None,
-                "started_at": now,
-                "expires_at": now + ACTIVE_THREAD_TTL,
-            }},
-            upsert=True,
-        )
+        try:
+            await col.update_one(
+                {"thread_id": thread.id},
+                {"$set": {
+                    "thread_id":  thread.id,
+                    "channel_id": channel.id,
+                    "match_id":   None,
+                    "started_at": now,
+                    "expires_at": now + ACTIVE_THREAD_TTL,
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            if "11000" in str(e) or "duplicate" in str(e).lower():
+                # Race condition: dois processos tentaram inserir ao mesmo tempo
+                # O documento já existe — apenas atualiza sem upsert
+                logger.warning(
+                    f"[ThreadPool] _mark_active: thread {thread.id} já estava ativa "
+                    f"(duplicate key — race condition), atualizando..."
+                )
+                try:
+                    await col.update_one(
+                        {"thread_id": thread.id},
+                        {"$set": {
+                            "channel_id": channel.id,
+                            "match_id":   None,
+                            "started_at": now,
+                            "expires_at": now + ACTIVE_THREAD_TTL,
+                        }},
+                    )
+                except Exception as e2:
+                    logger.error(f"[ThreadPool] _mark_active fallback erro: {e2}")
+            else:
+                logger.error(f"[ThreadPool] _mark_active erro inesperado: {e}", exc_info=True)
+                raise
 
     async def _unmark_active(self, thread: discord.Thread):
         col = db.get_collection("active_threads")
@@ -312,7 +346,6 @@ class ThreadReuseService:
         try:
             await self._unmark_active(thread)
 
-            # 1. Remove todos os membros (exceto o bot)
             try:
                 members = await thread.fetch_members()
                 for m in members:
@@ -324,7 +357,6 @@ class ThreadReuseService:
             except Exception as e:
                 logger.warning(f"[ThreadPool] Erro ao remover membros {thread.id}: {e}")
 
-            # 2. Apaga mensagens (bulk_delete para as < 14 dias, individual para antigas)
             try:
                 to_delete = [msg async for msg in thread.history(limit=200)]
                 if len(to_delete) >= 2:
@@ -334,7 +366,6 @@ class ThreadReuseService:
             except discord.HTTPException as e:
                 logger.warning(f"[ThreadPool] Erro ao limpar mensagens {thread.id}: {e}")
 
-            # 3. Renomeia e arquiva
             try:
                 await thread.edit(name=POOL_THREAD_NAME, archived=False)
                 await asyncio.sleep(0.5)

@@ -115,18 +115,12 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 # ─────────────────────────────────────────────────────────────
 
 async def _auto_setup_canais(guild: discord.Guild):
-    """
-    Executa o equivalente ao !setupcanais automaticamente toda vez que o
-    bot inicializa (startup, redeploy, crash+restart).
-    Não precisa de Context — chama o channel_setup_service diretamente.
-    """
     try:
         from services.channel_setup_service import channel_setup_service
         channel_setup_service.bot = bot
         result = await channel_setup_service.setup_all(guild)
         log_success(f"[AutoSetup] !setupcanais executado automaticamente: {result}")
 
-        # Notifica no canal alertas-adm que o setup rodou após reinício
         alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
         if alertas_ch:
             embed = discord.Embed(
@@ -143,7 +137,6 @@ async def _auto_setup_canais(guild: discord.Guild):
             await alertas_ch.send(embed=embed)
     except Exception as e:
         logger.error(f"[AutoSetup] Erro ao executar setupcanais automático: {e}", exc_info=True)
-        # Tenta notificar o erro no alertas-adm
         try:
             alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
             if alertas_ch:
@@ -156,6 +149,28 @@ async def _auto_setup_canais(guild: discord.Guild):
                 await alertas_ch.send(embed=embed)
         except Exception:
             pass
+
+
+# ─────────────────────────────────────────────────────────────
+# Garante índices únicos no MongoDB (thread pool)
+# ─────────────────────────────────────────────────────────────
+
+async def _ensure_db_indexes():
+    """
+    Cria índices únicos nas collections críticas para evitar
+    DuplicateKeyError em race conditions do ThreadReuseService.
+    Idempotente — pode ser chamado toda vez que o bot sobe.
+    """
+    try:
+        await db.get_collection("active_threads").create_index(
+            "thread_id", unique=True, background=True
+        )
+        await db.get_collection("thread_pool").create_index(
+            "thread_id", unique=True, background=True
+        )
+        logger.info("[DB] Índices únicos garantidos: active_threads, thread_pool")
+    except Exception as e:
+        logger.warning(f"[DB] _ensure_db_indexes: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -256,7 +271,6 @@ async def on_ready():
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
-    # Onboarding — instancia e restaura estado do DB
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
     if guild:
@@ -290,8 +304,10 @@ async def on_ready():
 
     try:
         from services.thread_reuse_service import init_thread_reuse_service
-        init_thread_reuse_service(bot)
-        logger.info("[ThreadReuse] Serviço inicializado")
+        svc = init_thread_reuse_service(bot)
+        # ✅ CORRIGIDO: garante índices únicos ao inicializar o serviço
+        await svc.ensure_indexes()
+        logger.info("[ThreadReuse] Serviço inicializado + índices garantidos")
     except Exception as e:
         logger.warning(f"[ThreadReuse] {e}")
 
@@ -338,8 +354,6 @@ async def on_ready():
     if not set_status.is_running():
         set_status.start()
 
-    # ── Circuit Breaker — injeta bot para notificações em #alertas-adm ──
-    # Precisa ser feito aqui pois o bot só está disponível após on_ready.
     try:
         from utils.circuit_breaker import db_circuit_breaker
         db_circuit_breaker.set_bot(bot)
@@ -347,10 +361,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[CircuitBreaker] Erro ao injetar bot: {e}")
 
-    # ── Auto Setup de canais ─────────────────────────────────────────────
-    # Toda vez que o bot sobe (novo deploy, crash recovery, redeploy)
-    # executa !setupcanais automaticamente — sem precisar digitar nada.
-    # O resultado é notificado em #alertas-adm.
     if guild:
         asyncio.create_task(_auto_setup_canais(guild))
 
@@ -529,7 +539,7 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Entrypoint — Cogs carregados ANTES do bot.start()
+# Entrypoint
 # ─────────────────────────────────────────────────────────────
 
 async def main():
@@ -538,9 +548,9 @@ async def main():
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Carrega todos os cogs ANTES de iniciar o bot para evitar
-    # race condition no on_ready e garantir que tudo está disponível
-    # desde o primeiro evento, inclusive após reconexão.
+    # ✅ CORRIGIDO: garante índices únicos ANTES de iniciar o bot
+    await _ensure_db_indexes()
+
     for cog in COGS:
         try:
             await bot.load_extension(cog)
