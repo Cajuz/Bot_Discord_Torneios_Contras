@@ -107,5 +107,5 @@ class MediatorPanelView(View):
             embed.add_field(name="Fila atual", value="\n".join(lines), inline=False)
         else:
             embed.add_field(name="Fila atual", value="Nenhum mediador na fila.", inline=False)
-        embed.set_footer(text="X1 Frifas — Fila de Mediação")
+        embed.set_footer(text="SOLAR E-SPORTS — Fila de Mediação")
         await interaction.response.send_message(embed=embed, ephemeral=True)
