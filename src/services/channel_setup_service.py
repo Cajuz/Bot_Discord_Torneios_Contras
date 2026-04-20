@@ -37,7 +37,7 @@ from services.channel_service import (
     LOGS_MESSAGE_DELETE_CHANNEL, LOGS_TROCA_CARGO_CHANNEL,
     MEDIADORES_AFKS_CHANNEL, HEALTH_CHECK_CHANNEL,
     # Influencer Live
-    CATEGORY_CONTRAS, MEDIADOR_LIVE_PANEL_CHANNEL,
+    CATEGORY_CONTRAS, MEDIADOR_LIVE_PANEL_CHANNEL, LIVE_CONTRA_CHANNEL,
     CONTROLLER_LIVE_ROLE_NAME,
     permission_service,
 )
@@ -47,7 +47,6 @@ from config.database import db
 
 THEME = 0xFFD54F
 ALERTAS_ADM_CHANNEL = "alertas-adm"
-
 
 
 class ChannelSetupService:
@@ -75,7 +74,6 @@ class ChannelSetupService:
         return f"Servidor **{guild.name}** configurado com sucesso."
 
     async def _setup_painel_contratos(self, guild: discord.Guild):
-        """Chama RenewalDashboardCog._update_panels() se o cog estiver carregado."""
         if not self.bot:
             return
         try:
@@ -94,7 +92,6 @@ class ChannelSetupService:
     # ══════════════════════════════════════════════════════════
 
     async def setup_roles(self, guild: discord.Guild) -> dict[str, discord.Role]:
-        """Cria todos os cargos listados em ALL_ROLES (incluindo Controller Live)."""
         existing = {r.name: r for r in guild.roles}
         roles = {}
         for name in ALL_ROLES:
@@ -182,6 +179,7 @@ class ChannelSetupService:
         await self.setup_blacklist(guild)
         await self.setup_alertas_adm(guild)
         await self.setup_mediador_live_panel(guild)
+        await self.setup_live_contra(guild)          # ← NOVO
         logger.info("[ChannelSetup] Todos os painéis postados")
 
 
@@ -456,10 +454,6 @@ class ChannelSetupService:
         await self._post_panel(guild, ALERTAS_ADM_CHANNEL, embed, None)
 
     async def setup_mediador_live_panel(self, guild: discord.Guild):
-        """
-        Posta o painel fixo do Controller Live no canal #painel-mediador-live.
-        Apenas mediadores com cargo Controller Live enxergam este canal.
-        """
         from views.influencer_live_view import ControllerLivePanelView
 
         embed = discord.Embed(
@@ -479,6 +473,17 @@ class ChannelSetupService:
         )
         await self._post_panel(guild, MEDIADOR_LIVE_PANEL_CHANNEL, embed, ControllerLivePanelView())
         logger.info("[ChannelSetup] Painel Controller Live postado")
+
+    async def setup_live_contra(self, guild: discord.Guild):
+        """
+        Posta o painel de criação de sala no canal #live-contra.
+        Apenas Influencers (e ADM) veem e interagem com esse canal.
+        """
+        from views.live_contra_setup_view import LiveContraSetupView, build_live_contra_embed
+
+        embed = build_live_contra_embed()
+        await self._post_panel(guild, LIVE_CONTRA_CHANNEL, embed, LiveContraSetupView())
+        logger.info("[ChannelSetup] Painel live-contra postado")
 
 
     # ══════════════════════════════════════════════════════════
