@@ -83,7 +83,7 @@ def create_match_queue_embed(
         description=f"**Modo:** {_channel_label(channel_name)}",
         color=THEME2,
     )
-    embed.set_image(url="attachment://banner.png")
+    embed.set_thumbnail(url="attachment://banner.png")
 
     if is_1x1:
         normal_status   = "🔒 Confirmando..." if locked_gel in ("normal",   "all") else f"{queue_normal_count}/{max_players}"
@@ -342,7 +342,7 @@ class MatchQueueView(discord.ui.View):
             file = get_banner_file(channel_name)
 
             if file:
-                embed.set_image(url=f"attachment://{file.filename}")
+                embed.set_thumbnail(url=f"attachment://{file.filename}")
                 await interaction.message.edit(
                     embed=embed, view=view, attachments=[file])
             else:
