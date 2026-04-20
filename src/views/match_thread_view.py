@@ -203,37 +203,62 @@ class PrizeConfirmView(discord.ui.View):
                 "❌ Partida não encontrada.", ephemeral=True)
             return
 
-        already_done = match_doc.get("status") == Match.STATUS_FINALIZADO
+        status = match_doc.get("status")
 
-        if not already_done:
-            result = await match_service.confirm_prize_received(self.match_id)
-            if not result:
-                await interaction.response.send_message(
-                    "❌ Erro ao finalizar partida.", ephemeral=True)
-                return
+        # ── CORREÇÃO: checa o status antes de tentar finalizar ──────────
+        if status == Match.STATUS_FINALIZADO:
+            # Já finalizado — só desabilita o botão
+            for item in self.children:
+                item.disabled = True
+                item.label    = "✅ Prêmio Confirmado"
+            await interaction.response.edit_message(view=self)
+            _try_return_to_pool(interaction.channel)
+            return
 
-        # Desabilita botão
+        if status != Match.STATUS_AGUARDANDO_PREMIO:
+            # Status incorreto — orienta o jogador
+            msgs = {
+                Match.STATUS_AGUARDANDO_PARTIDA: (
+                    "⏳ O mediador ainda não iniciou a partida via `/sala`."
+                ),
+                Match.STATUS_PARTIDA_INICIADA: (
+                    "⏳ O mediador ainda não declarou o vencedor (`!wt blue` ou `!wt red`)."
+                ),
+                Match.STATUS_CANCELADO: (
+                    "❌ Esta partida foi cancelada."
+                ),
+            }
+            msg = msgs.get(status, f"❌ Status inválido para confirmação: `{status}`")
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+        # ────────────────────────────────────────────────────────────────
+
+        result = await match_service.confirm_prize_received(self.match_id)
+        if not result:
+            await interaction.response.send_message(
+                "❌ Erro ao finalizar partida. Tente novamente ou contate um admin.",
+                ephemeral=True)
+            return
+
+        # Sucesso
         for item in self.children:
             item.disabled = True
             item.label    = "✅ Prêmio Confirmado"
         await interaction.response.edit_message(view=self)
 
-        if not already_done:
-            if isinstance(interaction.channel, discord.Thread):
-                await _update_thread_name(
-                    interaction.channel,
-                    _base_name(interaction.channel.name),
-                    "Finalizado ✅"
-                )
-            embed = discord.Embed(
-                title="✅ Partida Encerrada!",
-                description="🎉 Prêmio confirmado pelos vencedores! Obrigado a todos.",
-                color=discord.Color.green()
+        if isinstance(interaction.channel, discord.Thread):
+            await _update_thread_name(
+                interaction.channel,
+                _base_name(interaction.channel.name),
+                "Finalizado ✅"
             )
-            await interaction.channel.send(embed=embed)
-
+        embed = discord.Embed(
+            title="✅ Partida Encerrada!",
+            description="🎉 Prêmio confirmado pelos vencedores! Obrigado a todos.",
+            color=discord.Color.green()
+        )
+        await interaction.channel.send(embed=embed)
         _try_return_to_pool(interaction.channel)
-
 
 # ───────────────────────────────────────────────
 # Comandos de texto — mediador e ADM
