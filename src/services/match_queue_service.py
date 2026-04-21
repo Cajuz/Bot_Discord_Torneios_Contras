@@ -374,6 +374,19 @@ class MatchQueueService:
     async def _expire_queue(self, queue, bot, channel, message, confirm_thread=None):
         queue.status = MatchQueue.STATUS_EXPIRED
         await self._save_queue(queue)
+
+        # Cancela a partida no banco se já foi criada
+        if queue.match_id:
+            try:
+                await match_service.cancel_match(
+                    str(queue.match_id),
+                    cancelled_by=None,
+                    reason="Confirmação expirada ou jogador recusou",
+                )
+                logger.info(f"[Queue] Partida {queue.match_id} cancelada por expiração de fila")
+            except Exception as e:
+                logger.warning(f"[Queue] Erro ao cancelar partida na expiração: {e}")
+
         not_confirmed = queue.pending_confirmations()
         embed = discord.Embed(
             title="Tempo Esgotado",
@@ -541,8 +554,8 @@ class ConfirmationView(discord.ui.View):
         await interaction.response.send_message("✅ Confirmado!", ephemeral=True)
 
     @discord.ui.button(
-        label="Recusar", style=discord.ButtonStyle.red,
-        custom_id="decline_match_btn", emoji="✖"   # ← custom_id fixo
+    label="Recusar", style=discord.ButtonStyle.red,
+    custom_id="decline_match_btn", emoji="✖"   # ← custom_id fixo
     )
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId
@@ -570,6 +583,19 @@ class ConfirmationView(discord.ui.View):
             if hasattr(interaction.channel, "parent")
             else interaction.channel
         )
+
+        # Cancela a partida no banco se já foi criada antes da recusa
+        col = db.get_collection("matches")
+        existing_match = await col.find_one({
+            "player_ids": {"$in": [str(interaction.user.id)]},
+            "status": {"$in": Match.ACTIVE_STATUSES}
+        })
+        if existing_match:
+            await match_service.cancel_match(
+                str(existing_match["_id"]),
+                cancelled_by=interaction.user.id,
+                reason="Jogador recusou a partida",
+            )
 
         await self.service.remove_player_from_queue(
             queue.channel_name, queue.bet_value, queue.gel_type, interaction.user.id)
