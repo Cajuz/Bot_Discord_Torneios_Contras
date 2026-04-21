@@ -29,8 +29,9 @@ THEME2 = 0xFFA726
 GREEN  = 0x2ECC71
 
 # ── Status das partidas ───────────────────────────────────────────────────────
+# CORRIGIDO: "aguardando_premio" removido — partida ainda não foi concluída,
+# apenas aguarda pagamento do prêmio. Contar como finalizada inflava o número.
 STATUS_FINALIZADO_LIST = [
-    "aguardando_premio",
     "finalizado",
     "concluido",
 ]
@@ -160,12 +161,12 @@ def _add_fig_header(fig, title: str, subtitle: str = "") -> None:
 
 def _slots(now, period_key: str):
     cfg = MATCH_PERIODS[period_key]
-    since = now - cfg["delta"]
     if cfg["step"] == timedelta(hours=1):
-        base = since.replace(minute=0, second=0, microsecond=0)
+        last = now.replace(minute=0, second=0, microsecond=0)
     else:
-        base = since.replace(hour=0, minute=0, second=0, microsecond=0)
-    return [base + cfg["step"] * i for i in range(cfg["points"])]
+        last = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    first = last - cfg["step"] * (cfg["points"] - 1)
+    return [first + cfg["step"] * i for i in range(cfg["points"])]
 
 
 def _plot_smooth_line(ax, x, y_vals, color, label=None):
@@ -664,7 +665,7 @@ async def _render_perfil_embed(user: discord.Member | discord.User) -> discord.E
     embed.add_field(name="Derrotas",        value=f"`{losses}`",            inline=True)
     embed.add_field(name="Win Rate",        value=f"`{_pct(wins, total)}`", inline=True)
     embed.add_field(name="Total Partidas",  value=f"`{total}`",             inline=True)
-    embed.add_field(name="Volume Total",    value=f"**{_brl(volume)}**",    inline=True)
+    embed.add_field(name="Valor Total",    value=f"**{_brl(volume)}**",    inline=True)
     embed.add_field(name="Sequência atual", value=f"`{streak}` vitórias",   inline=True)
 
     if position:
@@ -856,8 +857,11 @@ class AnalyticsService:
         ax1.set_title(f"Partidas - {cfg['label']}", color=TEXT_COLOR, fontsize=11, fontweight="bold")
         ax1.legend(facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, fontsize=8, framealpha=0.7)
 
+        # CORRIGIDO: eixo Y sempre com ticks inteiros e escala correta
         max_y = max(max(y_fin, default=0), max(y_canc, default=0))
-        ax1.set_ylim(bottom=0, top=max(max_y * 1.2, 1))
+        top_y = max(int(max_y * 1.2) + 1, 2)
+        ax1.set_ylim(bottom=0, top=top_y)
+        ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
 
         _add_fig_header(
             fig,
@@ -999,7 +1003,7 @@ class AnalyticsService:
             vol    = _brl(row.get("vol", 0))
             marker = " ◀" if highlight_id and str(row["_id"]) == str(highlight_id) else ""
             lines.append(
-                f"{pos} <@{row['_id']}> ｜ **{wins}** vitórias ｜ `{wr}` ｜ {vol}{marker}"
+                f"{pos} <@{row['_id']}> ｜ **{wins}** vitórias ｜ `{wr}` {marker}"
             )
 
         embed = discord.Embed(
@@ -1010,11 +1014,7 @@ class AnalyticsService:
         embed.add_field(name="Jogadores ativos", value=f"`{len(top)}`",       inline=True)
         embed.add_field(name="Partidas",         value=f"`{total_partidas}`", inline=True)
         embed.add_field(name="Melhor WR",        value=f"`{top_wr:.1f}%`",   inline=True)
-        embed.add_field(
-            name  = "Maior volume",
-            value = f"**{_brl(max((row.get('vol', 0) for row in top), default=0))}**",
-            inline=True,
-        )
+        
         footer_suffix = " · Só você pode ver isso" if highlight_id else ""
         embed.set_footer(text=f"Atualizado {now.strftime('%d/%m/%Y %H:%M')} UTC | [players_dashboard]{footer_suffix}")
         return embed
