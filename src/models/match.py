@@ -44,6 +44,13 @@ class Match:
         'finalizado',
     ]
 
+    # ── Flow Types ────────────────────────────────────────────
+    # Identifica a origem/tipo da partida para roteamento de lógica
+    FLOW_TYPE_STANDARD        = 'standard'        # fila padrão (comportamento atual)
+    FLOW_TYPE_INFLUENCER_LIVE = 'influencer_live' # modo contra — sala do influencer
+
+    FLOW_TYPES = [FLOW_TYPE_STANDARD, FLOW_TYPE_INFLUENCER_LIVE]
+
     def __init__(self, data: Dict[str, Any]):
         self._id          = data.get('_id')
         self.guild_id     = data.get('guild_id')
@@ -75,6 +82,13 @@ class Match:
 
         self.cancelled_by  = str(data['cancelled_by']) if data.get('cancelled_by') else None
         self.cancel_reason = data.get('cancel_reason')
+
+        # ── Campos Influencer Live (todos opcionais — backward compatible) ──
+        self.flow_type        = data.get('flow_type', self.FLOW_TYPE_STANDARD)
+        self.room_id          = data.get('room_id')           # ObjectId da InfluencerLiveRoom
+        self.influencer_id    = data.get('influencer_id')     # ID Discord do influencer
+        self.custom_rules     = data.get('custom_rules')      # regras da sala no momento da partida
+        self.custom_entry_value = data.get('custom_entry_value')  # valor de entrada da sala
 
         self.created_at   = data.get('created_at', utcnow())
         self.updated_at   = data.get('updated_at', utcnow())
@@ -109,6 +123,13 @@ class Match:
             'premio_entregue_mediador':   self.premio_entregue_mediador,
             'cancelled_by':               self.cancelled_by,
             'cancel_reason':              self.cancel_reason,
+            # ── Influencer Live ──
+            'flow_type':                  self.flow_type,
+            'room_id':                    self.room_id,
+            'influencer_id':              self.influencer_id,
+            'custom_rules':               self.custom_rules,
+            'custom_entry_value':         self.custom_entry_value,
+            # ── Timestamps ──
             'created_at':                 self.created_at,
             'updated_at':                 utcnow(),
             'started_at':                 self.started_at,
@@ -122,6 +143,10 @@ class Match:
 
     def is_finished(self) -> bool:
         return self.status in (self.STATUS_FINALIZADO, self.STATUS_CANCELADO)
+
+    def is_live(self) -> bool:
+        """True se a partida pertence ao modo Influencer Live."""
+        return self.flow_type == self.FLOW_TYPE_INFLUENCER_LIVE
 
     def can_transition_to(self, new_status: str) -> bool:
         if new_status == self.STATUS_CANCELADO:
@@ -155,4 +180,7 @@ class Match:
         return []
 
     def __repr__(self) -> str:
-        return f"<Match id={self._id} status={self.status} value={self.bet_value}>"
+        return (
+            f"<Match id={self._id} status={self.status} "
+            f"value={self.bet_value} flow={self.flow_type}>"
+        )

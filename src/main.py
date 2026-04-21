@@ -4,8 +4,6 @@ import asyncio
 import os
 import random
 from datetime import datetime, timezone
-from discord import Interaction
-
 
 import discord
 from discord.ext import commands, tasks
@@ -22,7 +20,7 @@ from config.database         import db
 from config.discord_bot      import create_discord_bot, start_discord_bot, set_bot
 from utils.logger             import logger, log_success
 from utils.datetime_utils     import utcnow
-from utils.retry              import with_retry, on_rate_limit
+from utils.retry              import on_rate_limit
 from services.channel_service import RATE_LIMIT_CHANNEL_NAME, ADM_ROLE_NAME, PROTECTED_ROLES
 
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -35,14 +33,27 @@ COGS = [
     "cogs.analyst_cog",
     "cogs.invite_cog",
     "cogs.influencer_cog",
+    "cogs.influencer_live_cog",
     "cogs.renewal_cog",
     "cogs.thread_pool_cog",
     "cogs.renewal_dashboard_cog",
-    "cogs.alerts_cog",  # fix: estava faltando na lista original
+    "cogs.alerts_cog",
+    "cogs.moderation_cog",
 ]
 
 bot          = create_discord_bot()
 _initialized = False
+
+# ─────────────────────────────────────────────────────────────
+# Logs — instanciados dentro do on_ready para evitar chamadas
+# de API antes do bot estar conectado ao Discord
+# ─────────────────────────────────────────────────────────────
+
+_troca_cargo_log = None
+_call_log        = None
+_command_log     = None
+_delete_log      = None
+
 
 # ─────────────────────────────────────────────────────────────
 # Servidor HTTP — health check + webhook EFI
@@ -114,18 +125,12 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 # ─────────────────────────────────────────────────────────────
 
 async def _auto_setup_canais(guild: discord.Guild):
-    """
-    Executa o equivalente ao !setupcanais automaticamente toda vez que o
-    bot inicializa (startup, redeploy, crash+restart).
-    Não precisa de Context — chama o channel_setup_service diretamente.
-    """
     try:
         from services.channel_setup_service import channel_setup_service
         channel_setup_service.bot = bot
         result = await channel_setup_service.setup_all(guild)
         log_success(f"[AutoSetup] !setupcanais executado automaticamente: {result}")
 
-        # Notifica no canal alertas-adm que o setup rodou após reinício
         alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
         if alertas_ch:
             embed = discord.Embed(
@@ -142,7 +147,6 @@ async def _auto_setup_canais(guild: discord.Guild):
             await alertas_ch.send(embed=embed)
     except Exception as e:
         logger.error(f"[AutoSetup] Erro ao executar setupcanais automático: {e}", exc_info=True)
-        # Tenta notificar o erro no alertas-adm
         try:
             alertas_ch = discord.utils.get(guild.text_channels, name="alertas-adm")
             if alertas_ch:
@@ -158,16 +162,81 @@ async def _auto_setup_canais(guild: discord.Guild):
 
 
 # ─────────────────────────────────────────────────────────────
+# Garante índices + TTL no MongoDB
+# ─────────────────────────────────────────────────────────────
+
+async def _ensure_db_indexes():
+    _30_dias = 60 * 60 * 24 * 30  # 2_592_000 segundos
+
+    try:
+        # ── active_threads ──────────────────────────────────────
+        await db.get_collection("active_threads").create_index(
+            "thread_id", unique=True, background=True
+        )
+        await db.get_collection("active_threads").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        # ── thread_pool ─────────────────────────────────────────
+        await db.get_collection("thread_pool").create_index(
+            "thread_id", unique=True, background=True
+        )
+        await db.get_collection("thread_pool").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        # ── matches ─────────────────────────────────────────────
+        await db.get_collection("matches").create_index(
+            "thread_id", unique=True, sparse=True, background=True
+        )
+        await db.get_collection("matches").create_index(
+            "created_at", expireAfterSeconds=_30_dias, background=True
+        )
+
+        # ── influencer_live_rooms ────────────────────────────────
+        await db.get_collection("influencer_live_rooms").create_index(
+            [("influencer_id", 1), ("guild_id", 1)],
+            unique=True, background=True,
+        )
+
+        # ── influencer_live_queues ───────────────────────────────
+        await db.get_collection("influencer_live_queues").create_index(
+            [("influencer_id", 1), ("guild_id", 1)],
+            unique=True, background=True,
+        )
+
+        # ── mediator_live_queues ─────────────────────────────────
+        await db.get_collection("mediator_live_queues").create_index(
+            "guild_id", unique=True, background=True,
+        )
+
+        logger.info(
+            "[DB] Índices garantidos: active_threads, thread_pool, matches(sparse), "
+            "influencer_live_rooms, influencer_live_queues, mediator_live_queues "
+            "| TTL 30 dias ativo"
+        )
+    except Exception as e:
+        logger.warning(f"[DB] _ensure_db_indexes: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
 # on_ready
 # ─────────────────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
-    global _initialized
+    global _initialized, _troca_cargo_log, _call_log, _command_log, _delete_log
+
     if _initialized:
         logger.warning("[on_ready] Reconexão — pulando reinicialização.")
         return
     _initialized = True
+
+    # ── Instancia logs aqui — bot já está conectado ──────────
+    _troca_cargo_log = Troca_cargo(bot)
+    _call_log        = CallLog(bot)
+    _command_log     = CommandLog(bot)
+    _delete_log      = MessageDeleteLog(bot)
 
     guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
@@ -179,31 +248,38 @@ async def on_ready():
         logger.error(f"[SlashCommands] Erro: {e}")
 
     try:
-        from views.ticket_view import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
-        from views.mediator_panel_view     import MediatorPanelView
-        from views.quero_ser_mediador_view import PedidoMediadorView
-        from views.spam_block_card_view    import SpamBlockCardView
-        from views.match_queue_view        import MatchQueueView
-        from views.match_thread_view       import MatchThreadView
-        from views.health_check_view       import HealthCheckView
-        from views.analyst_views           import (
+        from views.ticket_view              import TicketPanelView, TicketCardView, SupportCardView, TicketChannelView
+        from views.mediator_panel_view      import MediatorPanelView
+        from views.quero_ser_mediador_view  import PedidoMediadorView
+        from views.spam_block_card_view     import SpamBlockCardView
+        from views.match_queue_view         import MatchQueueView
+        from views.match_thread_view        import MatchThreadView
+        from views.health_check_view        import HealthCheckView
+        from views.analyst_views            import (
             AnalystCaseView, AnalystDecisionView,
             ExposedPanelView, AnalisePanelView,
         )
-        from views.extra_panels            import (
+        from views.extra_panels             import (
             RenovacaoPanelView, PixPanelView,
             InfluencerMemberView, InfluencerAdminView,
         )
-        from views.staff_panels            import (
+        from views.staff_panels             import (
             MediadorPessoalView, MediadorAdminView,
             AnalistaPessoalView, AnalistaAdminView,
             SuporteAdminView,
         )
-        from views.blacklist_view          import BlacklistCheckView
-        from views.mediator_register_view  import MediatorRegisterView
-        from cogs.renewal_dashboard_cog    import ContractPanelView
-        from services.faturamento_mediador import RelatorioGeralView
-        from services.match_queue_service  import ConfirmationView
+        from views.blacklist_view           import BlacklistCheckView
+        from views.mediator_register_view   import MediatorRegisterView
+        from cogs.renewal_dashboard_cog     import ContractPanelView
+        from services.faturamento_mediador  import RelatorioGeralView
+        from services.match_queue_service   import ConfirmationView
+        # Onboarding
+        from views.rules_view               import RulesView, ConfirmationView as RulesConfirmationView
+        # Influencer Live
+        from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
+        from views.influencer_live_match_view import ContraConfirmView, ContraResultView
+        from views.influencer_live_admin_view import InfluencerLiveAdminView
+        from views.live_contra_setup_view     import LiveContraSetupView
 
         persistent_views = [
             TicketPanelView(),
@@ -234,6 +310,16 @@ async def on_ready():
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
+            # Onboarding — timeout=None já corrigido no rules_view.py
+            RulesView(),
+            RulesConfirmationView(),
+            # Influencer Live
+            ContraRoomView(influencer_id=0, guild_id=0),
+            ControllerLivePanelView(),
+            ContraConfirmView(match_id="__persistent__", challenger_id=0, influencer_id=0),
+            ContraResultView(match_id="__persistent__", influencer_id=0, challenger_id=0, guild_id=0),
+            InfluencerLiveAdminView(),
+            LiveContraSetupView(),
         ]
 
         for view in persistent_views:
@@ -255,7 +341,6 @@ async def on_ready():
     if not rate_limit_monitor.daily_summary.is_running():
         rate_limit_monitor.daily_summary.start()
 
-    # Onboarding — instancia e restaura estado do DB
     from services.onboarding_service import OnboardingService
     bot._onboarding_service = OnboardingService(bot)
     if guild:
@@ -289,8 +374,9 @@ async def on_ready():
 
     try:
         from services.thread_reuse_service import init_thread_reuse_service
-        init_thread_reuse_service(bot)
-        logger.info("[ThreadReuse] Serviço inicializado")
+        svc = init_thread_reuse_service(bot)
+        await svc.ensure_indexes()
+        logger.info("[ThreadReuse] Serviço inicializado + índices garantidos")
     except Exception as e:
         logger.warning(f"[ThreadReuse] {e}")
 
@@ -337,8 +423,6 @@ async def on_ready():
     if not set_status.is_running():
         set_status.start()
 
-    # ── Circuit Breaker — injeta bot para notificações em #alertas-adm ──
-    # Precisa ser feito aqui pois o bot só está disponível após on_ready.
     try:
         from utils.circuit_breaker import db_circuit_breaker
         db_circuit_breaker.set_bot(bot)
@@ -346,10 +430,6 @@ async def on_ready():
     except Exception as e:
         logger.warning(f"[CircuitBreaker] Erro ao injetar bot: {e}")
 
-    # ── Auto Setup de canais ─────────────────────────────────────────────
-    # Toda vez que o bot sobe (novo deploy, crash recovery, redeploy)
-    # executa !setupcanais automaticamente — sem precisar digitar nada.
-    # O resultado é notificado em #alertas-adm.
     if guild:
         asyncio.create_task(_auto_setup_canais(guild))
 
@@ -373,12 +453,6 @@ async def on_member_join(member: discord.Member):
         await svc.handle_new_member(member)
 
 
-_troca_cargo_log = Troca_cargo(bot)
-_call_log        = CallLog(bot)
-_command_log     = CommandLog(bot)
-_delete_log      = MessageDeleteLog(bot)
-
-
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     if before.roles == after.roles:
@@ -395,8 +469,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         return
 
     try:
-        guild    = after.guild
-        adm_role = discord.utils.get(guild.roles, name=ADM_ROLE_NAME)
+        guild = after.guild
 
         async for entry in guild.audit_logs(
             limit=5,
@@ -430,8 +503,11 @@ async def on_member_update(before: discord.Member, after: discord.Member):
         from services.channel_service import LOGS_TROCA_CARGO_CHANNEL
         log_ch = discord.utils.get(guild.text_channels, name=LOGS_TROCA_CARGO_CHANNEL)
         if log_ch:
-            embed = discord.Embed(title="⚠️ Tentativa de Auto-Atribuição de Cargo",
-                                  color=0xE74C3C, timestamp=utcnow())
+            embed = discord.Embed(
+                title="⚠️ Tentativa de Auto-Atribuição de Cargo",
+                color=0xE74C3C,
+                timestamp=utcnow(),
+            )
             embed.add_field(name="Membro",   value=f"{after.mention} (`{after.id}`)", inline=True)
             embed.add_field(name="Cargo(s)", value=role_names,                        inline=True)
             embed.set_footer(text="Bot removeu automaticamente")
@@ -446,6 +522,8 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 @bot.event
 async def on_voice_state_update(member, before, after):
     logger.info(f"[VOICE] Evento detectado: {member}")
+    if _call_log is None:
+        return
     if not before.channel and after.channel:
         await _call_log.on_enter(member, after.channel)
     elif before.channel and not after.channel:
@@ -455,6 +533,8 @@ async def on_voice_state_update(member, before, after):
 @bot.event
 async def on_command(ctx):
     logger.info(f"[COMMAND] Detectado: {ctx.command}")
+    if _command_log is None:
+        return
     args = " ".join(ctx.message.content.split()[1:])
     await _command_log.send_command_log(ctx.author, str(ctx.command), args, ctx.channel)
 
@@ -462,7 +542,7 @@ async def on_command(ctx):
 @bot.event
 async def on_message_delete(message: discord.Message):
     logger.info(f"[DELETE] Detectado: {message.author}")
-    if message.author.bot:
+    if message.author.bot or _delete_log is None:
         return
     await _delete_log.send_delete_log(message)
 
@@ -515,7 +595,7 @@ async def on_app_command_error(interaction, error):
 async def set_status():
     statuses = [
         discord.Activity(type=discord.ActivityType.watching,  name="as filas de partidas"),
-        discord.Activity(type=discord.ActivityType.playing,   name="X1 Frifas"),
+        discord.Activity(type=discord.ActivityType.playing,   name="SOLAR E-SPORTS"),
         discord.Activity(type=discord.ActivityType.listening, name="os mediadores"),
         discord.Activity(type=discord.ActivityType.watching,  name=f"{len(bot.guilds)} servidor(es)"),
     ]
@@ -528,18 +608,17 @@ async def before_set_status():
 
 
 # ─────────────────────────────────────────────────────────────
-# Entrypoint — Cogs carregados ANTES do bot.start()
+# Entrypoint
 # ─────────────────────────────────────────────────────────────
 
 async def main():
-    logger.info("Iniciando X1 Frifas Bot...")
+    logger.info("Iniciando Solar Bot...")
     await db.connect()
     log_success("MongoDB conectado!")
     set_bot(bot)
 
-    # Carrega todos os cogs ANTES de iniciar o bot para evitar
-    # race condition no on_ready e garantir que tudo está disponível
-    # desde o primeiro evento, inclusive após reconexão.
+    await _ensure_db_indexes()
+
     for cog in COGS:
         try:
             await bot.load_extension(cog)

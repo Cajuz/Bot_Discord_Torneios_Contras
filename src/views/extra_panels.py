@@ -7,11 +7,17 @@ import os
 import re
 from utils.datetime_utils import utcnow
 from utils.logger import logger
-from services.channel_service import CONTROLLER_ROLE_NAME, ADM_ROLE_NAME
+from services.channel_service import (
+    CONTROLLER_ROLE_NAME, ADM_ROLE_NAME,
+    STATUS_BOT_CHANNEL,
+)
 
-THEME  = 0xFFD54F   # amarelo  — mediador / renovação
-THEME2 = 0xFFA726   # laranja  — admin / influencer
-SUCCESS = 0x2ECC71  # verde    — confirmações
+THEME   = 0xFFD54F   # amarelo  — mediador / renovação
+THEME2  = 0xFFA726   # laranja  — admin / influencer
+SUCCESS = 0x2ECC71   # verde    — confirmações
+
+# Nome do canal onde os convites de influencers são gerados
+CONVITES_CHANNEL_NAME = STATUS_BOT_CHANNEL  # "convites"
 
 
 def _is_mediator(interaction: discord.Interaction) -> bool:
@@ -165,7 +171,7 @@ class PixPanelView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="Cadastrar / Atualizar PIX", style=discord.ButtonStyle.success,
-                    custom_id="pix_panel_cadastrar")
+                       custom_id="pix_panel_cadastrar")
     async def cadastrar_pix(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not _is_mediator(interaction):
             await interaction.response.send_message(
@@ -185,8 +191,8 @@ class PixPanelView(discord.ui.View):
                 "Você não tem chave PIX cadastrada.", ephemeral=True)
             return
         embed = discord.Embed(title="❖ Sua Chave PIX", color=THEME)
-        embed.add_field(name="Chave",    value=f"`{doc['pix_key']}`",     inline=False)
-        embed.add_field(name="Tipo",     value=doc.get("pix_type", "—"),  inline=True)
+        embed.add_field(name="Chave",    value=f"`{doc['pix_key']}`",    inline=False)
+        embed.add_field(name="Tipo",     value=doc.get("pix_type", "—"), inline=True)
         updated = doc.get("updated_at")
         if updated:
             embed.add_field(
@@ -290,7 +296,10 @@ class InfluencerMemberView(discord.ui.View):
         inf   = stats["influencer"]
         embed = discord.Embed(title="📊 Seus Stats", color=THEME)
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        embed.add_field(name="Link de convite",  value=f"`{inf.get('invite_code','—')}`",              inline=True)
+        # Monta o link completo se houver código salvo
+        invite_code = inf.get("invite_code", "")
+        invite_display = f"https://discord.gg/{invite_code}" if invite_code else "—"
+        embed.add_field(name="Link de convite",  value=invite_display,                                 inline=False)
         embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",          inline=True)
         embed.add_field(name="Comissão/membro",  value=f"R$ {inf.get('commission_per_member',2):.2f}", inline=True)
         embed.add_field(name="Total acumulado",  value=f"**R$ {stats['commission_due']:.2f}**",        inline=False)
@@ -442,7 +451,9 @@ class _BuscarInfluencerModal(discord.ui.Modal, title="Stats de Influencer"):
         embed  = discord.Embed(title=f"📊 Stats — {name}", color=THEME2)
         if member:
             embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Invite",           value=f"`{inf.get('invite_code','—')}`",              inline=True)
+        invite_code = inf.get("invite_code", "")
+        invite_display = f"https://discord.gg/{invite_code}" if invite_code else "—"
+        embed.add_field(name="Link de convite",  value=invite_display,                                 inline=False)
         embed.add_field(name="Membros trazidos", value=f"`{stats['total_members_brought']}`",          inline=True)
         embed.add_field(name="Comissão/membro",  value=f"R$ {inf.get('commission_per_member',2):.2f}", inline=True)
         embed.add_field(name="Partidas geradas", value=f"`{stats['total_matches_played']}`",           inline=True)
@@ -454,30 +465,92 @@ class _BuscarInfluencerModal(discord.ui.Modal, title="Stats de Influencer"):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+# ── helper: gera invite real no canal convites ────────────────────────────
+async def _create_influencer_invite(
+    guild: discord.Guild,
+    influencer_name: str,
+) -> discord.Invite | None:
+    """
+    Cria um convite permanente (max_age=0, max_uses=0) no canal `convites`.
+    Retorna o objeto Invite ou None se o canal não for encontrado.
+    """
+    channel = discord.utils.get(guild.text_channels, name=CONVITES_CHANNEL_NAME)
+    if channel is None:
+        logger.warning(
+            f"[InfluencerInvite] Canal '{CONVITES_CHANNEL_NAME}' não encontrado no servidor."
+        )
+        return None
+    try:
+        invite = await channel.create_invite(
+            max_age=0,       # permanente
+            max_uses=0,      # usos ilimitados
+            unique=True,
+            reason=f"Convite de influencer: {influencer_name}",
+        )
+        return invite
+    except discord.Forbidden:
+        logger.error(
+            f"[InfluencerInvite] Sem permissão para criar invite em '{CONVITES_CHANNEL_NAME}'."
+        )
+        return None
+    except Exception as e:
+        logger.error(f"[InfluencerInvite] Erro ao criar invite: {e}")
+        return None
+
+
 class _AdicionarInfluencerModal(discord.ui.Modal, title="Adicionar Influencer"):
-    membro_id   = discord.ui.TextInput(label="ID Discord do membro",
-                                        placeholder="Ex: 123456789012345678",
-                                        min_length=10, max_length=20)
-    invite_code = discord.ui.TextInput(label="Código do invite",
-                                        placeholder="Ex: abc123",
-                                        min_length=1, max_length=20)
-    comissao    = discord.ui.TextInput(label="Comissão por membro (R$)",
-                                        placeholder="Ex: 2.50",
-                                        min_length=1, max_length=6)
+    """
+    Campos: ID do membro + comissão.
+    O link de convite é gerado automaticamente no canal #convites.
+    """
+    membro_id = discord.ui.TextInput(
+        label="ID Discord do membro",
+        placeholder="Ex: 123456789012345678",
+        min_length=10, max_length=20,
+    )
+    comissao = discord.ui.TextInput(
+        label="Comissão por membro (R$)",
+        placeholder="Ex: 2.50",
+        min_length=1, max_length=6,
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+
+        # Valida comissão
         try:
             comm = float(self.comissao.value.replace(",", "."))
         except ValueError:
             await interaction.followup.send("Valor de comissão inválido.", ephemeral=True)
             return
+
         member = interaction.guild.get_member(int(self.membro_id.value.strip()))
-        name   = member.display_name if member else f"ID:{self.membro_id.value}"
+        name   = member.display_name if member else f"ID:{self.membro_id.value.strip()}"
+
+        # Gera invite real no canal #convites
+        invite = await _create_influencer_invite(interaction.guild, name)
+        if invite is None:
+            await interaction.followup.send(
+                f"❌ Não foi possível gerar o link de convite.\n"
+                f"Verifique se o canal **`{CONVITES_CHANNEL_NAME}`** existe e se o bot "
+                f"tem permissão de **Criar Convite** nele.",
+                ephemeral=True,
+            )
+            return
+
+        invite_code = invite.code   # apenas o código (ex: "abc123")
+        invite_url  = invite.url    # URL completa (ex: "https://discord.gg/abc123")
+
+        # Cadastra no DB com o código gerado
         from services.influencer_service import influencer_service
         await influencer_service.add_influencer(
-            discord_id=self.membro_id.value.strip(), username=name,
-            invite_code=self.invite_code.value.strip(), commission_per_member=comm)
+            discord_id=self.membro_id.value.strip(),
+            username=name,
+            invite_code=invite_code,
+            commission_per_member=comm,
+        )
+
+        # Atribui cargo Influencer se o membro estiver no servidor
         if member:
             role = discord.utils.get(interaction.guild.roles, name="Influencer")
             if role and role not in member.roles:
@@ -485,9 +558,17 @@ class _AdicionarInfluencerModal(discord.ui.Modal, title="Adicionar Influencer"):
                     await member.add_roles(role, reason="Cadastrado como influencer")
                 except Exception:
                     pass
+
         await interaction.followup.send(
-            f"✅ **{name}** cadastrado | Invite: `{self.invite_code.value}` | "
-            f"Comissão: R$ {comm:.2f}/membro", ephemeral=True)
+            f"✅ **{name}** cadastrado como influencer!\n"
+            f"🔗 **Link de convite:** {invite_url}\n"
+            f"💰 **Comissão:** R$ {comm:.2f}/membro",
+            ephemeral=True,
+        )
+        logger.info(
+            f"[Influencer] {name} ({self.membro_id.value.strip()}) cadastrado "
+            f"| invite: {invite_url} | comissão: R$ {comm:.2f}"
+        )
 
 
 class _RemoverInfluencerModal(discord.ui.Modal, title="Remover Influencer"):

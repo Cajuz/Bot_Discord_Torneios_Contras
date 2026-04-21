@@ -23,7 +23,7 @@ MAX_MESSAGES      = 500   # limite do history — loga aviso se atingido
 
 
 # ─────────────────────────────────────────────────────────────
-# CSS + JS (inalterados — apenas movidos para constantes)
+# CSS + JS
 # ─────────────────────────────────────────────────────────────
 
 HTML_CSS = """
@@ -152,6 +152,11 @@ class ThreadLogService:
     # ── API pública ───────────────────────────────────────────
 
     async def archive_thread(self, thread: discord.Thread, match: dict):
+        """
+        Lê todas as mensagens da thread, gera um ZIP (HTML + mídia) e
+        envia para o canal #logs-partidas.
+        Deve ser chamado ANTES de qualquer limpeza de mensagens.
+        """
         try:
             guild        = thread.guild
             logs_channel = discord.utils.get(guild.text_channels, name=LOGS_CHANNEL_NAME)
@@ -167,7 +172,6 @@ class ThreadLogService:
             match_id = str(match.get("_id", thread.id))
             logger.info(f"[ThreadLog] Gerando ZIP para match {match_id}...")
 
-            # ← session única reutilizada em todos os downloads
             async with aiohttp.ClientSession() as session:
                 zip_buffer, filename, included_media = await self._build_zip(
                     thread, match, messages, match_id, session, include_media=True
@@ -175,7 +179,6 @@ class ThreadLogService:
 
             size_mb = zip_buffer.getbuffer().nbytes / (1024 * 1024)
 
-            # ← fallback sem mídia — não rebaixa os arquivos
             if size_mb > MAX_ZIP_MB:
                 logger.warning(
                     f"[ThreadLog] ZIP muito grande ({size_mb:.1f} MB) "
@@ -223,6 +226,22 @@ class ThreadLogService:
             logger.error(
                 f"[ThreadLog] Erro ao arquivar thread {thread.id}: {e}", exc_info=True)
 
+    # ── Busca de mensagens ────────────────────────────────────
+
+    async def _fetch_messages(self, thread: discord.Thread) -> List[discord.Message]:
+        messages = []
+        try:
+            async for msg in thread.history(limit=MAX_MESSAGES, oldest_first=True):
+                messages.append(msg)
+            if len(messages) == MAX_MESSAGES:
+                logger.warning(
+                    f"[ThreadLog] Limite de {MAX_MESSAGES} mensagens atingido "
+                    f"para thread {thread.id} — log pode estar incompleto."
+                )
+        except Exception as e:
+            logger.error(f"[ThreadLog] Erro ao buscar histórico da thread {thread.id}: {e}")
+        return messages
+
     # ── Geração do ZIP ────────────────────────────────────────
 
     async def _build_zip(
@@ -231,8 +250,8 @@ class ThreadLogService:
         match:         dict,
         messages:      List[discord.Message],
         match_id:      str,
-        session:       aiohttp.ClientSession,  # ← session reutilizada
-        include_media: bool = True,            # ← nome semântico correto
+        session:       aiohttp.ClientSession,
+        include_media: bool = True,
     ) -> Tuple[io.BytesIO, str, bool]:
         """Retorna (BytesIO, filename, media_incluída)."""
         zip_buffer  = io.BytesIO()
@@ -266,6 +285,18 @@ class ThreadLogService:
         zip_buffer.seek(0)
         filename = f"match_{match_id[:12]}.zip"
         return zip_buffer, filename, include_media
+
+    # ── Download de anexo ─────────────────────────────────────
+
+    async def _download(self, url: str, session: aiohttp.ClientSession) -> Optional[bytes]:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                logger.warning(f"[ThreadLog] Download falhou (HTTP {resp.status}): {url}")
+        except Exception as e:
+            logger.warning(f"[ThreadLog] Erro ao baixar anexo {url}: {e}")
+        return None
 
     # ── Geração do HTML ───────────────────────────────────────
 
@@ -329,162 +360,109 @@ class ThreadLogService:
     <div class="info-card"><div class="label">Taxa</div><div class="value">R$ {taxa:.2f}</div></div>
     <div class="info-card"><div class="label">Criada em</div><div class="value">{created_str}</div></div>
     <div class="info-card"><div class="label">Mediador</div><div class="value blue">{_escape(mediator)}</div></div>
-    <div class="info-card"><div class="label">Mensagens</div><div class="value">{len(messages)}</div></div>
   </div>
   {teams_html}
 </div>"""
 
-        timeline_items = [
-            self._render_message(msg, match, media_map) for msg in messages]
-
-        total_media = sum(len(m.attachments) for m in messages)
-        total_bot   = sum(1 for m in messages if m.author.bot)
-        total_user  = len(messages) - total_bot
-
-        footer = f"""
-<div class="footer">
-  💬 {total_user} mensagens de usuários &nbsp;|&nbsp;
-  🤖 {total_bot} mensagens do bot &nbsp;|&nbsp;
-  🖼️ {total_media} arquivos de mídia<br>
-  Gerado automaticamente em {utcnow().strftime('%d/%m/%Y %H:%M UTC')}
-</div>"""
+        msgs_html = self._build_messages_html(messages, media_map, match)
 
         return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Log — Match {_escape(match_id[:12])}</title>
+  <title>Log — {_escape(match_id[:12])}</title>
   <style>{HTML_CSS}</style>
 </head>
 <body>
-<div id="lightbox"><img id="lb-img" src="" alt="preview"></div>
 <div class="container">
   {header}
-  <div class="timeline-header">💬 Timeline da Partida</div>
-  {''.join(timeline_items)}
-  {footer}
+  <div class="timeline-header">💬 Timeline da Partida ({len(messages)} mensagens)</div>
+  {msgs_html}
+  <div class="footer">
+    X1 Fritas Bot &nbsp;|&nbsp; Log gerado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC
+  </div>
 </div>
+<div id="lightbox"><img id="lb-img" src="" alt=""></div>
 <script>{HTML_JS}</script>
 </body>
 </html>"""
 
-    def _render_message(
+    def _build_messages_html(
         self,
-        msg:       discord.Message,
-        match:     dict,
+        messages:  List[discord.Message],
         media_map: dict,
+        match:     dict,
     ) -> str:
-        is_bot      = msg.author.bot
-        author_name = _escape(msg.author.display_name)
-        ts          = msg.created_at.strftime("%H:%M:%S")
-        is_mediator = str(msg.author.id) == str(match.get("mediator_id", ""))
+        mediator_id = str(match.get("mediator_id", ""))
+        parts = []
 
-        author_class = "bot" if is_bot else ("mediator" if is_mediator else "")
-        avatar_class = "bot" if is_bot else ""
-        letter       = "🤖" if is_bot else _avatar_letter(msg.author.display_name)
+        for msg in messages:
+            is_bot      = msg.author.bot
+            is_mediator = str(msg.author.id) == mediator_id
+            author_name = _escape(msg.author.display_name)
+            ts          = msg.created_at.strftime("%H:%M:%S")
 
-        content_html = ""
-        if msg.content and msg.content.strip():
-            text = _escape(msg.content)
-            text = re.sub(
-                r"&lt;@(\d+)&gt;",
-                r'<span style="color:#a78bfa">@\1</span>', text)
-            content_html = f'<div class="msg-content">{text}</div>'
+            avatar_cls  = "bot" if is_bot else ""
+            author_cls  = "bot" if is_bot else ("mediator" if is_mediator else "")
+            letter      = _avatar_letter(msg.author.display_name)
 
-        embeds_html = ""
-        if is_bot and msg.embeds:
-            parts = []
+            content_html = ""
+            if msg.content:
+                content_html = f'<div class="msg-content">{_escape(msg.content)}</div>'
+
+            embeds_html = ""
             for emb in msg.embeds:
-                cc    = _color_class(emb.color)
-                title = (f'<div class="bot-embed-title">{_escape(emb.title)}</div>'
-                         if emb.title else "")
-                desc  = (f'<div class="bot-embed-desc">{_escape(emb.description)}</div>'
-                         if emb.description else "")
-                # ← renomeado de `f` para `field` — evita confusão com f-strings
-                fields_html = "".join(
+                cls   = _color_class(emb.colour.value if emb.colour else None)
+                title = f'<div class="bot-embed-title">{_escape(emb.title or "")}</div>' if emb.title else ""
+                desc  = f'<div class="bot-embed-desc">{_escape(emb.description or "")}</div>' if emb.description else ""
+                fields = "".join(
                     f'<div class="bot-embed-field">'
-                    f'<div class="bot-embed-field-name">{_escape(field.name)}</div>'
-                    f'<div class="bot-embed-field-value">{_escape(field.value)}</div>'
+                    f'<div class="bot-embed-field-name">{_escape(f.name)}</div>'
+                    f'<div class="bot-embed-field-value">{_escape(f.value)}</div>'
                     f'</div>'
-                    for field in emb.fields
+                    for f in emb.fields
                 )
-                parts.append(
-                    f'<div class="bot-embed {cc}">{title}{desc}{fields_html}</div>')
-            embeds_html = "".join(parts)
+                embeds_html += f'<div class="bot-embed {cls}">{title}{desc}{fields}</div>'
 
-        attachments_html = ""
-        for att in msg.attachments:
-            fname = att.filename.lower()
-            local = media_map.get(att.url, "")
-            src   = local if local else att.url
-
-            if any(fname.endswith(e) for e in (".png", ".jpg", ".jpeg", ".gif", ".webp")):
-                attachments_html += (
-                    f'<div class="attachment">'
-                    f'<img src="{_escape(src)}" alt="{_escape(att.filename)}" '
-                    f'title="{_escape(att.filename)}"></div>')
-            elif any(fname.endswith(e) for e in (".mp4", ".mov", ".avi", ".webm")):
-                if local:
+            attachments_html = ""
+            for att in msg.attachments:
+                ext = os.path.splitext(att.filename)[1].lower()
+                local = media_map.get(att.url, "")
+                src   = local if local else att.url
+                if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
                     attachments_html += (
                         f'<div class="attachment">'
-                        f'<video controls src="{_escape(local)}"></video></div>')
+                        f'<img src="{_escape(src)}" alt="{_escape(att.filename)}" loading="lazy">'
+                        f'</div>'
+                    )
+                elif ext in (".mp4", ".mov", ".webm"):
+                    attachments_html += (
+                        f'<div class="attachment">'
+                        f'<video src="{_escape(src)}" controls></video>'
+                        f'</div>'
+                    )
                 else:
+                    label = att.filename
                     attachments_html += (
                         f'<div class="attachment">'
-                        f'<a class="attachment-link" href="{_escape(att.url)}" target="_blank">'
-                        f'🎥 {_escape(att.filename)} (link externo)</a></div>')
-            else:
-                attachments_html += (
-                    f'<div class="attachment">'
-                    f'<a class="attachment-link" href="{_escape(src)}">'
-                    f'📎 {_escape(att.filename)}</a></div>')
+                        f'<a class="attachment-link" href="{_escape(src)}" target="_blank">📎 {_escape(label)}</a>'
+                        f'</div>'
+                    )
 
-        body = content_html + embeds_html + attachments_html
-        if not body.strip():
-            return ""
-
-        return f"""
+            parts.append(f"""
 <div class="message">
-  <div class="avatar {avatar_class}">{letter}</div>
+  <div class="avatar {avatar_cls}">{letter}</div>
   <div class="msg-body">
     <div class="msg-meta">
-      <span class="msg-author {author_class}">{author_name}</span>
+      <span class="msg-author {author_cls}">{author_name}</span>
       <span class="msg-timestamp">{ts}</span>
     </div>
-    {body}
+    {content_html}{embeds_html}{attachments_html}
   </div>
-</div>"""
+</div>""")
 
-    # ── Helpers ───────────────────────────────────────────────
-
-    async def _fetch_messages(self, thread: discord.Thread) -> List[discord.Message]:
-        msgs = []
-        try:
-            async for m in thread.history(limit=MAX_MESSAGES, oldest_first=True):
-                msgs.append(m)
-            if len(msgs) == MAX_MESSAGES:
-                logger.warning(
-                    f"[ThreadLog] Thread {thread.id} atingiu limite de "
-                    f"{MAX_MESSAGES} mensagens — log pode estar incompleto.")
-        except discord.Forbidden:
-            logger.warning(f"[ThreadLog] Sem permissão para ler thread {thread.id}")
-        except Exception as e:
-            logger.error(f"[ThreadLog] Erro ao ler mensagens: {e}")
-        return msgs
-
-    async def _download(
-        self, url: str, session: aiohttp.ClientSession  # ← session injetada
-    ) -> Optional[bytes]:
-        try:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=30)
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-        except Exception as e:
-            logger.warning(f"[ThreadLog] Falha ao baixar {url}: {e}")
-        return None
+        return "\n".join(parts)
 
 
 # ─────────────────────────────────────────────────────────────
