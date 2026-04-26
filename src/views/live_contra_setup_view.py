@@ -1,20 +1,15 @@
 """
 live_contra_setup_view.py
 View postada no canal #live-contra.
-Permite ao Influencer configurar e criar sua sala no modo contra.
 
 Fluxo:
-  1. Influencer seleciona Plataforma (Mobile / Emulador / Misto)
-  2. Influencer seleciona Tipo (1x1 / 2x2 / 3x3 / 4x4)
-     → opções filtradas por plataforma (Misto não tem 1x1)
-  3. Clica em "📋 Regras" → Modal → preenche regras (opcional)
-  4. Clica em "💰 Valor"  → Modal → preenche valor de entrada
-  5. Botão "⚔️ Criar Sala" é liberado → cria os canais e a sala
+  1. Influencer clica em "Configurar Minha Sala" → abre LiveContraSessionView ephemeral
+  2. Seleciona Plataforma → Tipo → Regras (opcional) → Valor
+  3. Clica em "Criar Sala" → bot cria canais e sala
 
-FIX:
-  - PlatformSelect e GameModeSelect têm custom_id com influencer_id
-    para evitar colisão entre sessões simultâneas.
-  - LiveContraSessionView.on_timeout envia mensagem amigável.
+FIX BUG 4:
+  LiveContraSessionView salva a interaction original na primeira interação
+  para poder chamar edit_original_response no on_timeout.
 """
 from __future__ import annotations
 import discord
@@ -46,15 +41,14 @@ def build_live_contra_embed() -> discord.Embed:
     return embed
 
 
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # VIEW PRINCIPAL (persistent) — apenas 1 botão fixo
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 class LiveContraSetupView(View):
     """
     Painel fixo no canal #live-contra.
-    Só contém o botão 'Configurar Minha Sala' (custom_id fixo = ok para persistent).
-    A sessão de configuração é aberta em ephemeral como LiveContraSessionView.
+    custom_id FIXO = "live_contra_open_session" → ok para persistent view.
     """
 
     def __init__(self):
@@ -105,24 +99,26 @@ class LiveContraSetupView(View):
             color=THEME_LIVE,
         )
         await interaction.response.send_message(embed=embed, view=session_view, ephemeral=True)
+        # FIX BUG 4: salva a interaction para usar no on_timeout
+        session_view._setup_interaction = interaction
 
 
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # VIEW DE SESSÃO (ephemeral — timeout=300)
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 class LiveContraSessionView(View):
     """
-    View ephemeral de configuração da sala (timeout=300s).
-    Não é persistent — é recriada a cada clique no botão principal.
-    custom_id inclui influencer_id para evitar colisão entre sessões simultâneas.
+    View ephemeral de configuração (timeout=300s).
+    Não é persistent — recriada a cada clique no botão principal.
     """
 
     def __init__(self, influencer_id: int, guild_id: int):
         super().__init__(timeout=300)
-        self.influencer_id = influencer_id
-        self.guild_id      = guild_id
-        self._timed_out    = False
+        self.influencer_id      = influencer_id
+        self.guild_id           = guild_id
+        self._timed_out         = False
+        self._setup_interaction: discord.Interaction | None = None
 
         self.selected_platform: str | None  = None
         self.selected_game_mode: str | None = None
@@ -134,15 +130,29 @@ class LiveContraSessionView(View):
         self._refresh_criar_button()
 
     async def on_timeout(self):
-        """FIX: mensagem amigável ao invés de 'This interaction failed'."""
+        """FIX BUG 4: edita a mensagem ephemeral original para mostrar expiração."""
         self._timed_out = True
         for item in self.children:
             item.disabled = True
-        # Não é possível editar a mensagem ephemeral aqui sem interaction,
-        # mas desabilitamos os itens para evitar cliques mortos.
+        if self._setup_interaction:
+            try:
+                embed = discord.Embed(
+                    title="⏱️ Sessão Expirada",
+                    description=(
+                        "Sua sessão de configuração expirou após 5 minutos de inatividade.\n"
+                        "Clique em **⚔️ Configurar Minha Sala** novamente para recomeçar."
+                    ),
+                    color=discord.Colour.orange(),
+                )
+                await self._setup_interaction.edit_original_response(
+                    embed=embed, view=self
+                )
+            except Exception:
+                pass  # mensagem pode já ter sido deletada ou interação expirou
         logger.info(f"[LiveContraSession] Sessão expirou — influencer {self.influencer_id}")
 
     def _refresh_criar_button(self):
+        # Remove apenas botões (mantém os selects)
         self.children = [c for c in self.children if isinstance(c, Select)]
 
         can_create = (
@@ -182,10 +192,9 @@ class LiveContraSessionView(View):
         self.add_item(criar_btn)
 
     async def _check_expired(self, interaction: discord.Interaction) -> bool:
-        """Retorna True e responde se a sessão expirou."""
         if self._timed_out:
             await interaction.response.send_message(
-                "⏱️ Sua sessão de configuração expirou. Clique em **Configurar Minha Sala** novamente.",
+                "⏱️ Sua sessão expirou. Clique em **⚔️ Configurar Minha Sala** novamente.",
                 ephemeral=True,
             )
             return True
@@ -196,16 +205,14 @@ class LiveContraSessionView(View):
         if interaction.user.id != self.influencer_id:
             await interaction.response.send_message("❌ Esta sessão não é sua.", ephemeral=True)
             return
-        modal = _RegrasModalSession(session_view=self)
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(_RegrasModalSession(session_view=self))
 
     async def btn_valor(self, interaction: discord.Interaction):
         if await self._check_expired(interaction): return
         if interaction.user.id != self.influencer_id:
             await interaction.response.send_message("❌ Esta sessão não é sua.", ephemeral=True)
             return
-        modal = _ValorModalSession(session_view=self)
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(_ValorModalSession(session_view=self))
 
     async def btn_criar(self, interaction: discord.Interaction):
         if await self._check_expired(interaction): return
@@ -257,7 +264,10 @@ class LiveContraSessionView(View):
         )
 
     async def _update_message(self, interaction: discord.Interaction):
+        # Salva interaction mais recente para on_timeout
+        self._setup_interaction = interaction
         self._refresh_criar_button()
+
         plat = self.selected_platform or "—"
         modo = self.selected_game_mode or "—"
         val  = f"R$ {self.entry_value:.2f}" if self.entry_value else "—"
@@ -274,15 +284,15 @@ class LiveContraSessionView(View):
             and self.selected_game_mode is not None
             and self.entry_value is not None
         )
-        if can_create:
-            embed.description = "✅ Tudo pronto! Clique em **Criar Sala** para abrir a fila."
-        else:
-            missing = []
-            if not self.selected_platform:  missing.append("Plataforma")
-            if not self.selected_game_mode: missing.append("Tipo")
-            if not self.entry_value:        missing.append("Valor")
-            embed.description = f"Faltando: **{', '.join(missing)}**"
-
+        embed.description = (
+            "✅ Tudo pronto! Clique em **Criar Sala** para abrir a fila."
+            if can_create else
+            "Faltando: **" + ", ".join(
+                (["Plataforma"] if not self.selected_platform else []) +
+                (["Tipo"] if not self.selected_game_mode else []) +
+                (["Valor"] if not self.entry_value else [])
+            ) + "**"
+        )
         await interaction.edit_original_response(embed=embed, view=self)
 
 
@@ -290,14 +300,13 @@ class LiveContraSessionView(View):
 
 class PlatformSelect(Select):
     def __init__(self, influencer_id: int):
-        options = [
-            discord.SelectOption(label="📱 Mobile",    value="Mobile",   description="Free Fire Mobile"),
-            discord.SelectOption(label="🖥️ Emulador", value="Emulador", description="Free Fire Emulador"),
-            discord.SelectOption(label="🔀 Misto",     value="Misto",    description="Mobile vs Emulador (sem 1x1)"),
-        ]
         super().__init__(
             placeholder="Selecione a Plataforma...",
-            options=options,
+            options=[
+                discord.SelectOption(label="📱 Mobile",    value="Mobile",   description="Free Fire Mobile"),
+                discord.SelectOption(label="🖥️ Emulador", value="Emulador", description="Free Fire Emulador"),
+                discord.SelectOption(label="🔀 Misto",     value="Misto",    description="Mobile vs Emulador (sem 1x1)"),
+            ],
             custom_id=f"session_select_platform_{influencer_id}",
             row=0,
         )
@@ -309,7 +318,8 @@ class PlatformSelect(Select):
             return
         view.selected_platform = self.values[0]
         if view.selected_game_mode:
-            allowed = InfluencerLiveRoom.MODES_BY_PLATFORM.get(view.selected_platform, InfluencerLiveRoom.GAME_MODES)
+            allowed = InfluencerLiveRoom.MODES_BY_PLATFORM.get(
+                view.selected_platform, InfluencerLiveRoom.GAME_MODES)
             if view.selected_game_mode not in allowed:
                 view.selected_game_mode = None
         for item in view.children:
@@ -329,10 +339,8 @@ class GameModeSelect(Select):
         )
 
     def _build_options(self, platform: str | None) -> list[discord.SelectOption]:
-        if platform:
-            modes = InfluencerLiveRoom.MODES_BY_PLATFORM.get(platform, InfluencerLiveRoom.GAME_MODES)
-        else:
-            modes = InfluencerLiveRoom.GAME_MODES
+        modes = InfluencerLiveRoom.MODES_BY_PLATFORM.get(
+            platform, InfluencerLiveRoom.GAME_MODES) if platform else InfluencerLiveRoom.GAME_MODES
         return [discord.SelectOption(label=m, value=m) for m in modes]
 
     def _update_options(self, platform: str | None):
@@ -347,7 +355,7 @@ class GameModeSelect(Select):
         await view._update_message(interaction)
 
 
-# ── Modais internos da sessão ─────────────────────────────────────────────────
+# ── Modais internos ──────────────────────────────────────────────────────────
 
 class _RegrasModalSession(Modal, title="Regras da Sala"):
     regras = TextInput(

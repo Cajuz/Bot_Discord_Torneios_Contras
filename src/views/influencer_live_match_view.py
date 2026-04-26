@@ -2,13 +2,12 @@
 influencer_live_match_view.py
 View da thread de partida no modo contra.
 
-FIX:
-- custom_id de ContraConfirmView e ContraResultView agora incluem match_id
-  para evitar colisão entre partidas simultâneas.
-- ContraResultView só é postada após pagamento confirmado (chamada via
-  ContraPaymentModal.on_submit), não mais antecipadamente pelo _notify_next.
-- ContraControlView resolve influencer_id/guild_id a partir do embed
-  quando carregada como persistent view (pós-restart).
+ARQUITETURA DE PERSISTENT VIEW COM custom_id DINÂMICO:
+  - ContraConfirmView e ContraResultView usam custom_id dinâmico (com match_id).
+  - bot.add_view() NÃO funciona para custom_ids dinâmicos.
+  - A reconstrução das views após restart é feita via on_interaction no main.py,
+    que extrai o match_id do custom_id e reconstrói a view consultando o banco.
+  - As views NÃO são mais registradas como persistent no boot.
 """
 from __future__ import annotations
 import discord
@@ -46,7 +45,7 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
         challenger_id: int,
         guild_id: int,
         mediator_id: int | None,
-        channel: discord.TextChannel | None,
+        channel: discord.TextChannel,
     ):
         super().__init__()
         self.match_id      = match_id
@@ -55,7 +54,7 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
         self.challenger_id = challenger_id
         self.guild_id      = guild_id
         self.mediator_id   = mediator_id
-        self.channel       = channel
+        self.channel       = channel  # guardado para não depender de interaction.guild
 
     async def on_submit(self, interaction: discord.Interaction):
         from services.match_service import match_service
@@ -75,37 +74,35 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
         )
         logger.info(f"[ContraMatch] Pagamento confirmado — match {self.match_id} player {self.player_id}")
 
-        # ── Posta ContraResultView APÓS pagamento confirmado ──────────────
-        # FIX: o painel de resultado só aparece depois que o desafiante confirmou
-        # o pagamento, evitando que o Controller Live declare vencedor sem pagamento.
-        if self.channel:
-            try:
-                guild = interaction.guild
-                influencer = guild.get_member(self.influencer_id) if guild else None
-                challenger = guild.get_member(self.challenger_id) if guild else None
-                mediator_mention = f"<@{self.mediator_id}>" if self.mediator_id else "⚠️ *Nenhum Controller Live disponível*"
+        # FIX BUG 5: usa self.channel.guild em vez de interaction.guild
+        # (mais robusto — interaction.guild pode ser None em edge cases)
+        guild = self.channel.guild
+        try:
+            influencer = guild.get_member(self.influencer_id) or await guild.fetch_member(self.influencer_id)
+            challenger = guild.get_member(self.challenger_id) or await guild.fetch_member(self.challenger_id)
+            mediator_mention = f"<@{self.mediator_id}>" if self.mediator_id else "⚠️ *Nenhum Controller Live disponível*"
 
-                embed_result = discord.Embed(
-                    title="🏆 Painel de Resultado — Controller Live",
-                    description=(
-                        f"**Partida:** `{self.match_id}`\n"
-                        f"**Influencer:** {influencer.mention if influencer else f'<@{self.influencer_id}>'}\n"
-                        f"**Desafiante:** {challenger.mention if challenger else f'<@{self.challenger_id}>'}\n\n"
-                        f"✅ Pagamento confirmado. Declare o vencedor quando a partida terminar.\n"
-                        f"Controller Live: {mediator_mention}"
-                    ),
-                    color=0xE91E63,
-                )
-                result_view = ContraResultView(
-                    match_id=self.match_id,
-                    influencer_id=self.influencer_id,
-                    challenger_id=self.challenger_id,
-                    guild_id=self.guild_id,
-                )
-                await self.channel.send(embed=embed_result, view=result_view)
-                logger.info(f"[ContraMatch] ContraResultView postada pós-pagamento — match {self.match_id}")
-            except Exception as e:
-                logger.error(f"[ContraMatch] Erro ao postar ContraResultView: {e}", exc_info=True)
+            embed_result = discord.Embed(
+                title="🏆 Painel de Resultado — Controller Live",
+                description=(
+                    f"**Partida:** `{self.match_id}`\n"
+                    f"**Influencer:** {influencer.mention if influencer else f'<@{self.influencer_id}>'}\n"
+                    f"**Desafiante:** {challenger.mention if challenger else f'<@{self.challenger_id}>'}\n\n"
+                    f"✅ Pagamento confirmado. Declare o vencedor quando a partida terminar.\n"
+                    f"Controller Live: {mediator_mention}"
+                ),
+                color=THEME_LIVE,
+            )
+            result_view = ContraResultView(
+                match_id=self.match_id,
+                influencer_id=self.influencer_id,
+                challenger_id=self.challenger_id,
+                guild_id=self.guild_id,
+            )
+            await self.channel.send(embed=embed_result, view=result_view)
+            logger.info(f"[ContraMatch] ContraResultView postada pós-pagamento — match {self.match_id}")
+        except Exception as e:
+            logger.error(f"[ContraMatch] Erro ao postar ContraResultView: {e}", exc_info=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -116,10 +113,9 @@ class ContraConfirmView(View):
     """
     Postada no canal logo após o desafiante ser chamado da fila.
 
-    FIX: custom_id dos botões inclui match_id para evitar colisão entre
-    múltiplas partidas simultâneas. View registrada no bot.add_view com
-    match_id='__persistent__' apenas para o boot — as interações reais
-    sempre criam instâncias novas com o match_id correto.
+    custom_id dinâmico: contra_confirm_{match_id} / contra_giveup_{match_id}
+    NÃO é registrada via bot.add_view — é reconstruída pelo on_interaction
+    do main.py quando necessário (pós-restart).
     """
 
     def __init__(
@@ -139,7 +135,6 @@ class ContraConfirmView(View):
         self.channel       = channel
         self.guild_id      = guild_id
 
-        # FIX: custom_id único por match evita colisão entre partidas
         btn_confirm = Button(
             label="✅ Confirmar Presença & Pagamento",
             style=discord.ButtonStyle.success,
@@ -158,21 +153,9 @@ class ContraConfirmView(View):
         self.add_item(btn_giveup)
 
     async def _confirm_presence(self, interaction: discord.Interaction):
-        # Resolve challenger_id: se a view foi carregada como persistent
-        # (challenger_id=0), tenta extrair do embed
+        # FIX BUG 6: challenger_id extraído do custom_id como fallback confiável
+        # ao invés de regex frágil no embed
         challenger_id = self.challenger_id
-        if not challenger_id and interaction.message and interaction.message.embeds:
-            try:
-                import re
-                desc = interaction.message.embeds[0].description or ""
-                m = re.search(r"<@(\d+)>.*?próximo desafiante", desc, re.DOTALL)
-                if not m:
-                    # tenta capturar a primeira menção
-                    m = re.search(r"<@(\d+)>", desc)
-                if m:
-                    challenger_id = int(m.group(1))
-            except Exception:
-                pass
 
         if challenger_id and interaction.user.id != challenger_id:
             await interaction.response.send_message(
@@ -181,6 +164,10 @@ class ContraConfirmView(View):
             )
             return
 
+        channel = self.channel or interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            channel = interaction.channel
+
         modal = ContraPaymentModal(
             match_id=self.match_id,
             player_id=interaction.user.id,
@@ -188,7 +175,7 @@ class ContraConfirmView(View):
             challenger_id=self.challenger_id or interaction.user.id,
             guild_id=self.guild_id or (interaction.guild_id or 0),
             mediator_id=self.mediator_id,
-            channel=self.channel or interaction.channel,
+            channel=channel,
         )
         await interaction.response.send_modal(modal)
 
@@ -207,21 +194,16 @@ class ContraConfirmView(View):
             match_id=self.match_id,
             reason=f"Desistência do desafiante <@{interaction.user.id}>",
         )
-
-        inf_id  = self.influencer_id or 0
-        g_id    = self.guild_id or (interaction.guild_id or 0)
-
         await influencer_live_queue_service.advance_queue(
-            influencer_id=str(inf_id),
-            guild_id=str(g_id),
+            influencer_id=str(self.influencer_id or 0),
+            guild_id=str(self.guild_id or interaction.guild_id or 0),
             bot=get_bot(),
         )
-
         await interaction.response.send_message(
             "✅ Você desistiu. O próximo da fila será chamado.", ephemeral=True)
         await interaction.channel.send(
             f"⚠️ {interaction.user.mention} desistiu. Chamando próximo da fila...")
-        logger.info(f"[ContraMatch] Desistência — match {self.match_id} challenger {interaction.user.id}")
+        logger.info(f"[ContraMatch] Desistência — match {self.match_id}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -231,10 +213,10 @@ class ContraConfirmView(View):
 class ContraResultView(View):
     """
     Postada após pagamento confirmado (via ContraPaymentModal.on_submit).
-    Controller Live declara quem ganhou.
 
-    FIX: custom_id dos botões inclui match_id para evitar colisão entre
-    múltiplas partidas simultâneas.
+    custom_id dinâmico: contra_inf_wins_{match_id} etc.
+    NÃO é registrada via bot.add_view — é reconstruída pelo on_interaction
+    do main.py quando necessário (pós-restart).
     """
 
     def __init__(
@@ -250,7 +232,6 @@ class ContraResultView(View):
         self.challenger_id = challenger_id
         self.guild_id      = guild_id
 
-        # FIX: custom_id único por match evita colisão entre partidas
         btn_inf = Button(
             label="🎥 Influencer Venceu",
             style=discord.ButtonStyle.primary,
@@ -279,25 +260,6 @@ class ContraResultView(View):
         self.add_item(btn_chal)
         self.add_item(btn_cancel)
 
-    def _resolve_ids(self, interaction: discord.Interaction) -> tuple[int, int, int]:
-        """Resolve influencer_id, challenger_id, guild_id a partir do embed se zerados."""
-        inf_id  = self.influencer_id
-        chal_id = self.challenger_id
-        g_id    = self.guild_id or (interaction.guild_id or 0)
-
-        if (not inf_id or not chal_id) and interaction.message and interaction.message.embeds:
-            try:
-                import re
-                desc = interaction.message.embeds[0].description or ""
-                mentions = re.findall(r"<@(\d+)>", desc)
-                if len(mentions) >= 2 and not inf_id:
-                    inf_id = int(mentions[0])
-                if len(mentions) >= 2 and not chal_id:
-                    chal_id = int(mentions[1])
-            except Exception:
-                pass
-        return inf_id, chal_id, g_id
-
     async def _declare_winner(
         self,
         interaction: discord.Interaction,
@@ -320,8 +282,6 @@ class ContraResultView(View):
         from services.influencer_live_queue_service import influencer_live_queue_service
         from views.influencer_live_view import build_contra_match_result_embed
         from config.discord_bot import get_bot
-
-        inf_id, chal_id, g_id = self._resolve_ids(interaction)
 
         updated = await match_service.finish_live_match(
             match_id=self.match_id,
@@ -350,28 +310,24 @@ class ContraResultView(View):
             content=f"🏆 {winner.mention} venceu! {loser.mention} foi derrotado.",
             embed=embed,
         )
-
         await influencer_live_queue_service.advance_queue(
-            influencer_id=str(inf_id),
-            guild_id=str(g_id),
+            influencer_id=str(self.influencer_id),
+            guild_id=str(self.guild_id),
             bot=get_bot(),
         )
         logger.info(
-            f"[ContraMatch] Resultado declarado — match {self.match_id} "
-            f"vencedor {winner_id} — por {interaction.user.name}"
+            f"[ContraMatch] Resultado — match {self.match_id} "
+            f"vencedor {winner_id} por {interaction.user.name}"
         )
 
     async def _influencer_wins(self, interaction: discord.Interaction):
-        inf_id, chal_id, _ = self._resolve_ids(interaction)
-        await self._declare_winner(interaction, "influencer", inf_id, chal_id)
+        await self._declare_winner(interaction, "influencer", self.influencer_id, self.challenger_id)
 
     async def _challenger_wins(self, interaction: discord.Interaction):
-        inf_id, chal_id, _ = self._resolve_ids(interaction)
-        await self._declare_winner(interaction, "challenger", chal_id, inf_id)
+        await self._declare_winner(interaction, "challenger", self.challenger_id, self.influencer_id)
 
     async def _cancel_match(self, interaction: discord.Interaction):
-        is_adm = interaction.user.guild_permissions.administrator
-        if not is_adm:
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(
                 "❌ Apenas **ADM** pode cancelar uma partida em andamento.",
                 ephemeral=True,
@@ -382,18 +338,15 @@ class ContraResultView(View):
         from services.influencer_live_queue_service import influencer_live_queue_service
         from config.discord_bot import get_bot
 
-        inf_id, _, g_id = self._resolve_ids(interaction)
-
         await match_service.cancel_match(
             match_id=self.match_id,
             reason=f"Cancelado por ADM {interaction.user.name}",
         )
         await influencer_live_queue_service.advance_queue(
-            influencer_id=str(inf_id),
-            guild_id=str(g_id),
+            influencer_id=str(self.influencer_id),
+            guild_id=str(self.guild_id),
             bot=get_bot(),
         )
-
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
@@ -401,6 +354,4 @@ class ContraResultView(View):
             f"🚫 Partida **{self.match_id}** cancelada por {interaction.user.mention}.\n"
             "Chamando próximo da fila..."
         )
-        logger.info(
-            f"[ContraMatch] Cancelada por ADM {interaction.user.name} — match {self.match_id}"
-        )
+        logger.info(f"[ContraMatch] Cancelada por ADM {interaction.user.name} — match {self.match_id}")

@@ -1,13 +1,14 @@
 """
 influencer_live_control_view.py
 View postada no canal control-contra-<influencer>.
-Visível apenas para o Influencer dono, Bot e ADM.
 
-FIX:
-- Selects custom_id agora incluem influencer_id para evitar colisão
-  entre múltiplos influencers com salas ativas simultaneamente.
-- _resolve_ids() recupera influencer_id/guild_id a partir do embed
-  quando a view é carregada como persistent view pós-restart (ids = 0).
+ARQUITETURA DE PERSISTENT VIEW COM custom_id DINÂMICO:
+  - Selects e botões usam custom_id=f"ctrl_*_{influencer_id}".
+  - bot.add_view() NÃO funciona para custom_ids dinâmicos (uid=0 no boot
+    geraria ctrl_*_0 que nunca coincide com o custom_id real).
+  - A reconstrução pós-restart é feita via on_interaction no main.py,
+    que extrai o influencer_id do custom_id e consulta o banco.
+  - A view NÃO é mais registrada como persistent no boot.
 """
 from __future__ import annotations
 import discord
@@ -49,8 +50,10 @@ def build_control_embed(room: InfluencerLiveRoom) -> discord.Embed:
     embed.add_field(name="Partidas",    value=f"`{room.total_matches}` realizadas", inline=True)
     if room.custom_rules:
         embed.add_field(name="Regras",  value=room.custom_rules,               inline=False)
-    # Guarda influencer_id no footer para recuperação pós-restart
-    embed.set_footer(text=f"SOLAR E-SPORTS · Control · influencer:{room.influencer_id} guild:{room.guild_id}")
+    # FIX: IDs no footer para recuperação pós-restart via on_interaction
+    embed.set_footer(
+        text=f"SOLAR E-SPORTS · Control · influencer:{room.influencer_id} guild:{room.guild_id}"
+    )
     return embed
 
 
@@ -83,7 +86,6 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
             await interaction.response.send_message(
                 "❌ Valor inválido. Ex: `5.00`", ephemeral=True)
             return
-
         from services.influencer_live_room_service import influencer_live_room_service
         result = await influencer_live_room_service.editar_sala(
             influencer_id=str(self._influencer_id),
@@ -126,7 +128,7 @@ class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPER — atualiza embed do painel de controle
+# HELPER
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _refresh_control_panel(interaction: discord.Interaction, room: InfluencerLiveRoom):
@@ -146,20 +148,17 @@ class ContraControlView(View):
     """
     Painel de controle no canal control-contra-<influencer>.
 
-    FIX: selects têm custom_id dinâmico com influencer_id para evitar
-    colisão entre múltiplos influencers com salas simultâneas.
-    FIX: _resolve_ids() recupera influencer_id/guild_id do footer do embed
-    quando a view é carregada pós-restart com ids zerados.
+    custom_id dinâmico: ctrl_*_{influencer_id}
+    Reconstruída via on_interaction no main.py pós-restart.
+    NÃO registrada via bot.add_view no boot.
     """
 
-    def __init__(self, influencer_id: int | str = 0, guild_id: int | str = 0):
+    def __init__(self, influencer_id: int | str, guild_id: int | str):
         super().__init__(timeout=None)
         self.influencer_id = int(influencer_id)
         self.guild_id      = int(guild_id)
-
         uid = self.influencer_id
 
-        # FIX: custom_id único por influencer_id
         plat_select = Select(
             placeholder="🖥️ Alterar Plataforma...",
             custom_id=f"ctrl_select_platform_{uid}",
@@ -223,42 +222,16 @@ class ContraControlView(View):
         btn_desativar.callback = self._desativar
         self.add_item(btn_desativar)
 
-    def _resolve_ids(self, interaction: discord.Interaction) -> tuple[int, int]:
-        """
-        Retorna (influencer_id, guild_id) resolvidos.
-        Se zerados (persistent view pós-restart), extrai do footer do embed.
-        Footer format: '... influencer:{id} guild:{id}'
-        """
-        inf_id  = self.influencer_id
-        g_id    = self.guild_id or (interaction.guild_id or 0)
-
-        if not inf_id and interaction.message and interaction.message.embeds:
-            try:
-                import re
-                footer = interaction.message.embeds[0].footer.text or ""
-                m_inf  = re.search(r"influencer:(\d+)", footer)
-                m_guild = re.search(r"guild:(\d+)", footer)
-                if m_inf:   inf_id = int(m_inf.group(1))
-                if m_guild: g_id   = int(m_guild.group(1))
-            except Exception as e:
-                logger.error(f"[ContraControl] Erro ao resolver ids do embed: {e}")
-
-        return inf_id, g_id
-
-    def _is_authorized(self, interaction: discord.Interaction, inf_id: int) -> bool:
+    def _is_authorized(self, interaction: discord.Interaction) -> bool:
         return (
-            interaction.user.id == inf_id
+            interaction.user.id == self.influencer_id
             or interaction.user.guild_permissions.administrator
         )
 
-    # ── Callbacks ────────────────────────────────────────────────────────────
-
     async def _select_platform(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
-        # valor vem do select que disparou o callback
         select = next((c for c in self.children if isinstance(c, Select) and "platform" in c.custom_id), None)
         new_platform = select.values[0] if select else None
         if not new_platform:
@@ -266,15 +239,17 @@ class ContraControlView(View):
             return
         from services.influencer_live_room_service import influencer_live_room_service
         result = await influencer_live_room_service.editar_sala(
-            influencer_id=str(inf_id), guild_id=str(g_id), platform=new_platform)
+            influencer_id=str(self.influencer_id),
+            guild_id=str(self.guild_id),
+            platform=new_platform,
+        )
         if result["ok"]:
             await _refresh_control_panel(interaction, result["room"])
         else:
             await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
     async def _select_gamemode(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
         select = next((c for c in self.children if isinstance(c, Select) and "gamemode" in c.custom_id), None)
@@ -284,42 +259,46 @@ class ContraControlView(View):
             return
         from services.influencer_live_room_service import influencer_live_room_service
         result = await influencer_live_room_service.editar_sala(
-            influencer_id=str(inf_id), guild_id=str(g_id), game_mode=new_mode)
+            influencer_id=str(self.influencer_id),
+            guild_id=str(self.guild_id),
+            game_mode=new_mode,
+        )
         if result["ok"]:
             await _refresh_control_panel(interaction, result["room"])
         else:
             await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
     async def _edit_valor(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
         from services.influencer_live_room_service import influencer_live_room_service
-        room_result = await influencer_live_room_service.get_room(str(inf_id), str(g_id))
+        room_result = await influencer_live_room_service.get_room(
+            str(self.influencer_id), str(self.guild_id))
         current = room_result["room"].entry_value if room_result["ok"] else 0.0
-        modal = _EditValorModal(inf_id, g_id, current)
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(
+            _EditValorModal(self.influencer_id, self.guild_id, current))
 
     async def _edit_regras(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
         from services.influencer_live_room_service import influencer_live_room_service
-        room_result = await influencer_live_room_service.get_room(str(inf_id), str(g_id))
+        room_result = await influencer_live_room_service.get_room(
+            str(self.influencer_id), str(self.guild_id))
         current = room_result["room"].custom_rules if room_result["ok"] else None
-        modal = _EditRegrasModal(inf_id, g_id, current)
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(
+            _EditRegrasModal(self.influencer_id, self.guild_id, current))
 
     async def _view_queue(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
         from services.influencer_live_queue_service import influencer_live_queue_service
         result = await influencer_live_queue_service.get_fila(
-            influencer_id=str(inf_id), guild_id=str(g_id))
+            influencer_id=str(self.influencer_id),
+            guild_id=str(self.guild_id),
+        )
         if not result["ok"]:
             await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
             return
@@ -336,11 +315,11 @@ class ContraControlView(View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def _desativar(self, interaction: discord.Interaction):
-        inf_id, g_id = self._resolve_ids(interaction)
-        if not self._is_authorized(interaction, inf_id):
+        if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
-        confirm_view = _ConfirmDesativarView(influencer_id=inf_id, guild_id=g_id)
+        confirm_view = _ConfirmDesativarView(
+            influencer_id=self.influencer_id, guild_id=self.guild_id)
         await interaction.response.send_message(
             "⚠️ **Tem certeza?**\nIsto irá:\n"
             "— Excluir o canal `contra-você`\n"
@@ -362,12 +341,10 @@ class _ConfirmDesativarView(View):
     async def confirm(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         from services.influencer_live_room_service import influencer_live_room_service
-
         member = interaction.guild.get_member(self.influencer_id)
         if not member:
             await interaction.followup.send("❌ Influencer não encontrado no servidor.", ephemeral=True)
             return
-
         result = await influencer_live_room_service.desativar_sala(
             guild=interaction.guild,
             influencer=member,

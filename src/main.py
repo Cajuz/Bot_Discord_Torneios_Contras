@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import os
+import re
 import random
 from datetime import datetime, timezone
 
@@ -44,11 +45,6 @@ COGS = [
 bot          = create_discord_bot()
 _initialized = False
 
-# ─────────────────────────────────────────────────────────────
-# Logs — instanciados dentro do on_ready para evitar chamadas
-# de API antes do bot estar conectado ao Discord
-# ─────────────────────────────────────────────────────────────
-
 _troca_cargo_log = None
 _call_log        = None
 _command_log     = None
@@ -56,7 +52,7 @@ _delete_log      = None
 
 
 # ─────────────────────────────────────────────────────────────
-# Servidor HTTP — health check + webhook EFI
+# Servidor HTTP
 # ─────────────────────────────────────────────────────────────
 
 async def _start_http_server():
@@ -121,7 +117,7 @@ async def _rate_limit_monitor(endpoint: str, retry_after: float, context: str):
 
 
 # ─────────────────────────────────────────────────────────────
-# Auto Setup — executa !setupcanais automaticamente no startup
+# Auto Setup
 # ─────────────────────────────────────────────────────────────
 
 async def _auto_setup_canais(guild: discord.Guild):
@@ -162,54 +158,31 @@ async def _auto_setup_canais(guild: discord.Guild):
 
 
 # ─────────────────────────────────────────────────────────────
-# Garante índices + TTL no MongoDB
+# Índices MongoDB
 # ─────────────────────────────────────────────────────────────
 
 async def _ensure_db_indexes():
-    _30_dias = 60 * 60 * 24 * 30  # 2_592_000 segundos
+    _30_dias = 60 * 60 * 24 * 30
 
     try:
-        # ── active_threads ───────────────────────────────────
         await db.get_collection("active_threads").create_index(
-            "thread_id", unique=True, background=True
-        )
+            "thread_id", unique=True, background=True)
         await db.get_collection("active_threads").create_index(
-            "created_at", expireAfterSeconds=_30_dias, background=True
-        )
-
-        # ── thread_pool ───────────────────────────────────
+            "created_at", expireAfterSeconds=_30_dias, background=True)
         await db.get_collection("thread_pool").create_index(
-            "thread_id", unique=True, background=True
-        )
+            "thread_id", unique=True, background=True)
         await db.get_collection("thread_pool").create_index(
-            "created_at", expireAfterSeconds=_30_dias, background=True
-        )
-
-        # ── matches ─────────────────────────────────────
+            "created_at", expireAfterSeconds=_30_dias, background=True)
         await db.get_collection("matches").create_index(
-            "thread_id", unique=True, sparse=True, background=True
-        )
+            "thread_id", unique=True, sparse=True, background=True)
         await db.get_collection("matches").create_index(
-            "created_at", expireAfterSeconds=_30_dias, background=True
-        )
-
-        # ── influencer_live_rooms ────────────────────────
+            "created_at", expireAfterSeconds=_30_dias, background=True)
         await db.get_collection("influencer_live_rooms").create_index(
-            [("influencer_id", 1), ("guild_id", 1)],
-            unique=True, background=True,
-        )
-
-        # ── influencer_live_queues ───────────────────────
+            [("influencer_id", 1), ("guild_id", 1)], unique=True, background=True)
         await db.get_collection("influencer_live_queues").create_index(
-            [("influencer_id", 1), ("guild_id", 1)],
-            unique=True, background=True,
-        )
-
-        # ── mediator_live_queues ────────────────────────
+            [("influencer_id", 1), ("guild_id", 1)], unique=True, background=True)
         await db.get_collection("mediator_live_queues").create_index(
-            "guild_id", unique=True, background=True,
-        )
-
+            "guild_id", unique=True, background=True)
         logger.info(
             "[DB] Índices garantidos: active_threads, thread_pool, matches(sparse), "
             "influencer_live_rooms, influencer_live_queues, mediator_live_queues "
@@ -217,6 +190,137 @@ async def _ensure_db_indexes():
         )
     except Exception as e:
         logger.warning(f"[DB] _ensure_db_indexes: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# on_interaction — reconstrói views com custom_id dinâmico
+# ─────────────────────────────────────────────────────────────
+
+async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
+    """
+    Reconstrói ContraConfirmView, ContraResultView e ContraControlView
+    a partir do custom_id dinâmico quando a view não está registrada
+    (pós-restart ou primeira interação após criação).
+
+    Retorna True se a interação foi tratada aqui (não deve continuar o dispatch),
+    False se deve seguir o fluxo normal.
+    """
+    if interaction.type != discord.InteractionType.component:
+        return False
+
+    custom_id: str = interaction.data.get("custom_id", "")
+
+    # ── ContraConfirmView: contra_confirm_{match_id} / contra_giveup_{match_id}
+    m = re.match(r"^contra_(confirm|giveup)_(.+)$", custom_id)
+    if m:
+        match_id = m.group(2)
+        try:
+            from services.match_service import match_service
+            from views.influencer_live_match_view import ContraConfirmView
+
+            match_doc = await match_service.get_match(match_id)
+            if not match_doc:
+                await interaction.response.send_message(
+                    "❌ Partida não encontrada.", ephemeral=True)
+                return True
+
+            view = ContraConfirmView(
+                match_id=match_id,
+                challenger_id=int(match_doc.get("challenger_id", 0)),
+                influencer_id=int(match_doc.get("influencer_id", 0)),
+                guild_id=int(match_doc.get("guild_id", 0)),
+                channel=interaction.channel,
+            )
+            # Deixa a view processar a interação
+            await view._dispatch_interaction(interaction, custom_id)
+        except Exception as e:
+            logger.error(f"[on_interaction] ContraConfirmView rebuild erro: {e}", exc_info=True)
+            try:
+                await interaction.response.send_message(
+                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+            except Exception:
+                pass
+        return True
+
+    # ── ContraResultView: contra_inf_wins_{match_id} / contra_chal_wins_{match_id} / contra_cancel_{match_id}
+    m = re.match(r"^contra_(inf_wins|chal_wins|cancel)_(.+)$", custom_id)
+    if m:
+        match_id = m.group(2)
+        try:
+            from services.match_service import match_service
+            from views.influencer_live_match_view import ContraResultView
+
+            match_doc = await match_service.get_match(match_id)
+            if not match_doc:
+                await interaction.response.send_message(
+                    "❌ Partida não encontrada.", ephemeral=True)
+                return True
+
+            view = ContraResultView(
+                match_id=match_id,
+                influencer_id=int(match_doc.get("influencer_id", 0)),
+                challenger_id=int(match_doc.get("challenger_id", 0)),
+                guild_id=int(match_doc.get("guild_id", 0)),
+            )
+            await view._dispatch_interaction(interaction, custom_id)
+        except Exception as e:
+            logger.error(f"[on_interaction] ContraResultView rebuild erro: {e}", exc_info=True)
+            try:
+                await interaction.response.send_message(
+                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+            except Exception:
+                pass
+        return True
+
+    # ── ContraControlView: ctrl_*_{influencer_id}
+    m = re.match(r"^ctrl_(?:select_platform|select_gamemode|edit_valor|edit_regras|view_queue|desativar)_(\d+)$", custom_id)
+    if m:
+        influencer_id = int(m.group(1))
+        try:
+            from services.influencer_live_room_service import influencer_live_room_service
+            from views.influencer_live_control_view import ContraControlView
+
+            guild_id = str(interaction.guild_id)
+            room_result = await influencer_live_room_service.get_room(
+                influencer_id=str(influencer_id),
+                guild_id=guild_id,
+            )
+            if not room_result["ok"]:
+                await interaction.response.send_message(
+                    "❌ Sala não encontrada. Pode ter sido desativada.", ephemeral=True)
+                return True
+
+            view = ContraControlView(
+                influencer_id=influencer_id,
+                guild_id=int(guild_id),
+            )
+            await view._dispatch_interaction(interaction, custom_id)
+        except Exception as e:
+            logger.error(f"[on_interaction] ContraControlView rebuild erro: {e}", exc_info=True)
+            try:
+                await interaction.response.send_message(
+                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+            except Exception:
+                pass
+        return True
+
+    return False
+
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    """
+    Intercepta interações de componentes com custom_id dinâmico
+    antes do dispatch padrão do discord.py.
+    Reconstrói a view adequada via _rebuild_dynamic_view.
+    """
+    if await _rebuild_dynamic_view(interaction):
+        return
+    # Para todos os outros tipos de interação, deixa o discord.py processar normalmente
+    # (slash commands, modais, etc.)
+    # NOTA: bot.process_application_commands não existe no discord.py puro;
+    # o dispatch de slash/autocomplete é automático pelo bot. Para componentes
+    # não tratados acima, o bot já despacha via add_view registrados no boot.
 
 
 # ─────────────────────────────────────────────────────────────
@@ -232,7 +336,6 @@ async def on_ready():
         return
     _initialized = True
 
-    # ── Instancia logs aqui — bot já está conectado ──────────
     _troca_cargo_log = Troca_cargo(bot)
     _call_log        = CallLog(bot)
     _command_log     = CommandLog(bot)
@@ -241,7 +344,6 @@ async def on_ready():
     guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
 
-    # ── Garante índices depois da conexão estar totalmente estável ────────
     try:
         await _ensure_db_indexes()
     except Exception as e:
@@ -280,14 +382,14 @@ async def on_ready():
         from cogs.renewal_dashboard_cog     import ContractPanelView
         from services.faturamento_mediador  import RelatorioGeralView
         from services.match_queue_service   import ConfirmationView
-        # Onboarding
         from views.rules_view               import RulesView, ConfirmationView as RulesConfirmationView
-        # Influencer Live
+        # Influencer Live — apenas views com custom_id FIXO
         from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
-        from views.influencer_live_control_view import ContraControlView
-        from views.influencer_live_match_view import ContraConfirmView, ContraResultView
         from views.influencer_live_admin_view import InfluencerLiveAdminView
         from views.live_contra_setup_view     import LiveContraSetupView
+        # ContraConfirmView, ContraResultView e ContraControlView NÃO são
+        # registradas aqui — usam custom_id dinâmico e são reconstruídas
+        # via on_interaction/_rebuild_dynamic_view
 
         persistent_views = [
             TicketPanelView(),
@@ -318,25 +420,21 @@ async def on_ready():
             BlacklistCheckView(),
             MediatorRegisterView(),
             ContractPanelView(),
-            # Onboarding — timeout=None já corrigido no rules_view.py
             RulesView(),
             RulesConfirmationView(),
-            # Influencer Live
+            # Influencer Live — custom_id FIXO
             ContraRoomView(influencer_id=0, guild_id=0),
             ControllerLivePanelView(),
-            ContraControlView(influencer_id=0, guild_id=0),
-            ContraConfirmView(match_id="__persistent__", challenger_id=0, influencer_id=0),
-            ContraResultView(match_id="__persistent__", influencer_id=0, challenger_id=0, guild_id=0),
             InfluencerLiveAdminView(),
             LiveContraSetupView(),
-            # CAPTCHA — registro para manter callbacks após restart
+            # CAPTCHA
             CaptchaButtonView,
         ]
 
         for view in persistent_views:
             try:
                 if isinstance(view, type):
-                    logger.info(f"[views] Ignorando registro automático de classe não-instanciável: {view.__name__}")
+                    logger.info(f"[views] Ignorando classe não-instanciável: {view.__name__}")
                     continue
                 bot.add_view(view)
             except Exception as e:
@@ -469,10 +567,6 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_remove(member: discord.Member):
-    """
-    BUG2+BUG3-FIX: limpa estado de onboarding quando membro sai ou é kickado/banido.
-    Cancela cleanup task, remove do pending set e deleta canal de verificação.
-    """
     svc = getattr(bot, "_onboarding_service", None)
     if svc:
         try:
@@ -660,7 +754,6 @@ async def main():
 
 
 async def _keep_alive():
-    """Coroutine auxiliar para manter o gather ativo indefinidamente."""
     while True:
         await asyncio.sleep(3600)
 
