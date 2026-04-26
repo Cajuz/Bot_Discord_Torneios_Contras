@@ -136,7 +136,6 @@ class _ConfirmCreateView(View):
             influencer=interaction.user,
         )
 
-        # Posta o painel de setup no canal de controle
         setup_view = ContraSetupChannelView(
             influencer=interaction.user,
             ctrl_channel=ctrl,
@@ -149,7 +148,6 @@ class _ConfirmCreateView(View):
         )
         setup_view._setup_msg = msg
 
-        # Dispara o timer de 5 min
         asyncio.create_task(
             _auto_delete_if_idle(ctrl, setup_view, interaction.user)
         )
@@ -217,27 +215,23 @@ def _build_setup_embed(
 class ContraSetupChannelView(View):
     """
     View postada no canal control-contra-<nome> logo após a confirmação.
-    Não é persistent (timeout=None mas controlada pelo _auto_delete_if_idle).
+    Não é persistent — controlada pelo _auto_delete_if_idle.
     """
 
     def __init__(self, influencer: discord.Member, ctrl_channel: discord.TextChannel):
         super().__init__(timeout=None)
-        self.influencer       = influencer
-        self.ctrl_channel     = ctrl_channel
+        self.influencer           = influencer
+        self.ctrl_channel         = ctrl_channel
         self._setup_msg: discord.Message | None = None
-        self._finalized       = False
-
+        self._finalized           = False
         self.selected_platform: str | None  = None
         self.selected_game_mode: str | None = None
         self.entry_value: float | None      = None
         self.custom_rules: str | None       = None
-
         self._build_items()
 
     def _build_items(self):
-        """Reconstrói todos os itens da view com base no estado atual."""
         self.clear_items()
-
         self.add_item(_PlatformSelect(self))
         self.add_item(_GameModeSelect(self))
 
@@ -270,7 +264,8 @@ class ContraSetupChannelView(View):
         abrir_btn.callback = self._btn_abrir
         self.add_item(abrir_btn)
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _update_panel(self, interaction: discord.Interaction):
+        """Reconstrói itens e edita a mensagem com embed atualizado."""
         self._build_items()
         embed = _build_setup_embed(
             self.influencer,
@@ -317,7 +312,7 @@ class ContraSetupChannelView(View):
             game_mode=self.selected_game_mode,
             entry_value=self.entry_value,
             custom_rules=self.custom_rules,
-            ctrl_channel=self.ctrl_channel,  # reutiliza o canal já criado
+            ctrl_channel=self.ctrl_channel,
         )
 
         if not result["ok"]:
@@ -337,7 +332,6 @@ class ContraSetupChannelView(View):
             ),
             color=discord.Colour.green(),
         )
-        # Desabilita o painel de setup (já configurado)
         for item in self.children:
             item.disabled = True
         if self._setup_msg:
@@ -361,7 +355,6 @@ async def _auto_delete_if_idle(
     setup_view: ContraSetupChannelView,
     influencer: discord.Member,
 ):
-    """Aguarda SETUP_TTL segundos. Se a sala não foi aberta, exclui o canal."""
     await asyncio.sleep(SETUP_TTL)
     if setup_view._finalized:
         return
@@ -401,12 +394,11 @@ class _PlatformSelect(Select):
             await interaction.response.send_message("❌ Este painel não é seu.", ephemeral=True)
             return
         self.parent.selected_platform = self.values[0]
-        # Reseta modo se incompatível
         allowed = InfluencerLiveRoom.MODES_BY_PLATFORM.get(
             self.parent.selected_platform, InfluencerLiveRoom.GAME_MODES)
         if self.parent.selected_game_mode not in allowed:
             self.parent.selected_game_mode = None
-        await self.parent._refresh(interaction)
+        await self.parent._update_panel(interaction)
 
 
 class _GameModeSelect(Select):
@@ -427,7 +419,7 @@ class _GameModeSelect(Select):
             await interaction.response.send_message("❌ Este painel não é seu.", ephemeral=True)
             return
         self.parent.selected_game_mode = self.values[0]
-        await self.parent._refresh(interaction)
+        await self.parent._update_panel(interaction)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -462,7 +454,7 @@ class _ValorModal(Modal, title="Valor de Entrada"):
             )
             return
         self._parent.entry_value = val
-        await self._parent._refresh(interaction)
+        await self._parent._update_panel(interaction)
 
 
 class _RegrasModal(Modal, title="Regras da Sala"):
@@ -482,4 +474,4 @@ class _RegrasModal(Modal, title="Regras da Sala"):
 
     async def on_submit(self, interaction: discord.Interaction):
         self._parent.custom_rules = self.regras.value or None
-        await self._parent._refresh(interaction)
+        await self._parent._update_panel(interaction)
