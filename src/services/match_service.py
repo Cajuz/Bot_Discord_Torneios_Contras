@@ -197,6 +197,131 @@ class MatchService:
             logger.error(f"Erro ao criar partida: {e}")
             raise
 
+    # ── Criação — fluxo Influencer Live ──────────────────────────────
+
+    async def create_live_match(
+        self,
+        guild_id:      str,
+        influencer_id: str,
+        challenger_id: str,
+        entry_value:   float,
+        game_mode:     str,
+        mediator_id:   str | None = None,
+        channel_id:    str | None = None,
+        channel_name:  str = "",
+    ) -> Dict[str, Any]:
+        """
+        Cria uma partida do fluxo Influencer Live.
+        Armazena flow_type='influencer_live' para diferenciação de stats.
+        """
+        try:
+            match_data = {
+                "guild_id":                  str(guild_id),
+                "channel_id":                str(channel_id) if channel_id else None,
+                "channel_name":              channel_name,
+                "match_type":                game_mode,
+                "platform":                  "influencer_live",
+                "flow_type":                 "influencer_live",
+                "bet_value":                 float(entry_value),
+                "gel_type":                  "normal",
+                "influencer_id":             str(influencer_id),
+                "challenger_id":             str(challenger_id),
+                "player_ids":                [str(influencer_id), str(challenger_id)],
+                "max_players":               2,
+                "mediator_id":               str(mediator_id) if mediator_id else "pending",
+                "status":                    Match.STATUS_AGUARDANDO_PARTIDA,
+                "thread_id":                 None,
+                "time_blue":                 [],
+                "time_red":                  [],
+                "vencedor":                  None,
+                "winner_id":                 None,
+                "premio_confirmado_jogador": False,
+                "payment_confirmed":         False,
+                "cancelled_by":              None,
+                "cancel_reason":             None,
+                "created_at":                utcnow(),
+                "updated_at":                utcnow(),
+                "started_at":                None,
+                "completed_at":              None,
+                "cancelled_at":              None,
+            }
+            col    = self._get_collection()
+            result = await col.insert_one(match_data)
+            match_data["_id"] = result.inserted_id
+            logger.info(
+                f"[LiveMatch] ✅ Partida live criada: {result.inserted_id} | "
+                f"influencer={influencer_id} challenger={challenger_id} "
+                f"mode={game_mode} R${entry_value:.2f}"
+            )
+            return match_data
+        except Exception as e:
+            logger.error(f"[LiveMatch] Erro ao criar partida live: {e}")
+            raise
+
+    async def finish_live_match(
+        self,
+        match_id:  str,
+        vencedor:  str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Encerra uma partida live declarando o vencedor.
+        vencedor: 'influencer' | 'challenger'
+        """
+        try:
+            match_doc = await self._find(match_id)
+            if not match_doc:
+                logger.warning(f"[LiveMatch] finish_live_match: partida não encontrada {match_id}")
+                return None
+            if match_doc.get("status") in (Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO):
+                logger.warning(f"[LiveMatch] finish_live_match: partida já encerrada {match_id}")
+                return None
+
+            updated = await self._update(match_id, {
+                "status":       Match.STATUS_FINALIZADO,
+                "vencedor":     vencedor,
+                "winner_id":    match_doc.get("influencer_id") if vencedor == "influencer"
+                                else match_doc.get("challenger_id"),
+                "completed_at": utcnow(),
+            })
+            log_success(f"[LiveMatch] ✅ Partida live finalizada: {match_id} vencedor={vencedor}")
+            if updated:
+                asyncio.create_task(self._post_history(updated, outcome="finalizado"))
+            return updated
+        except Exception as e:
+            logger.error(f"[LiveMatch] Erro ao finalizar partida live {match_id}: {e}")
+            return None
+
+    async def register_payment_confirmation(
+        self,
+        match_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Registra confirmação de pagamento pelo desafiante.
+        Avança status para partida_iniciada (aguardando o influencer iniciar).
+        """
+        try:
+            match_doc = await self._find(match_id)
+            if not match_doc:
+                logger.warning(f"[LiveMatch] register_payment_confirmation: não encontrado {match_id}")
+                return None
+            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
+                logger.warning(
+                    f"[LiveMatch] register_payment_confirmation: "
+                    f"status inválido '{match_doc.get('status')}' para {match_id}"
+                )
+                return None
+
+            updated = await self._update(match_id, {
+                "payment_confirmed": True,
+                "status":            Match.STATUS_PARTIDA_INICIADA,
+                "started_at":        utcnow(),
+            })
+            logger.info(f"[LiveMatch] 💰 Pagamento confirmado: {match_id}")
+            return updated
+        except Exception as e:
+            logger.error(f"[LiveMatch] Erro ao registrar pagamento {match_id}: {e}")
+            return None
+
     # ── Leitura ──────────────────────────────────────────────────────
 
     async def get_match(self, match_id: str) -> Optional[Dict[str, Any]]:
@@ -377,10 +502,10 @@ class MatchService:
                 logger.warning(f"cancel_match: partida já encerrada {match_id}")
                 return None
             updated = await self._update(match_id, {
-                "status":       Match.STATUS_CANCELADO,
-                "cancelled_by": str(cancelled_by) if cancelled_by else None,
+                "status":        Match.STATUS_CANCELADO,
+                "cancelled_by":  str(cancelled_by) if cancelled_by else None,
                 "cancel_reason": reason,
-                "cancelled_at": utcnow(),
+                "cancelled_at":  utcnow(),
             })
             logger.info(f"❌ Partida cancelada: {match_id}")
             if updated:
