@@ -38,40 +38,46 @@ def _channel_label(channel_name: str) -> str:
 
 
 def is_1x1_mob(channel_name: str) -> bool:
-    return channel_name.lower().startswith("📲1x1-mob")
+    """
+    Retorna True se o canal é um 1x1 Mobile (ex: 📲1x1-mob).
+    É o único canal que tem Gel Normal e Gel Infinito como opções separadas.
+    """
+    name = channel_name.lower()
+    # aceita emoji antes do '1x1-mob', ex: "📲1x1-mob" ou "1x1-mob"
+    return bool(re.search(r"1[xv]1-mob", name))
 
 
 def is_mob(channel_name: str) -> bool:
-    """Mobile que NÃO é 1x1 (ex: 4v4-mob, 2v2-mob)"""
+    """Mobile que NÃO é 1x1 (ex: 4v4-mob, 2v2-mob) — tem Entrar na Fila + Full Ump e Xm8."""
     name = channel_name.lower()
     return name.endswith("-mob") and not is_1x1_mob(channel_name)
 
 
 def is_emu(channel_name: str) -> bool:
-    """Canais emulador (ex: 3v3-emu, 4v4-emu)"""
+    """Canais emulador (ex: 3v3-emu, 4v4-emu)."""
     return channel_name.lower().endswith("-emu")
 
 
 def is_misto(channel_name: str) -> bool:
-    """Canais misto (ex: 2v2-misto, 3v3-misto, 4v4-misto)"""
+    """Canais misto (ex: 2v2-misto, 3v3-misto, 4v4-misto)."""
     return channel_name.lower().endswith("-misto")
 
 
 def get_misto_max_emus(channel_name: str) -> int:
     """
-    Retorna quantos botões de emulador o canal misto deve ter:
+    Retorna quantos slots de emulador o canal misto deve ter:
       2x2-misto → 1 emu
       3x3-misto → 2 emus
       4x4-misto → 3 emus
-    FIX: usa re.search + aceita tanto 'x' quanto 'v' como separador,
-    ignorando emojis e outros prefixos no nome do canal.
+
+    FIX: re.search (não re.match) para ignorar emojis e prefixos no nome;
+         aceita tanto 'x' quanto 'v' como separador (2x2 ou 2v2).
     """
     name = channel_name.lower()
-    # FIX: re.search (em vez de re.match) + [xv] para aceitar 4x4 e 4v4
     m = re.search(r"(\d+)[xv]\d+-misto", name)
     if m:
         n = int(m.group(1))
-        return max(1, n - 1)
+        return max(1, n - 1)  # 2→1, 3→2, 4→3
     return 1
 
 
@@ -109,11 +115,12 @@ def create_match_queue_embed(
     queue_emu3_count: int = 0,
 ) -> discord.Embed:
     """
-    Canal 1x1-mob    → duas filas (Gel Normal / Gel Infinito).
-    Canal mob / emu  → duas filas (Entrar na Fila / Full Ump e Xm8).
-    Canal misto 2v2  → fila 1 Emu.
-    Canal misto 3v3  → filas 1 Emu e 2 Emu.
-    Canal misto 4v4  → filas 1 Emu, 2 Emu e 3 Emu.
+    Canal 1x1-mob    → duas filas EXCLUSIVAS: Gel Normal / Gel Infinito.
+    Canal mob (>=2)  → Entrar na Fila / Full Ump e Xm8.
+    Canal emu        → Entrar na Fila / Full Ump e Xm8.
+    Canal misto 2v2  → 1 Emu.
+    Canal misto 3v3  → 1 Emu + 2 Emu.
+    Canal misto 4v4  → 1 Emu + 2 Emu + 3 Emu.
     """
     bet_str = f"{bet_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -132,22 +139,26 @@ def create_match_queue_embed(
     embed.set_thumbnail(url="attachment://banner.png")
 
     if is_1x1_mob(channel_name):
-        normal_status   = "🔒 Confirmando..." if locked_gel in ("normal", "all")   else f"{queue_normal_count}/{max_players}"
+        # Único modo com Gel Normal e Gel Infinito
+        normal_status   = "🔒 Confirmando..." if locked_gel in ("normal",   "all") else f"{queue_normal_count}/{max_players}"
         infinito_status = "🔒 Confirmando..." if locked_gel in ("infinito", "all") else f"{queue_infinito_count}/{max_players}"
         embed.add_field(name="Gel Normal",   value=normal_status,   inline=True)
         embed.add_field(name="Gel Infinito", value=infinito_status, inline=True)
 
     elif is_mob(channel_name) or is_emu(channel_name):
-        normal_status  = "🔒 Confirmando..." if locked_gel in ("normal", "all")    else f"{queue_normal_count}/{max_players}"
-        fullump_status = "🔒 Confirmando..." if locked_gel in ("fullump", "all")   else f"{queue_infinito_count}/{max_players}"
-        embed.add_field(name="Fila Normal",      value=normal_status,  inline=True)
-        embed.add_field(name="🔫 Full Ump e Xm8", value=fullump_status, inline=True)
+        # Mobile >= 2v2 e todos os Emuladores
+        normal_status  = "🔒 Confirmando..." if locked_gel in ("normal",  "all") else f"{queue_normal_count}/{max_players}"
+        fullump_status = "🔒 Confirmando..." if locked_gel in ("fullump", "all") else f"{queue_infinito_count}/{max_players}"
+        embed.add_field(name="Fila Normal",       value=normal_status,  inline=True)
+        embed.add_field(name="🔫 Full Ump e Xm8",  value=fullump_status, inline=True)
 
     elif is_misto(channel_name):
+        # Misto: um campo por slot de emulador
         max_emus = get_misto_max_emus(channel_name)
-        counts = [queue_emu1_count, queue_emu2_count, queue_emu3_count]
+        counts   = [queue_emu1_count, queue_emu2_count, queue_emu3_count]
         for i in range(max_emus):
-            status = "🔒 Confirmando..." if locked_gel == f"emu{i+1}" or locked_gel == "all" else f"{counts[i]}/{max_players}"
+            locked = locked_gel == f"emu{i+1}" or locked_gel == "all"
+            status = "🔒 Confirmando..." if locked else f"{counts[i]}/{max_players}"
             embed.add_field(name=f"{i+1} Emu", value=status, inline=True)
 
     else:
@@ -168,8 +179,9 @@ class MatchQueueView(discord.ui.View):
     View de fila de partidas.
 
     Lógica de botões por tipo de canal:
-      1x1-mob   → Gel Normal + Gel Infinito + Sair
-      mob / emu → Entrar na Fila + Full Ump e Xm8 + Sair
+      1x1-mob   → Gel Normal + Gel Infinito + Sair  (EXCLUSIVO)
+      mob >=2   → Entrar na Fila + Full Ump e Xm8 + Sair
+      emu       → Entrar na Fila + Full Ump e Xm8 + Sair
       2v2-misto → 1 Emu + Sair
       3v3-misto → 1 Emu + 2 Emu + Sair
       4v4-misto → 1 Emu + 2 Emu + 3 Emu + Sair
@@ -184,24 +196,23 @@ class MatchQueueView(discord.ui.View):
     ):
         super().__init__(timeout=None)
         self.channel_name = channel_name
-        self.bet_value = bet_value
-        self.locked_gel = locked_gel
-        self.guild = guild
+        self.bet_value    = bet_value
+        self.locked_gel   = locked_gel
+        self.guild        = guild
 
-        aprovar_emoji = discord.utils.get(guild.emojis, name="aprovar") if guild else None
+        aprovar_emoji  = discord.utils.get(guild.emojis, name="aprovar")  if guild else None
         cancelar_emoji = discord.utils.get(guild.emojis, name="cancelar") if guild else None
-        gel_emoji = discord.utils.get(guild.emojis, name="gel") if guild else None
+        gel_emoji      = discord.utils.get(guild.emojis, name="gel")      if guild else None
 
-        self.btn_entrar.emoji = aprovar_emoji
         self.btn_sair.emoji = cancelar_emoji
-        self.btn_gel_normal.emoji = gel_emoji
+        self.btn_gel_normal.emoji   = gel_emoji
         self.btn_gel_infinito.emoji = gel_emoji
-        # FIX: emoji de arma fixo no lugar do aprovar_emoji
+        self.btn_entrar.emoji       = aprovar_emoji
         self.btn_full_ump_xm8.emoji = "🔫"
 
         if channel_name:
             if is_1x1_mob(channel_name):
-                # 1x1: remove botões não pertinentes
+                # 1x1 Mobile: SOMENTE Gel Normal + Gel Infinito
                 self.remove_item(self.btn_entrar)
                 self.remove_item(self.btn_full_ump_xm8)
                 self.remove_item(self.btn_1_emu)
@@ -209,7 +220,7 @@ class MatchQueueView(discord.ui.View):
                 self.remove_item(self.btn_3_emu)
 
             elif is_mob(channel_name) or is_emu(channel_name):
-                # Mobile (exceto 1x1) e Emulador: Entrar + Full Ump e Xm8 + Sair
+                # Mobile >=2v2 e Emulador: Entrar + Full Ump e Xm8
                 self.remove_item(self.btn_gel_normal)
                 self.remove_item(self.btn_gel_infinito)
                 self.remove_item(self.btn_1_emu)
@@ -217,7 +228,7 @@ class MatchQueueView(discord.ui.View):
                 self.remove_item(self.btn_3_emu)
 
             elif is_misto(channel_name):
-                # Misto: apenas botões de emu conforme o tamanho da partida
+                # Misto: botoes de emu conforme tamanho da partida
                 self.remove_item(self.btn_entrar)
                 self.remove_item(self.btn_full_ump_xm8)
                 self.remove_item(self.btn_gel_normal)
@@ -227,9 +238,10 @@ class MatchQueueView(discord.ui.View):
                     self.remove_item(self.btn_3_emu)
                 if max_emus < 2:
                     self.remove_item(self.btn_2_emu)
+                # btn_1_emu sempre fica
 
             else:
-                # Fallback: apenas fila normal
+                # Fallback generico
                 self.remove_item(self.btn_gel_normal)
                 self.remove_item(self.btn_gel_infinito)
                 self.remove_item(self.btn_full_ump_xm8)
@@ -241,17 +253,17 @@ class MatchQueueView(discord.ui.View):
         if self.channel_name and self.bet_value:
             return self.channel_name, self.bet_value
         try:
-            embed = interaction.message.embeds[0]
+            embed   = interaction.message.embeds[0]
             bet_str = embed.title.replace("R$ ", "").replace(".", "").replace(",", ".")
             bet_value = float(bet_str)
-            desc = embed.description or ""
-            raw = desc.replace("**Modo:** ", "").split(" ")[0].lower()
+            desc  = embed.description or ""
+            raw   = desc.replace("**Modo:** ", "").split(" ")[0].lower()
             return raw, bet_value
         except Exception as e:
             logger.error(f"[Queue] Erro ao parsear contexto do embed: {e}")
             return "", 0.0
 
-    # ── Botões 1x1-mob ──────────────────────────────────────────
+    # ── Botões exclusivos 1x1-mob ────────────────────────────────
 
     @discord.ui.button(
         label="Gel Normal",
@@ -275,7 +287,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "infinito", ch, bet)
 
-    # ── Botões Mobile / Emulador ─────────────────────────────
+    # ── Botões Mobile >=2v2 e Emulador ───────────────────────────
 
     @discord.ui.button(
         label="ENTRAR NA FILA",
@@ -299,7 +311,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "fullump", ch, bet)
 
-    # ── Botões Misto ──────────────────────────────────────────
+    # ── Botões Misto ─────────────────────────────────────────
 
     @discord.ui.button(
         label="1 Emu",
@@ -334,7 +346,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "emu3", ch, bet)
 
-    # ── Sair (universal) ─────────────────────────────────────────
+    # ── Sair (universal) ───────────────────────────────────────
 
     @discord.ui.button(
         label="SAIR DA FILA",
@@ -426,7 +438,7 @@ class MatchQueueView(discord.ui.View):
             elif is_mob(channel_name) or is_emu(channel_name):
                 gel_types = ["normal", "fullump"]
             elif is_misto(channel_name):
-                max_emus = get_misto_max_emus(channel_name)
+                max_emus  = get_misto_max_emus(channel_name)
                 gel_types = [f"emu{i+1}" for i in range(max_emus)]
             else:
                 gel_types = ["normal"]
@@ -500,7 +512,7 @@ class MatchQueueView(discord.ui.View):
 
             elif is_misto(channel_name):
                 max_emus = get_misto_max_emus(channel_name)
-                counts = []
+                counts   = []
                 for i in range(3):
                     if i < max_emus:
                         q = await match_queue_service.get_queue_status(channel_name, bet_value, f"emu{i+1}")
@@ -519,7 +531,7 @@ class MatchQueueView(discord.ui.View):
                 )
 
             else:
-                q_normal = await match_queue_service.get_queue_status(channel_name, bet_value, "normal")
+                q_normal     = await match_queue_service.get_queue_status(channel_name, bet_value, "normal")
                 normal_count = len(q_normal.players) if q_normal else 0
                 if q_normal and q_normal.status == MatchQueue.STATUS_CONFIRMING:
                     locked_gel = "normal"
