@@ -68,7 +68,6 @@ class InfluencerLiveQueueService:
         doc["players"].append(player_id)
         position = len(doc["players"])
 
-        # Incrementa queue_size no room
         from services.influencer_live_room_service import influencer_live_room_service
         await influencer_live_room_service.update_queue_size(influencer_id, guild_id, 1)
 
@@ -106,7 +105,7 @@ class InfluencerLiveQueueService:
         doc = await self._get_or_create(influencer_id, guild_id)
         return {"ok": True, "queue": InfluencerLiveQueue(doc)}
 
-    # ── Limpar fila (ao desativar sala) ───────────────────────────────────
+    # ── Limpar fila (ao desativar sala) ─────────────────────────────────────
     async def clear_queue(self, influencer_id: str, guild_id: str):
         await self._col().update_one(
             {"influencer_id": influencer_id, "guild_id": guild_id},
@@ -115,7 +114,7 @@ class InfluencerLiveQueueService:
         )
         logger.info(f"[LiveQueue] Fila limpa — influencer {influencer_id}")
 
-    # ── Avançar fila (após fim de partida) ────────────────────────────────
+    # ── Avançar fila (após fim de partida) ──────────────────────────────
     async def advance_queue(
         self,
         influencer_id: str,
@@ -124,6 +123,7 @@ class InfluencerLiveQueueService:
     ) -> dict:
         """
         Remove o primeiro da fila (partida encerrada/cancelada/desistência).
+        Só decrementa queue_size se havia alguém na fila.
         Se houver próximo, cria a partida e notifica.
         """
         doc = await self._col().find_one(
@@ -131,9 +131,10 @@ class InfluencerLiveQueueService:
         if not doc:
             return {"ok": False, "msg": "Fila não encontrada."}
 
-        players = doc.get("players", [])
-        if players:
-            # Remove o primeiro (que acabou de jogar/desistiu)
+        players       = list(doc.get("players", []))
+        had_player    = len(players) > 0
+
+        if had_player:
             players.pop(0)
 
         await self._col().update_one(
@@ -146,14 +147,15 @@ class InfluencerLiveQueueService:
             }},
         )
 
-        from services.influencer_live_room_service import influencer_live_room_service
-        await influencer_live_room_service.update_queue_size(influencer_id, guild_id, -1)
+        # Só decrementa se havia jogador na fila para remover
+        if had_player:
+            from services.influencer_live_room_service import influencer_live_room_service
+            await influencer_live_room_service.update_queue_size(influencer_id, guild_id, -1)
 
         if not players:
             logger.info(f"[LiveQueue] Fila vazia após avanço — influencer {influencer_id}")
             return {"ok": True, "next": None}
 
-        # Notifica próximo desafiante
         next_player_id = players[0]
         logger.info(
             f"[LiveQueue] Próximo desafiante: {next_player_id} — influencer {influencer_id}")
@@ -179,6 +181,7 @@ class InfluencerLiveQueueService:
         try:
             from services.influencer_live_room_service import influencer_live_room_service
             from services.match_service import match_service
+            from services.mediator_live_queue_service import mediator_live_queue_service
             from views.influencer_live_match_view import ContraConfirmView
 
             guild = bot.get_guild(int(guild_id))
@@ -199,6 +202,13 @@ class InfluencerLiveQueueService:
             if not influencer or not challenger:
                 return
 
+            # Escala o próximo Controller Live disponível
+            mediator_result = await mediator_live_queue_service.assign_next(
+                guild_id=guild_id,
+                match_id="pending",  # será atualizado após criar a partida
+            )
+            mediator_id = mediator_result.get("mediator_id") if mediator_result.get("ok") else None
+
             # Cria a partida live no DB
             match_doc = await match_service.create_live_match(
                 guild_id=guild_id,
@@ -206,8 +216,19 @@ class InfluencerLiveQueueService:
                 challenger_id=next_player_id,
                 entry_value=room.entry_value,
                 game_mode=room.game_mode,
+                mediator_id=mediator_id,
+                channel_id=str(room.channel_id) if room.channel_id else None,
+                channel_name=room.channel_name,
             )
             match_id = str(match_doc["_id"])
+
+            # Atualiza mediator_live_queue com o match_id real
+            if mediator_result.get("ok"):
+                from config.database import db as _db
+                await _db.get_collection("mediator_live_queues").update_one(
+                    {"guild_id": guild_id},
+                    {"$set": {"active_match_id": match_id}},
+                )
 
             # Marca fila como in_match
             await self._col().update_one(
@@ -219,12 +240,15 @@ class InfluencerLiveQueueService:
                 }},
             )
 
+            mediator_mention = f"<@{mediator_id}>" if mediator_id else "⚠️ *Nenhum Controller Live disponível*"
+
             embed = discord.Embed(
                 title="⚔️ É a sua vez!",
                 description=(
                     f"{challenger.mention}, você é o próximo desafiante!\n\n"
                     f"**Influencer:** {influencer.mention}\n"
-                    f"**Modo:** `{room.game_mode}` | **Valor:** R$ `{room.entry_value:.2f}`\n\n"
+                    f"**Modo:** `{room.game_mode}` | **Valor:** R$ `{room.entry_value:.2f}`\n"
+                    f"**Controller Live:** {mediator_mention}\n\n"
                     "Confirme sua presença e pagamento abaixo."
                 ),
                 color=0xE91E63,
@@ -241,12 +265,12 @@ class InfluencerLiveQueueService:
             )
             logger.info(
                 f"[LiveQueue] Notificação enviada para {next_player_id} "
-                f"— match {match_id}"
+                f"— match {match_id} mediator {mediator_id or 'nenhum'}"
             )
         except Exception as e:
             logger.error(f"[LiveQueue] _notify_next erro: {e}", exc_info=True)
 
-    # ── Posição de um jogador ─────────────────────────────────────────────
+    # ── Posição de um jogador ────────────────────────────────────────────────
     async def get_position(self, influencer_id: str, guild_id: str, player_id: str) -> dict:
         doc = await self._col().find_one(
             {"influencer_id": influencer_id, "guild_id": guild_id})
