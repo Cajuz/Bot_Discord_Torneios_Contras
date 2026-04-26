@@ -21,9 +21,9 @@ from utils.datetime_utils import utcnow
 THEME_LIVE = 0xE91E63
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # EMBED DO CANAL live-contra
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def build_live_contra_embed() -> discord.Embed:
     embed = discord.Embed(
@@ -45,41 +45,9 @@ def build_live_contra_embed() -> discord.Embed:
     return embed
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MODAIS
-# ══════════════════════════════════════════════════════════════════════════════
-
-class RegrasModal(Modal, title="Regras da Sala"):
-    regras = TextInput(
-        label="Regras customizadas",
-        placeholder="Ex: Sem rush nos primeiros 30s, mapa aleatório...",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        max_length=500,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        # Armazena no state da view via custom_id trick — usamos o parent view
-        view: LiveContraSetupView = interaction.message  # será resolvido no callback
-        await interaction.response.defer()
-
-
-class ValorModal(Modal, title="Valor de Entrada"):
-    valor = TextInput(
-        label="Valor de entrada (R$)",
-        placeholder="Ex: 5.00",
-        style=discord.TextStyle.short,
-        required=True,
-        max_length=10,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VIEW PRINCIPAL
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
+# VIEW PRINCIPAL (persistent)
+# ════════════════════════════════════════════════════════════════════════════════
 
 class LiveContraSetupView(View):
     """
@@ -117,8 +85,8 @@ class LiveContraSetupView(View):
         if existing["ok"]:
             room = existing["room"]
             await interaction.response.send_message(
-                f"❌ Você já tem uma sala ativa (`{room.platform} · {room.game_mode}`).\n"
-                f"Acesse seu canal de controle para gerenciá-la ou desativá-la.",
+                f"❌ Você já tem uma sala ativa (`{room.platform} · {room.game_mode}`).\
+\nAcesse seu canal de controle para gerenciá-la ou desativá-la.",
                 ephemeral=True,
             )
             return
@@ -140,14 +108,17 @@ class LiveContraSetupView(View):
         await interaction.response.send_message(embed=embed, view=session_view, ephemeral=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # VIEW DE SESSÃO (ephemeral — por influencer)
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 class LiveContraSessionView(View):
     """
     View ephemeral de configuração da sala.
     Mantém estado da seleção até o influencer clicar em Criar.
+
+    FIX: custom_id dos botões dinâmicos incluem o influencer_id para
+    evitar conflito entre sessões e falha de interação pós-restart.
     """
 
     def __init__(self, influencer_id: int, guild_id: int):
@@ -167,7 +138,9 @@ class LiveContraSessionView(View):
         self._refresh_criar_button()
 
     def _refresh_criar_button(self):
-        """Remove e re-adiciona o botão Criar com estado atualizado."""
+        """Remove e re-adiciona os botões com estado atualizado.
+        FIX: custom_id inclui influencer_id para evitar conflito de interação.
+        """
         # Remove botões existentes (não selects)
         self.children = [c for c in self.children if isinstance(c, Select)]
 
@@ -177,10 +150,12 @@ class LiveContraSessionView(View):
             and self.entry_value is not None
         )
 
+        uid = self.influencer_id  # usado para tornar custom_id único por usuário
+
         regras_btn = Button(
             label="📋 Regras" + (" ✅" if self.custom_rules is not None else ""),
             style=discord.ButtonStyle.secondary,
-            custom_id="session_regras",
+            custom_id=f"session_regras_{uid}",
             row=2,
         )
         regras_btn.callback = self.btn_regras
@@ -188,7 +163,7 @@ class LiveContraSessionView(View):
         valor_btn = Button(
             label="💰 Valor" + (f" ✅ R${self.entry_value:.2f}" if self.entry_value else ""),
             style=discord.ButtonStyle.primary if self.entry_value is None else discord.ButtonStyle.secondary,
-            custom_id="session_valor",
+            custom_id=f"session_valor_{uid}",
             row=2,
         )
         valor_btn.callback = self.btn_valor
@@ -196,7 +171,7 @@ class LiveContraSessionView(View):
         criar_btn = Button(
             label="⚔️ Criar Sala",
             style=discord.ButtonStyle.danger,
-            custom_id="session_criar",
+            custom_id=f"session_criar_{uid}",
             disabled=not can_create,
             row=3,
         )
@@ -206,7 +181,7 @@ class LiveContraSessionView(View):
         self.add_item(valor_btn)
         self.add_item(criar_btn)
 
-    # ── Callbacks dos botões ──────────────────────────────────────────────
+    # ── Callbacks dos botões ──────────────────────────────────────────
 
     async def btn_regras(self, interaction: discord.Interaction):
         if interaction.user.id != self.influencer_id:
@@ -309,7 +284,7 @@ class LiveContraSessionView(View):
         await interaction.edit_original_response(embed=embed, view=self)
 
 
-# ── Selects ───────────────────────────────────────────────────────────────────
+# ── Selects ─────────────────────────────────────────────────────────────────────────────
 
 class PlatformSelect(Select):
     def __init__(self):
@@ -376,7 +351,7 @@ class GameModeSelect(Select):
         await view._update_message(interaction)
 
 
-# ── Modais internos da sessão ─────────────────────────────────────────────────
+# ── Modais internos da sessão ──────────────────────────────────────────────────────────────────
 
 class _RegrasModalSession(Modal, title="Regras da Sala"):
     regras = TextInput(
