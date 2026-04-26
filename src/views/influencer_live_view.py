@@ -39,9 +39,9 @@ def build_contra_room_embed(room, queue_size: int = 0) -> discord.Embed:
         color=color,
         timestamp=utcnow(),
     )
-    embed.add_field(name="Status",          value=status_label,                    inline=True)
-    embed.add_field(name="Modo",            value=f"`{room.game_mode}`",            inline=True)
-    embed.add_field(name="Valor de Entrada", value=f"R$ `{room.entry_value:.2f}`",  inline=True)
+    embed.add_field(name="Status",           value=status_label,                    inline=True)
+    embed.add_field(name="Modo",             value=f"`{room.game_mode}`",            inline=True)
+    embed.add_field(name="Valor de Entrada", value=f"R$ `{room.entry_value:.2f}`",   inline=True)
     embed.add_field(name="Jogadores na Fila", value=f"`{queue_size}`",              inline=True)
 
     if room.custom_rules:
@@ -62,10 +62,10 @@ def build_contra_match_started_embed(
         color=THEME_LIVE,
         timestamp=utcnow(),
     )
-    embed.add_field(name="🎥 Influencer",   value=influencer.mention,              inline=True)
-    embed.add_field(name="⚔️ Desafiante",  value=challenger.mention,              inline=True)
-    embed.add_field(name="🎮 Modo",         value=f"`{room.game_mode}`",            inline=True)
-    embed.add_field(name="💰 Valor",        value=f"R$ `{room.entry_value:.2f}`",   inline=True)
+    embed.add_field(name="🎥 Influencer",  value=influencer.mention,             inline=True)
+    embed.add_field(name="⚔️ Desafiante", value=challenger.mention,             inline=True)
+    embed.add_field(name="🎮 Modo",        value=f"`{room.game_mode}`",            inline=True)
+    embed.add_field(name="💰 Valor",       value=f"R$ `{room.entry_value:.2f}`",   inline=True)
     embed.set_footer(
         text=f"Mediador Controller Live · {utcnow().strftime('%d/%m/%Y %H:%M UTC')}"
     )
@@ -84,10 +84,10 @@ def build_contra_match_result_embed(
         color=discord.Colour.gold(),
         timestamp=utcnow(),
     )
-    embed.add_field(name="🥇 Vencedor",  value=winner.mention,          inline=True)
-    embed.add_field(name="💀 Perdedor",  value=loser.mention,           inline=True)
-    embed.add_field(name="💰 Prêmio",    value=f"R$ `{prize:.2f}`",     inline=True)
-    embed.add_field(name="📋 Partida",   value=f"`{match_id}`",         inline=False)
+    embed.add_field(name="🥇 Vencedor", value=winner.mention,       inline=True)
+    embed.add_field(name="💀 Perdedor", value=loser.mention,         inline=True)
+    embed.add_field(name="💰 Prêmio",   value=f"R$ `{prize:.2f}`",   inline=True)
+    embed.add_field(name="📋 Partida",  value=f"`{match_id}`",       inline=False)
     embed.set_footer(text="SOLAR E-SPORTS · Modo Contra")
     return embed
 
@@ -123,7 +123,6 @@ class ContraRoomView(View):
         if not inf_id and interaction.message and interaction.message.embeds:
             try:
                 title = interaction.message.embeds[0].title or ""
-                # Título: "⚔️ Sala Contra — <@123456789>"
                 import re
                 match = re.search(r"<@(\d+)>", title)
                 if match:
@@ -254,16 +253,8 @@ class ContraRoomView(View):
             color=THEME_LIVE,
             timestamp=utcnow(),
         )
-        embed.add_field(
-            name="Influencer",
-            value=f"<@{inf_id}>",
-            inline=True,
-        )
-        embed.add_field(
-            name="Jogadores na Fila",
-            value=f"`{len(players)}`",
-            inline=True,
-        )
+        embed.add_field(name="Influencer",       value=f"<@{inf_id}>",     inline=True)
+        embed.add_field(name="Jogadores na Fila", value=f"`{len(players)}`", inline=True)
 
         if players:
             lines = [f"`{i+1}.` <@{pid}>" for i, pid in enumerate(players[:15])]
@@ -326,7 +317,7 @@ class ControllerLivePanelView(View):
 
     @discord.ui.button(
         label="Sair da Fila Live",
-        style=discord.ButtonStyle.red,
+        style=discord.ButtonStyle.danger,
         custom_id="controller_live_leave",
         emoji="❌",
     )
