@@ -193,37 +193,31 @@ async def _ensure_db_indexes():
 
 
 # ─────────────────────────────────────────────────────────────
-# on_interaction — reconstrói views com custom_id dinâmico
+# on_interaction — reconstrói views com custom_id dinâmico (pós-restart)
 # ─────────────────────────────────────────────────────────────
 
-async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
+async def _handle_dynamic_view(interaction: discord.Interaction) -> bool:
     """
-    Reconstrói ContraConfirmView, ContraResultView e ContraControlView
-    a partir do custom_id dinâmico quando a view não está registrada
-    (pós-restart ou primeira interação após criação).
-
-    Retorna True se a interação foi tratada aqui (não deve continuar o dispatch),
-    False se deve seguir o fluxo normal.
+    Trata interações de componentes com custom_id dinâmico (ContraConfirmView,
+    ContraResultView, ContraControlView) que não são registradas como persistent.
+    Retorna True se tratou, False para deixar o discord.py processar normalmente.
     """
     if interaction.type != discord.InteractionType.component:
         return False
 
     custom_id: str = interaction.data.get("custom_id", "")
 
-    # ── ContraConfirmView: contra_confirm_{match_id} / contra_giveup_{match_id}
+    # ── ContraConfirmView
     m = re.match(r"^contra_(confirm|giveup)_(.+)$", custom_id)
     if m:
         match_id = m.group(2)
         try:
             from services.match_service import match_service
             from views.influencer_live_match_view import ContraConfirmView
-
             match_doc = await match_service.get_match(match_id)
             if not match_doc:
-                await interaction.response.send_message(
-                    "❌ Partida não encontrada.", ephemeral=True)
+                await interaction.response.send_message("❌ Partida não encontrada.", ephemeral=True)
                 return True
-
             view = ContraConfirmView(
                 match_id=match_id,
                 challenger_id=int(match_doc.get("challenger_id", 0)),
@@ -233,28 +227,24 @@ async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
             )
             await view._dispatch_interaction(interaction, custom_id)
         except Exception as e:
-            logger.error(f"[on_interaction] ContraConfirmView rebuild erro: {e}", exc_info=True)
+            logger.error(f"[on_interaction] ContraConfirmView: {e}", exc_info=True)
             try:
-                await interaction.response.send_message(
-                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+                await interaction.response.send_message("❌ Erro interno.", ephemeral=True)
             except Exception:
                 pass
         return True
 
-    # ── ContraResultView: contra_inf_wins_{match_id} / contra_chal_wins_{match_id} / contra_cancel_{match_id}
+    # ── ContraResultView
     m = re.match(r"^contra_(inf_wins|chal_wins|cancel)_(.+)$", custom_id)
     if m:
         match_id = m.group(2)
         try:
             from services.match_service import match_service
             from views.influencer_live_match_view import ContraResultView
-
             match_doc = await match_service.get_match(match_id)
             if not match_doc:
-                await interaction.response.send_message(
-                    "❌ Partida não encontrada.", ephemeral=True)
+                await interaction.response.send_message("❌ Partida não encontrada.", ephemeral=True)
                 return True
-
             view = ContraResultView(
                 match_id=match_id,
                 influencer_id=int(match_doc.get("influencer_id", 0)),
@@ -263,42 +253,33 @@ async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
             )
             await view._dispatch_interaction(interaction, custom_id)
         except Exception as e:
-            logger.error(f"[on_interaction] ContraResultView rebuild erro: {e}", exc_info=True)
+            logger.error(f"[on_interaction] ContraResultView: {e}", exc_info=True)
             try:
-                await interaction.response.send_message(
-                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+                await interaction.response.send_message("❌ Erro interno.", ephemeral=True)
             except Exception:
                 pass
         return True
 
-    # ── ContraControlView: ctrl_*_{influencer_id}
+    # ── ContraControlView
     m = re.match(r"^ctrl_(?:select_platform|select_gamemode|edit_valor|edit_regras|view_queue|desativar)_(\d+)$", custom_id)
     if m:
         influencer_id = int(m.group(1))
         try:
             from services.influencer_live_room_service import influencer_live_room_service
             from views.influencer_live_control_view import ContraControlView
-
             guild_id = str(interaction.guild_id)
             room_result = await influencer_live_room_service.get_room(
-                influencer_id=str(influencer_id),
-                guild_id=guild_id,
-            )
+                influencer_id=str(influencer_id), guild_id=guild_id)
             if not room_result["ok"]:
                 await interaction.response.send_message(
                     "❌ Sala não encontrada. Pode ter sido desativada.", ephemeral=True)
                 return True
-
-            view = ContraControlView(
-                influencer_id=influencer_id,
-                guild_id=int(guild_id),
-            )
+            view = ContraControlView(influencer_id=influencer_id, guild_id=int(guild_id))
             await view._dispatch_interaction(interaction, custom_id)
         except Exception as e:
-            logger.error(f"[on_interaction] ContraControlView rebuild erro: {e}", exc_info=True)
+            logger.error(f"[on_interaction] ContraControlView: {e}", exc_info=True)
             try:
-                await interaction.response.send_message(
-                    "❌ Erro interno. Contate um admin.", ephemeral=True)
+                await interaction.response.send_message("❌ Erro interno.", ephemeral=True)
             except Exception:
                 pass
         return True
@@ -306,31 +287,18 @@ async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
     return False
 
 
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-    """
-    Intercepta interações de componentes com custom_id dinâmico
-    antes do dispatch padrão do discord.py 2.4.0.
-    Para custom_ids não tratados, repassa via bot._connection._view_store
-    (componentes) e bot.tree (slash/autocomplete/modal).
-    """
-    if await _rebuild_dynamic_view(interaction):
-        return
+# NÃO definimos on_interaction aqui.
+# O discord.py 2.4.0 processa as persistent views e slash commands automaticamente.
+# As views dinâmicas são tratadas via setup_hook abaixo.
 
-    # Componentes (botões, selects) → view store das persistent views
-    if interaction.type == discord.InteractionType.component:
-        store = bot._connection._view_store
-        store.dispatch(interaction)
-        return
+class _DynamicViewCog(commands.Cog):
+    """Cog que intercepta interações de views dinâmicas sem quebrar o fluxo padrão."""
 
-    # Slash commands, autocomplete, modais → app command tree
-    if interaction.type in (
-        discord.InteractionType.application_command,
-        discord.InteractionType.autocomplete,
-        discord.InteractionType.modal_submit,
-    ):
-        await bot.tree.call(interaction)
-        return
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        await _handle_dynamic_view(interaction)
+        # Não retorna nem consome a interação — o discord.py continua
+        # processando normalmente pelas persistent views registradas.
 
 
 # ─────────────────────────────────────────────────────────────
@@ -393,13 +361,9 @@ async def on_ready():
         from services.faturamento_mediador  import RelatorioGeralView
         from services.match_queue_service   import ConfirmationView
         from views.rules_view               import RulesView, ConfirmationView as RulesConfirmationView
-        # Influencer Live — apenas views com custom_id FIXO
         from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
         from views.influencer_live_admin_view import InfluencerLiveAdminView
         from views.live_contra_setup_view     import LiveContraSetupView
-        # ContraConfirmView, ContraResultView e ContraControlView NÃO são
-        # registradas aqui — usam custom_id dinâmico e são reconstruídas
-        # via on_interaction/_rebuild_dynamic_view
 
         persistent_views = [
             TicketPanelView(),
@@ -432,12 +396,10 @@ async def on_ready():
             ContractPanelView(),
             RulesView(),
             RulesConfirmationView(),
-            # Influencer Live — custom_id FIXO
             ContraRoomView(influencer_id=0, guild_id=0),
             ControllerLivePanelView(),
             InfluencerLiveAdminView(),
             LiveContraSetupView(),
-            # CAPTCHA
             CaptchaButtonView,
         ]
 
@@ -755,6 +717,9 @@ async def main():
             logger.info(f"[Cog] ✅ {cog}")
         except Exception as e:
             logger.error(f"[Cog] ❌ {cog}: {e}")
+
+    # Registra o cog de views dinâmicas
+    await bot.add_cog(_DynamicViewCog(bot))
 
     await _start_http_server()
     await asyncio.gather(
