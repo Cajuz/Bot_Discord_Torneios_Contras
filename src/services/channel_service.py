@@ -381,23 +381,37 @@ class PermissionService:
                 read_messages=False, send_messages=False)}
 
             if category_name == CATEGORY_CONTRAS:
+                # FIX: use_application_commands=True garante que botões funcionem
+                # mesmo com send_messages=False na categoria.
+
                 # Controller Live vê a categoria inteira (painel-mediador-live)
                 cl_role = roles.get(CONTROLLER_LIVE_ROLE_NAME) or discord.utils.get(
                     guild.roles, name=CONTROLLER_LIVE_ROLE_NAME)
                 if cl_role:
                     overwrites[cl_role] = discord.PermissionOverwrite(
-                        read_messages=True, send_messages=False)
+                        read_messages=True,
+                        send_messages=False,
+                        use_application_commands=True,
+                    )
+
                 # Influencer vê (live-contra + seus canais control-contra-*)
                 inf_role = roles.get(INFLUENCER_ROLE_NAME) or discord.utils.get(
                     guild.roles, name=INFLUENCER_ROLE_NAME)
                 if inf_role:
                     overwrites[inf_role] = discord.PermissionOverwrite(
-                        read_messages=True, send_messages=False)
+                        read_messages=True,
+                        send_messages=False,
+                        use_application_commands=True,
+                    )
+
                 # Membro precisa ver a categoria para acessar canais contra-*
                 member_role = roles.get(MEMBER_ROLE_NAME)
                 if member_role:
                     overwrites[member_role] = discord.PermissionOverwrite(
-                        read_messages=True, send_messages=False)
+                        read_messages=True,
+                        send_messages=False,
+                        use_application_commands=True,
+                    )
 
             return overwrites
 
