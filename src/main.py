@@ -231,7 +231,6 @@ async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
                 guild_id=int(match_doc.get("guild_id", 0)),
                 channel=interaction.channel,
             )
-            # Deixa a view processar a interação
             await view._dispatch_interaction(interaction, custom_id)
         except Exception as e:
             logger.error(f"[on_interaction] ContraConfirmView rebuild erro: {e}", exc_info=True)
@@ -313,14 +312,12 @@ async def on_interaction(interaction: discord.Interaction):
     Intercepta interações de componentes com custom_id dinâmico
     antes do dispatch padrão do discord.py.
     Reconstrói a view adequada via _rebuild_dynamic_view.
+    Para todos os demais casos, repassa para o handler interno do bot
+    para que as persistent views e slash commands funcionem normalmente.
     """
     if await _rebuild_dynamic_view(interaction):
         return
-    # Para todos os outros tipos de interação, deixa o discord.py processar normalmente
-    # (slash commands, modais, etc.)
-    # NOTA: bot.process_application_commands não existe no discord.py puro;
-    # o dispatch de slash/autocomplete é automático pelo bot. Para componentes
-    # não tratados acima, o bot já despacha via add_view registrados no boot.
+    await bot._handle_interaction(interaction)
 
 
 # ─────────────────────────────────────────────────────────────
