@@ -4,7 +4,9 @@ Fila de desafiantes de uma sala do modo contra.
 
 Cada sala tem sua própria fila isolada (keyed por influencer_id + guild_id).
 Quando a fila avança, o próximo desafiante é notificado e a partida é criada.
-Ao confirmar pagamento, posta ContraResultView para o Controller Live declarar vencedor.
+
+FIX: ContraResultView NÃO é mais postada aqui.
+É postada em ContraPaymentModal.on_submit (após pagamento confirmado).
 """
 from __future__ import annotations
 import discord
@@ -19,8 +21,8 @@ class InfluencerLiveQueue:
     def __init__(self, doc: dict):
         self.influencer_id   = str(doc["influencer_id"])
         self.guild_id        = str(doc["guild_id"])
-        self.players         = doc.get("players", [])        # list[str] — discord_ids
-        self.status          = doc.get("status", "waiting")  # waiting | in_match
+        self.players         = doc.get("players", [])
+        self.status          = doc.get("status", "waiting")
         self.active_match_id = doc.get("active_match_id")
         self.updated_at      = doc.get("updated_at", utcnow())
 
@@ -48,7 +50,6 @@ class InfluencerLiveQueueService:
             await self._col().insert_one(doc)
         return doc
 
-    # ── Entrar na fila ────────────────────────────────────────────────────
     async def enter_queue(
         self, influencer_id: str, guild_id: str, player_id: str
     ) -> dict:
@@ -60,12 +61,8 @@ class InfluencerLiveQueueService:
 
         await self._col().update_one(
             {"influencer_id": influencer_id, "guild_id": guild_id},
-            {
-                "$push": {"players": player_id},
-                "$set":  {"updated_at": utcnow()},
-            },
+            {"$push": {"players": player_id}, "$set": {"updated_at": utcnow()}},
         )
-
         doc["players"].append(player_id)
         position = len(doc["players"])
 
@@ -73,12 +70,9 @@ class InfluencerLiveQueueService:
         await influencer_live_room_service.update_queue_size(influencer_id, guild_id, 1)
 
         logger.info(
-            f"[LiveQueue] {player_id} entrou na fila — "
-            f"influencer {influencer_id} pos {position}"
-        )
+            f"[LiveQueue] {player_id} entrou na fila — influencer {influencer_id} pos {position}")
         return {"ok": True, "position": position}
 
-    # ── Sair da fila ──────────────────────────────────────────────────────
     async def leave_queue(
         self, influencer_id: str, guild_id: str, player_id: str
     ) -> dict:
@@ -89,24 +83,18 @@ class InfluencerLiveQueueService:
 
         await self._col().update_one(
             {"influencer_id": influencer_id, "guild_id": guild_id},
-            {
-                "$pull": {"players": player_id},
-                "$set":  {"updated_at": utcnow()},
-            },
+            {"$pull": {"players": player_id}, "$set": {"updated_at": utcnow()}},
         )
-
         from services.influencer_live_room_service import influencer_live_room_service
         await influencer_live_room_service.update_queue_size(influencer_id, guild_id, -1)
 
         logger.info(f"[LiveQueue] {player_id} saiu da fila — influencer {influencer_id}")
         return {"ok": True}
 
-    # ── Ver fila ──────────────────────────────────────────────────────────
     async def get_fila(self, influencer_id: str, guild_id: str) -> dict:
         doc = await self._get_or_create(influencer_id, guild_id)
         return {"ok": True, "queue": InfluencerLiveQueue(doc)}
 
-    # ── Limpar fila (ao desativar sala) ───────────────────────────────────
     async def clear_queue(self, influencer_id: str, guild_id: str):
         await self._col().update_one(
             {"influencer_id": influencer_id, "guild_id": guild_id},
@@ -115,7 +103,6 @@ class InfluencerLiveQueueService:
         )
         logger.info(f"[LiveQueue] Fila limpa — influencer {influencer_id}")
 
-    # ── Avançar fila (após fim de partida) ────────────────────────────────
     async def advance_queue(
         self,
         influencer_id: str,
@@ -124,8 +111,8 @@ class InfluencerLiveQueueService:
     ) -> dict:
         """
         Remove o primeiro da fila (partida encerrada/cancelada/desistência).
-        Só decrementa queue_size se havia alguém na fila.
-        Se houver próximo, cria a partida e notifica.
+        Se houver próximo, cria a partida e notifica (só ContraConfirmView).
+        ContraResultView é postada posteriormente pelo ContraPaymentModal.
         """
         doc = await self._col().find_one(
             {"influencer_id": influencer_id, "guild_id": guild_id})
@@ -157,8 +144,7 @@ class InfluencerLiveQueueService:
             return {"ok": True, "next": None}
 
         next_player_id = players[0]
-        logger.info(
-            f"[LiveQueue] Próximo desafiante: {next_player_id} — influencer {influencer_id}")
+        logger.info(f"[LiveQueue] Próximo desafiante: {next_player_id} — influencer {influencer_id}")
 
         if bot:
             await self._notify_next(
@@ -178,10 +164,9 @@ class InfluencerLiveQueueService:
         next_player_id: str,
     ):
         """
-        Notifica o próximo desafiante no canal contra-<influencer>.
-        Posta ContraConfirmView (desafiante confirma) e, após pagamento confirmado
-        (register_payment_confirmation), o match_service.on_payment_confirmed chama
-        post_result_panel para postar ContraResultView ao Controller Live.
+        Posta ContraConfirmView no canal contra-<influencer>.
+        ContraResultView só será postada APÓS o desafiante confirmar pagamento
+        (via ContraPaymentModal.on_submit).
         """
         try:
             from services.influencer_live_room_service import influencer_live_room_service
@@ -207,14 +192,10 @@ class InfluencerLiveQueueService:
             if not influencer or not challenger:
                 return
 
-            # Escala o próximo Controller Live disponível
             mediator_result = await mediator_live_queue_service.assign_next(
-                guild_id=guild_id,
-                match_id="pending",
-            )
+                guild_id=guild_id, match_id="pending")
             mediator_id = mediator_result.get("mediator_id") if mediator_result.get("ok") else None
 
-            # Cria a partida live no DB
             match_doc = await match_service.create_live_match(
                 guild_id=guild_id,
                 influencer_id=influencer_id,
@@ -227,7 +208,6 @@ class InfluencerLiveQueueService:
             )
             match_id = str(match_doc["_id"])
 
-            # Atualiza mediator_live_queue com o match_id real
             if mediator_result.get("ok"):
                 from config.database import db as _db
                 await _db.get_collection("mediator_live_queues").update_one(
@@ -235,7 +215,6 @@ class InfluencerLiveQueueService:
                     {"$set": {"active_match_id": match_id}},
                 )
 
-            # Marca fila como in_match
             await self._col().update_one(
                 {"influencer_id": influencer_id, "guild_id": guild_id},
                 {"$set": {
@@ -247,8 +226,7 @@ class InfluencerLiveQueueService:
 
             mediator_mention = f"<@{mediator_id}>" if mediator_id else "⚠️ *Nenhum Controller Live disponível*"
 
-            # ── Posta ContraConfirmView (desafiante confirma presença/pagamento)
-            embed_confirm = discord.Embed(
+            embed = discord.Embed(
                 title="⚔️ É a sua vez!",
                 description=(
                     f"{challenger.mention}, você é o próximo desafiante!\n\n"
@@ -259,51 +237,29 @@ class InfluencerLiveQueueService:
                 ),
                 color=0xE91E63,
             )
+
+            # Passa channel e mediator_id para o ContraConfirmView
+            # para que ContraPaymentModal possa postar ContraResultView após pagamento
             confirm_view = ContraConfirmView(
                 match_id=match_id,
                 challenger_id=int(next_player_id),
                 influencer_id=int(influencer_id),
+                mediator_id=int(mediator_id) if mediator_id else None,
+                channel=channel,
+                guild_id=int(guild_id),
             )
             await channel.send(
                 content=f"🚨 {challenger.mention}",
-                embed=embed_confirm,
+                embed=embed,
                 view=confirm_view,
             )
-
-            # ── Posta ContraResultView (Controller Live declara vencedor)
-            # Gap resolvido: o painel de resultado é postado logo após a notificação
-            # para que o Controller Live já possa declarar o vencedor quando a partida
-            # terminar, sem depender de nenhum comando adicional.
-            from views.influencer_live_match_view import ContraResultView
-
-            embed_result = discord.Embed(
-                title="🏆 Painel de Resultado — Controller Live",
-                description=(
-                    f"**Partida:** `{match_id}`\n"
-                    f"**Influencer:** {influencer.mention}\n"
-                    f"**Desafiante:** {challenger.mention}\n"
-                    f"**Valor:** R$ `{room.entry_value:.2f}`\n\n"
-                    f"Quando a partida terminar, declare o vencedor abaixo.\n"
-                    f"Controller Live escalado: {mediator_mention}"
-                ),
-                color=0xE91E63,
-            )
-            result_view = ContraResultView(
-                match_id=match_id,
-                influencer_id=int(influencer_id),
-                challenger_id=int(next_player_id),
-                guild_id=int(guild_id),
-            )
-            await channel.send(embed=embed_result, view=result_view)
-
             logger.info(
-                f"[LiveQueue] Notificação + painel de resultado postados — "
-                f"match {match_id} mediator {mediator_id or 'nenhum'}"
+                f"[LiveQueue] ContraConfirmView postada — match {match_id} "
+                f"mediator {mediator_id or 'nenhum'}"
             )
         except Exception as e:
             logger.error(f"[LiveQueue] _notify_next erro: {e}", exc_info=True)
 
-    # ── Posição de um jogador ─────────────────────────────────────────────
     async def get_position(self, influencer_id: str, guild_id: str, player_id: str) -> dict:
         doc = await self._col().find_one(
             {"influencer_id": influencer_id, "guild_id": guild_id})
