@@ -43,12 +43,16 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
 
     async def on_submit(self, interaction: discord.Interaction):
         from services.match_service import match_service
-        await match_service.register_payment_confirmation(
+        # register_payment_confirmation só recebe match_id
+        updated = await match_service.register_payment_confirmation(
             match_id=self.match_id,
-            player_id=str(self.player_id),
-            comprovante=self.comprovante.value,
-            observacao=self.observacao.value or "",
         )
+        if not updated:
+            await interaction.response.send_message(
+                "❌ Não foi possível registrar o pagamento. Contate um admin.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(
             "✅ Pagamento confirmado! Aguarde o Controller Live abrir a sala.",
             ephemeral=True,
@@ -104,6 +108,7 @@ class ContraConfirmView(View):
 
         from services.influencer_live_queue_service import influencer_live_queue_service
         from services.match_service import match_service
+        from config.discord_bot import get_bot
 
         await match_service.cancel_match(
             match_id=self.match_id,
@@ -112,6 +117,7 @@ class ContraConfirmView(View):
         await influencer_live_queue_service.advance_queue(
             influencer_id=str(self.influencer_id),
             guild_id=str(interaction.guild_id),
+            bot=get_bot(),
         )
 
         await interaction.response.send_message(
@@ -146,6 +152,7 @@ class ContraResultView(View):
     async def _declare_winner(
         self,
         interaction: discord.Interaction,
+        vencedor: str,          # 'influencer' | 'challenger'
         winner_id: int,
         loser_id: int,
     ):
@@ -164,22 +171,26 @@ class ContraResultView(View):
         from services.match_service import match_service
         from services.influencer_live_queue_service import influencer_live_queue_service
         from views.influencer_live_view import build_contra_match_result_embed
+        from config.discord_bot import get_bot
 
-        result = await match_service.finish_live_match(
+        # finish_live_match(match_id, vencedor: 'influencer'|'challenger')
+        updated = await match_service.finish_live_match(
             match_id=self.match_id,
-            winner_id=str(winner_id),
-            loser_id=str(loser_id),
-            declared_by=str(interaction.user.id),
+            vencedor=vencedor,
         )
 
-        if not result["ok"]:
+        if not updated:
             await interaction.response.send_message(
-                f"❌ {result['msg']}", ephemeral=True)
+                "❌ Não foi possível finalizar a partida. Verifique o status.",
+                ephemeral=True,
+            )
             return
 
-        prize   = result.get("prize", 0.0)
-        winner  = interaction.guild.get_member(winner_id) or await interaction.guild.fetch_member(winner_id)
-        loser   = interaction.guild.get_member(loser_id)  or await interaction.guild.fetch_member(loser_id)
+        bet_value = updated.get("bet_value", 0.0)
+        prize     = bet_value * 2
+
+        winner = interaction.guild.get_member(winner_id) or await interaction.guild.fetch_member(winner_id)
+        loser  = interaction.guild.get_member(loser_id)  or await interaction.guild.fetch_member(loser_id)
 
         embed = build_contra_match_result_embed(
             winner=winner,
@@ -198,10 +209,11 @@ class ContraResultView(View):
             embed=embed,
         )
 
-        # Avança a fila para o próximo desafiante
+        # Avança a fila para o próximo desafiante (com bot para notificar)
         await influencer_live_queue_service.advance_queue(
             influencer_id=str(self.influencer_id),
             guild_id=str(self.guild_id),
+            bot=get_bot(),
         )
 
         logger.info(
@@ -218,6 +230,7 @@ class ContraResultView(View):
     async def influencer_wins(self, interaction: discord.Interaction, button: Button):
         await self._declare_winner(
             interaction,
+            vencedor="influencer",
             winner_id=self.influencer_id,
             loser_id=self.challenger_id,
         )
@@ -231,6 +244,7 @@ class ContraResultView(View):
     async def challenger_wins(self, interaction: discord.Interaction, button: Button):
         await self._declare_winner(
             interaction,
+            vencedor="challenger",
             winner_id=self.challenger_id,
             loser_id=self.influencer_id,
         )
@@ -252,6 +266,7 @@ class ContraResultView(View):
 
         from services.match_service import match_service
         from services.influencer_live_queue_service import influencer_live_queue_service
+        from config.discord_bot import get_bot
 
         await match_service.cancel_match(
             match_id=self.match_id,
@@ -260,6 +275,7 @@ class ContraResultView(View):
         await influencer_live_queue_service.advance_queue(
             influencer_id=str(self.influencer_id),
             guild_id=str(self.guild_id),
+            bot=get_bot(),
         )
 
         for child in self.children:
