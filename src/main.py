@@ -310,14 +310,27 @@ async def _rebuild_dynamic_view(interaction: discord.Interaction) -> bool:
 async def on_interaction(interaction: discord.Interaction):
     """
     Intercepta interações de componentes com custom_id dinâmico
-    antes do dispatch padrão do discord.py.
-    Reconstrói a view adequada via _rebuild_dynamic_view.
-    Para todos os demais casos, repassa para o handler interno do bot
-    para que as persistent views e slash commands funcionem normalmente.
+    antes do dispatch padrão do discord.py 2.4.0.
+    Para custom_ids não tratados, repassa via bot._connection._view_store
+    (componentes) e bot.tree (slash/autocomplete/modal).
     """
     if await _rebuild_dynamic_view(interaction):
         return
-    await bot._handle_interaction(interaction)
+
+    # Componentes (botões, selects) → view store das persistent views
+    if interaction.type == discord.InteractionType.component:
+        store = bot._connection._view_store
+        store.dispatch(interaction)
+        return
+
+    # Slash commands, autocomplete, modais → app command tree
+    if interaction.type in (
+        discord.InteractionType.application_command,
+        discord.InteractionType.autocomplete,
+        discord.InteractionType.modal_submit,
+    ):
+        await bot.tree.call(interaction)
+        return
 
 
 # ─────────────────────────────────────────────────────────────
