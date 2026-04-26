@@ -24,13 +24,20 @@ from utils.datetime_utils import utcnow
 from utils.logger import logger
 
 # ── Cores do embed ────────────────────────────────────────────────────────────
-THEME = 0xFFD54F
+THEME  = 0xFFD54F
 THEME2 = 0xFFA726
-GREEN = 0x2ECC71
+GREEN  = 0x2ECC71
 
 # ── Status das partidas ───────────────────────────────────────────────────────
-STATUS_FINALIZADO = "aguardando_premio"
-STATUS_CANCELADO = "cancelado"
+# CORRIGIDO: "aguardando_premio" removido — partida ainda não foi concluída,
+# apenas aguarda pagamento do prêmio. Contar como finalizada inflava o número.
+STATUS_FINALIZADO_LIST = [
+    "finalizado",
+    "concluido",
+]
+STATUS_CANCELADO_LIST = [
+    "cancelado",
+]
 
 # ── Paleta de cores dos gráficos ──────────────────────────────────────────────
 BG_COLOR    = "#161925"
@@ -47,14 +54,14 @@ PURPLE      = "#8E7CFF"
 
 # ── Configurações centralizadas ───────────────────────────────────────────────
 class AnalyticsConfig:
-    TOP_MEDIATORS       = 8
-    TOP_PLAYERS         = 10
-    TOP_INFLUENCERS     = 10
-    TOP_CATEGORIES      = 6
-    TOP_AGENTS          = 5
-    LOOKBACK_DAYS       = 30
-    CACHE_TTL_SECONDS   = 300
-    CHART_DPI           = 135
+    TOP_MEDIATORS     = 8
+    TOP_PLAYERS       = 10
+    TOP_INFLUENCERS   = 10
+    TOP_CATEGORIES    = 6
+    TOP_AGENTS        = 5
+    LOOKBACK_DAYS     = 30
+    CACHE_TTL_SECONDS = 300
+    CHART_DPI         = 135
 
 
 # ── Cache em memória ──────────────────────────────────────────────────────────
@@ -87,31 +94,31 @@ async def _cached_render(
 # ── Períodos dos gráficos ─────────────────────────────────────────────────────
 MATCH_PERIODS = {
     "daily": {
-        "label":        "Diario",
-        "embed_label":  "Ultimas 24 horas",
-        "delta":        timedelta(hours=24),
-        "bucket_format":"%Y-%m-%d %H:00",
-        "tick_format":  "%Hh",
-        "step":         timedelta(hours=1),
-        "points":       24,
+        "label":         "Diario",
+        "embed_label":   "Ultimas 24 horas",
+        "delta":         timedelta(hours=24),
+        "bucket_format": "%Y-%m-%d %H:00",
+        "tick_format":   "%Hh",
+        "step":          timedelta(hours=1),
+        "points":        24,
     },
     "weekly": {
-        "label":        "Semanal",
-        "embed_label":  "Ultimos 7 dias",
-        "delta":        timedelta(days=7),
-        "bucket_format":"%Y-%m-%d",
-        "tick_format":  "%d/%m",
-        "step":         timedelta(days=1),
-        "points":       7,
+        "label":         "Semanal",
+        "embed_label":   "Ultimos 7 dias",
+        "delta":         timedelta(days=7),
+        "bucket_format": "%Y-%m-%d",
+        "tick_format":   "%d/%m",
+        "step":          timedelta(days=1),
+        "points":        7,
     },
     "monthly": {
-        "label":        "Mensal",
-        "embed_label":  "Ultimos 30 dias",
-        "delta":        timedelta(days=30),
-        "bucket_format":"%Y-%m-%d",
-        "tick_format":  "%d/%m",
-        "step":         timedelta(days=1),
-        "points":       30,
+        "label":         "Mensal",
+        "embed_label":   "Ultimos 30 dias",
+        "delta":         timedelta(days=30),
+        "bucket_format": "%Y-%m-%d",
+        "tick_format":   "%d/%m",
+        "step":          timedelta(days=1),
+        "points":        30,
     },
 }
 
@@ -154,16 +161,15 @@ def _add_fig_header(fig, title: str, subtitle: str = "") -> None:
 
 def _slots(now, period_key: str):
     cfg = MATCH_PERIODS[period_key]
-    since = now - cfg["delta"]
     if cfg["step"] == timedelta(hours=1):
-        base = since.replace(minute=0, second=0, microsecond=0)
+        last = now.replace(minute=0, second=0, microsecond=0)
     else:
-        base = since.replace(hour=0, minute=0, second=0, microsecond=0)
-    return [base + cfg["step"] * i for i in range(cfg["points"])]
+        last = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    first = last - cfg["step"] * (cfg["points"] - 1)
+    return [first + cfg["step"] * i for i in range(cfg["points"])]
 
 
 def _plot_smooth_line(ax, x, y_vals, color, label=None):
-    """Plota linha reta com marcadores."""
     ax.fill_between(x, y_vals, color=color, alpha=0.18)
     ax.plot(x, y_vals, color=color, linewidth=2.5, marker="o", markersize=4, label=label)
 
@@ -187,6 +193,17 @@ async def _safe_aggregate(collection, pipeline: list, limit: int, fallback=None)
         return fallback
 
 
+async def _debug_status_values() -> list[str]:
+    col = db.get_collection("matches")
+    try:
+        result = await col.distinct("status")
+        logger.info(f"[Analytics][DEBUG] Status encontrados: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[Analytics][DEBUG] Erro ao buscar status: {e}")
+        return []
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Views do Discord
 # ══════════════════════════════════════════════════════════════════════════════
@@ -194,7 +211,7 @@ async def _safe_aggregate(collection, pipeline: list, limit: int, fallback=None)
 class MatchesDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "daily"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -240,7 +257,7 @@ class MatchesDashboardView(discord.ui.View):
 class MediatorsDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "monthly"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -286,48 +303,77 @@ class MediatorsDashboardView(discord.ui.View):
 class PlayersDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "weekly"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
-        self.btn_weekly._period_key  = "weekly"
-        self.btn_monthly._period_key = "monthly"
+        self._sync_styles()
+
+    def _sync_styles(self):
+        pass
+
+    @discord.ui.button(label="🏆 Rank",       style=discord.ButtonStyle.primary,   custom_id="players_open_rank")
+    async def btn_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view  = _RankGeralEphemeralView(self.service, interaction.user.id, "weekly")
+        embed = await view._render()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="👤 Meu Perfil", style=discord.ButtonStyle.secondary, custom_id="players_open_perfil")
+    async def btn_perfil(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = await _render_perfil_embed(interaction.user)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Atualizar",     style=discord.ButtonStyle.success,   custom_id="players_refresh")
+    async def btn_refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        embed = await self.service._render_players_dashboard(self.period_key)
+        await interaction.edit_original_response(embed=embed, view=self)
+
+
+class _RankGeralEphemeralView(discord.ui.View):
+    def __init__(self, service: "AnalyticsService", user_id: int, period_key: str = "weekly"):
+        super().__init__(timeout=180)
+        self.service    = service
+        self.user_id    = user_id
+        self.period_key = period_key
         self._sync_styles()
 
     def _sync_styles(self):
         for child in self.children:
             if not isinstance(child, discord.ui.Button):
                 continue
-            key = getattr(child, "_period_key", None)
-            if key:
-                child.style = (
-                    discord.ButtonStyle.primary
-                    if key == self.period_key
-                    else discord.ButtonStyle.secondary
-                )
+            if child.custom_id == "rank_ep_7d":
+                child.style = discord.ButtonStyle.primary if self.period_key == "weekly" else discord.ButtonStyle.secondary
+            elif child.custom_id == "rank_ep_30d":
+                child.style = discord.ButtonStyle.primary if self.period_key == "monthly" else discord.ButtonStyle.secondary
 
-    async def _update_period(self, interaction: discord.Interaction, period_key: str):
-        self.period_key = period_key
+    async def _render(self) -> discord.Embed:
+        return await self.service._render_players_dashboard(
+            self.period_key, highlight_id=self.user_id
+        )
+
+    async def _update(self, interaction: discord.Interaction):
         self._sync_styles()
-        await interaction.response.defer()
-        embed = await self.service._render_players_dashboard(period_key)
-        await interaction.edit_original_response(embed=embed, attachments=[], view=self)
+        embed = await self._render()
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="7 dias",    style=discord.ButtonStyle.primary,   custom_id="players_weekly")
-    async def btn_weekly(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._update_period(interaction, "weekly")
+    @discord.ui.button(label="7 dias",    style=discord.ButtonStyle.primary,   custom_id="rank_ep_7d")
+    async def btn_7d(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.period_key = "weekly"
+        await self._update(interaction)
 
-    @discord.ui.button(label="30 dias",   style=discord.ButtonStyle.secondary, custom_id="players_monthly")
-    async def btn_monthly(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._update_period(interaction, "monthly")
+    @discord.ui.button(label="30 dias",   style=discord.ButtonStyle.secondary, custom_id="rank_ep_30d")
+    async def btn_30d(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.period_key = "monthly"
+        await self._update(interaction)
 
-    @discord.ui.button(label="Atualizar", style=discord.ButtonStyle.success,   custom_id="players_refresh")
+    @discord.ui.button(label="Atualizar", style=discord.ButtonStyle.success,   custom_id="rank_ep_refresh")
     async def btn_refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._update_period(interaction, self.period_key)
+        await self._update(interaction)
 
 
 class SupportDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "monthly"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -373,8 +419,8 @@ class SupportDashboardView(discord.ui.View):
 class ServerDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", guild: discord.Guild, period_key: str = "monthly"):
         super().__init__(timeout=None)
-        self.service = service
-        self.guild = guild
+        self.service    = service
+        self.guild      = guild
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -420,8 +466,8 @@ class ServerDashboardView(discord.ui.View):
 class InfluencersDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", guild: discord.Guild, period_key: str = "monthly"):
         super().__init__(timeout=None)
-        self.service = service
-        self.guild = guild
+        self.service    = service
+        self.guild      = guild
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -467,7 +513,7 @@ class InfluencersDashboardView(discord.ui.View):
 class ApostasDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "daily"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -513,7 +559,7 @@ class ApostasDashboardView(discord.ui.View):
 class MembrosMovDashboardView(discord.ui.View):
     def __init__(self, service: "AnalyticsService", period_key: str = "monthly"):
         super().__init__(timeout=None)
-        self.service = service
+        self.service    = service
         self.period_key = period_key
         self.btn_daily._period_key   = "daily"
         self.btn_weekly._period_key  = "weekly"
@@ -554,6 +600,84 @@ class MembrosMovDashboardView(discord.ui.View):
     @discord.ui.button(label="Atualizar", style=discord.ButtonStyle.success,   custom_id="membros_mov_refresh")
     async def btn_refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._update_period(interaction, self.period_key)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helper: embed de perfil pessoal
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _render_perfil_embed(user: discord.Member | discord.User) -> discord.Embed:
+    col = db.get_collection("matches")
+
+    total  = await _safe_count(col, {"player_ids": str(user.id)})
+    wins   = await _safe_count(col, {"player_ids": str(user.id), "winner_id": str(user.id)})
+    losses = total - wins
+
+    vol_agg = await _safe_aggregate(col, [
+        {"$match": {"player_ids": str(user.id)}},
+        {"$group": {"_id": None, "s": {"$sum": "$bet_value"}}},
+    ], 1)
+    volume = vol_agg[0]["s"] if vol_agg else 0.0
+
+    recent = await _safe_aggregate(col, [
+        {"$match": {"player_ids": str(user.id)}},
+        {"$sort": {"created_at": -1}},
+        {"$limit": 20},
+        {"$project": {"winner_id": 1}},
+    ], 20)
+    streak = 0
+    for r in recent:
+        if str(r.get("winner_id")) == str(user.id):
+            streak += 1
+        else:
+            break
+
+    all_players = await _safe_aggregate(col, [
+        {"$unwind": "$player_ids"},
+        {"$group": {
+            "_id":  "$player_ids",
+            "wins": {"$sum": {"$cond": [{"$eq": ["$winner_id", "$player_ids"]}, 1, 0]}},
+        }},
+        {"$sort": {"wins": -1}},
+        {"$limit": 500},
+    ], 500)
+    position = next(
+        (i + 1 for i, r in enumerate(all_players) if str(r["_id"]) == str(user.id)),
+        None,
+    )
+
+    last5 = await _safe_aggregate(col, [
+        {"$match": {"player_ids": str(user.id)}},
+        {"$sort": {"created_at": -1}},
+        {"$limit": 5},
+        {"$project": {"winner_id": 1, "bet_value": 1, "created_at": 1}},
+    ], 5)
+    history_lines = []
+    for r in last5:
+        won  = str(r.get("winner_id")) == str(user.id)
+        icon = "✅" if won else "❌"
+        val  = _brl(r.get("bet_value", 0))
+        history_lines.append(f"{icon} {val}")
+
+    embed = discord.Embed(title=f"📊 Perfil — {user.display_name}", color=THEME)
+    embed.set_thumbnail(url=user.display_avatar.url)
+    embed.add_field(name="Vitórias",        value=f"`{wins}`",              inline=True)
+    embed.add_field(name="Derrotas",        value=f"`{losses}`",            inline=True)
+    embed.add_field(name="Win Rate",        value=f"`{_pct(wins, total)}`", inline=True)
+    embed.add_field(name="Total Partidas",  value=f"`{total}`",             inline=True)
+    embed.add_field(name="Valor Total",    value=f"**{_brl(volume)}**",    inline=True)
+    embed.add_field(name="Sequência atual", value=f"`{streak}` vitórias",   inline=True)
+
+    if position:
+        medals  = {1: "🥇", 2: "🥈", 3: "🥉"}
+        pos_str = medals.get(position, f"#{position}")
+        embed.add_field(name="Posição Geral", value=f"**{pos_str}**", inline=True)
+
+    if history_lines:
+        embed.add_field(name="Últimas partidas", value="  ".join(history_lines), inline=False)
+
+    embed.set_footer(text="Histórico completo · Só você pode ver isso")
+    return embed
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -642,8 +766,8 @@ class AnalyticsService:
         query = {"created_at": {"$gte": since}}
 
         total       = await _safe_count(col, query)
-        finalizadas = await _safe_count(col, {**query, "status": STATUS_FINALIZADO})
-        canceladas  = await _safe_count(col, {**query, "status": STATUS_CANCELADO})
+        finalizadas = await _safe_count(col, {**query, "status": {"$in": STATUS_FINALIZADO_LIST}})
+        canceladas  = await _safe_count(col, {**query, "status": {"$in": STATUS_CANCELADO_LIST}})
 
         vol_agg = await _safe_aggregate(col, [
             {"$match": query},
@@ -651,14 +775,65 @@ class AnalyticsService:
         ], 1)
         volume = vol_agg[0]["s"] if vol_agg else 0.0
 
+        # ── DEBUG: inspeciona canceladas no período ───────────────────────────
+        try:
+            docs_canceladas = await col.find(
+                {**query, "status": {"$in": STATUS_CANCELADO_LIST}}
+            ).to_list(length=50)
+
+            logger.info(
+                f"[Analytics][DEBUG] Canceladas | período: {cfg['embed_label']} | "
+                f"since: {since.strftime('%d/%m/%Y %H:%M')} UTC | "
+                f"encontradas: {len(docs_canceladas)}"
+            )
+
+            if docs_canceladas:
+                for i, doc in enumerate(docs_canceladas, 1):
+                    logger.info(
+                        f"[Analytics][DEBUG] Cancelada #{i} | "
+                        f"_id: {doc.get('_id')} | "
+                        f"status: {doc.get('status')} | "
+                        f"created_at: {doc.get('created_at')} | "
+                        f"cancelled_at: {doc.get('cancelled_at')} | "
+                        f"bet_value: {doc.get('bet_value')} | "
+                        f"cancelled_by: {doc.get('cancelled_by')} | "
+                        f"cancel_reason: {doc.get('cancel_reason')}"
+                    )
+            else:
+                # Nenhuma no período — verifica se existem no banco sem filtro de data
+                total_sem_filtro = await _safe_count(col, {"status": {"$in": STATUS_CANCELADO_LIST}})
+                logger.warning(
+                    f"[Analytics][DEBUG] Nenhuma cancelada no período. "
+                    f"Total SEM filtro de data: {total_sem_filtro}"
+                )
+                if total_sem_filtro > 0:
+                    exemplo = await col.find_one({"status": {"$in": STATUS_CANCELADO_LIST}})
+                    logger.warning(
+                        f"[Analytics][DEBUG] Exemplo de cancelada no banco | "
+                        f"_id: {exemplo.get('_id')} | "
+                        f"status: {exemplo.get('status')} | "
+                        f"created_at: {exemplo.get('created_at')} | "
+                        f"cancelled_at: {exemplo.get('cancelled_at')}"
+                    )
+                else:
+                    # Mostra todos os status existentes para confirmar o valor real
+                    todos_status = await col.distinct("status")
+                    logger.warning(
+                        f"[Analytics][DEBUG] Nenhuma cancelada no banco. "
+                        f"Status existentes: {todos_status}"
+                    )
+        except Exception as e:
+            logger.error(f"[Analytics][DEBUG] Erro ao inspecionar canceladas: {e}")
+        # ── FIM DEBUG ─────────────────────────────────────────────────────────
+
         group_expr = {"$dateToString": {"format": cfg["bucket_format"], "date": "$created_at"}}
         fin_rows   = await _safe_aggregate(col, [
-            {"$match": {**query, "status": STATUS_FINALIZADO}},
+            {"$match": {**query, "status": {"$in": STATUS_FINALIZADO_LIST}}},
             {"$group": {"_id": group_expr, "c": {"$sum": 1}}},
             {"$sort": {"_id": 1}},
         ], cfg["points"])
         canc_rows  = await _safe_aggregate(col, [
-            {"$match": {**query, "status": STATUS_CANCELADO}},
+            {"$match": {**query, "status": {"$in": STATUS_CANCELADO_LIST}}},
             {"$group": {"_id": group_expr, "c": {"$sum": 1}}},
             {"$sort": {"_id": 1}},
         ], cfg["points"])
@@ -681,6 +856,13 @@ class AnalyticsService:
         ax1.set_ylabel("Partidas", color=MUTED, fontsize=9)
         ax1.set_title(f"Partidas - {cfg['label']}", color=TEXT_COLOR, fontsize=11, fontweight="bold")
         ax1.legend(facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, fontsize=8, framealpha=0.7)
+
+        # CORRIGIDO: eixo Y sempre com ticks inteiros e escala correta
+        max_y = max(max(y_fin, default=0), max(y_canc, default=0))
+        top_y = max(int(max_y * 1.2) + 1, 2)
+        ax1.set_ylim(bottom=0, top=top_y)
+        ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+
         _add_fig_header(
             fig,
             f"Dashboard de Partidas - {cfg['embed_label']}",
@@ -718,8 +900,8 @@ class AnalyticsService:
             {"$group": {
                 "_id":   "$mediator_id",
                 "total": {"$sum": 1},
-                "fin":   {"$sum": {"$cond": [{"$eq": ["$status", STATUS_FINALIZADO]}, 1, 0]}},
-                "canc":  {"$sum": {"$cond": [{"$eq": ["$status", STATUS_CANCELADO]},  1, 0]}},
+                "fin":   {"$sum": {"$cond": [{"$in": ["$status", STATUS_FINALIZADO_LIST]}, 1, 0]}},
+                "canc":  {"$sum": {"$cond": [{"$in": ["$status", STATUS_CANCELADO_LIST]},  1, 0]}},
                 "vol":   {"$sum": "$bet_value"},
             }},
             {"$sort": {"fin": -1}},
@@ -783,7 +965,11 @@ class AnalyticsService:
 
     # ── Dashboard: Jogadores ──────────────────────────────────────────────────
 
-    async def _render_players_dashboard(self, period_key: str = "weekly") -> discord.Embed:
+    async def _render_players_dashboard(
+        self,
+        period_key: str = "weekly",
+        highlight_id: Optional[int] = None,
+    ) -> discord.Embed:
         cfg   = MATCH_PERIODS[period_key]
         col   = db.get_collection("matches")
         now   = utcnow()
@@ -798,38 +984,46 @@ class AnalyticsService:
                 "wins":  {"$sum": {"$cond": [{"$eq": ["$winner_id", "$player_ids"]}, 1, 0]}},
                 "vol":   {"$sum": "$bet_value"},
             }},
-            {"$sort": {"total": -1}},
+            {"$sort": {"wins": -1}},
             {"$limit": AnalyticsConfig.TOP_PLAYERS},
         ], AnalyticsConfig.TOP_PLAYERS)
 
-        totals = [row["total"] for row in top]
-        wrs    = [(row["wins"] / row["total"] * 100) if row["total"] else 0 for row in top]
-
+        totals         = [row["total"] for row in top]
+        wrs            = [(row["wins"] / row["total"] * 100) if row["total"] else 0 for row in top]
         total_partidas = sum(totals)
         top_wr         = max(wrs) if wrs else 0
-        medals         = ["🥇", "🥈", "🥉"]
-        lines          = []
+
+        medals = ["🥇", "🥈", "🥉"]
+        lines  = []
         for i, row in enumerate(top):
-            icon = medals[i] if i < 3 else f"`{i + 1}.`"
+            pos    = medals[i] if i < 3 else f"`{i + 1}º`"
+            wins   = row["wins"]
+            tot    = row["total"]
+            wr     = _pct(wins, tot)
+            vol    = _brl(row.get("vol", 0))
+            marker = " ◀" if highlight_id and str(row["_id"]) == str(highlight_id) else ""
             lines.append(
-                f"{icon} <@{row['_id']}> — `{row['total']}` partidas | WR: `{_pct(row['wins'], row['total'])}` | {_brl(row.get('vol', 0))}"
+                f"{pos} <@{row['_id']}> ｜ **{wins}** vitórias ｜ `{wr}` {marker}"
             )
 
-        embed = discord.Embed(title=f"Top Jogadores — {cfg['embed_label']}", color=THEME)
-        embed.description = "\n".join(lines) if lines else "Nenhuma partida disputada ainda."
+        embed = discord.Embed(
+            title       = f"🏆 Ranking de Vitórias — {cfg['embed_label']}",
+            description = "\n".join(lines) if lines else "Nenhuma partida disputada ainda.",
+            color       = THEME,
+        )
         embed.add_field(name="Jogadores ativos", value=f"`{len(top)}`",       inline=True)
         embed.add_field(name="Partidas",         value=f"`{total_partidas}`", inline=True)
         embed.add_field(name="Melhor WR",        value=f"`{top_wr:.1f}%`",   inline=True)
-        embed.add_field(name="Maior volume",
-                        value=f"**{_brl(max((row.get('vol', 0) for row in top), default=0))}**",
-                        inline=True)
-        embed.set_footer(text=f"Atualizado {now.strftime('%d/%m/%Y %H:%M')} UTC | [players_dashboard]")
+        
+        footer_suffix = " · Só você pode ver isso" if highlight_id else ""
+        embed.set_footer(text=f"Atualizado {now.strftime('%d/%m/%Y %H:%M')} UTC | [players_dashboard]{footer_suffix}")
         return embed
 
     async def _players(self, guild: discord.Guild):
-        period_key  = "weekly"
-        embed       = await self._render_players_dashboard(period_key)
-        view        = PlayersDashboardView(self, period_key=period_key)
+        period_key = "weekly"
+        embed      = await self._render_players_dashboard(period_key)
+        view       = PlayersDashboardView(self, period_key=period_key)
+
         ch = discord.utils.get(guild.text_channels, name="ranking")
         if not ch:
             return
@@ -901,6 +1095,7 @@ class AnalyticsService:
                 color=[RED, ORANGE, TEAL], alpha=0.88)
         ax1.set_ylabel("Tickets", color=MUTED, fontsize=9)
         ax1.set_title("Situacao atual", color=TEXT_COLOR, fontsize=11, fontweight="bold")
+        ax1.set_ylim(bottom=0, top=max(max(abertos, atend, fechados) * 1.2, 1))
 
         fig.text(0.02, 0.485, "Distribuicao por Categoria",
                  color=TEXT_COLOR, fontsize=11, fontweight="bold", va="top")
@@ -925,7 +1120,6 @@ class AnalyticsService:
                        loc="lower center", bbox_to_anchor=(0.5, -0.15), ncol=3,
                        facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, fontsize=8, framealpha=0.7)
             ax2.set_title("Tickets por Categoria", color=TEXT_COLOR, fontsize=11, fontweight="bold")
-            # ── MUDANÇA 2: texto do centro removido ──
         else:
             ax2.text(0.5, 0.5, "Sem categorias", color=MUTED,
                      ha="center", va="center", transform=ax2.transAxes)
@@ -987,6 +1181,7 @@ class AnalyticsService:
         ax.bar(labels, values, color=[BLUE, GOLD, TEAL, RED, ORANGE, PURPLE], alpha=0.88)
         ax.set_ylabel("Quantidade", color=MUTED, fontsize=9)
         ax.set_title("Status geral do servidor", color=TEXT_COLOR, fontsize=11, fontweight="bold")
+        ax.set_ylim(bottom=0, top=max(max(values) * 1.2, 1))
         for tick in ax.get_xticklabels():
             tick.set_color(MUTED)
             tick.set_fontsize(10)
@@ -1054,16 +1249,14 @@ class AnalyticsService:
 
         if rows:
             x = np.arange(len(labels))
-
-            # Barras de membros
             ax1.bar(x, members_list, color=PURPLE, alpha=0.9)
             ax1.set_xticks(x)
             ax1.set_xticklabels(labels, color=MUTED, fontsize=10)
             ax1.set_ylabel("Membros indicados", color=MUTED, fontsize=9)
             ax1.set_xlabel("Posicao no ranking", color=MUTED, fontsize=9)
             ax1.set_title("Influencers por membros indicados", color=TEXT_COLOR, fontsize=11, fontweight="bold")
+            ax1.set_ylim(bottom=0, top=max(max(members_list, default=0) * 1.2, 1))
 
-            # Linha de partidas com curva suavizada
             ax2 = ax1.twinx()
             ax2.tick_params(colors=MUTED, labelsize=8)
             for spine in ax2.spines.values():
@@ -1078,7 +1271,6 @@ class AnalyticsService:
             else:
                 ax2.plot(x, match_totals, color=GOLD, marker="o", linewidth=2.2)
 
-            # Pontos e anotações
             ax2.scatter(x, match_totals, color=TEXT_COLOR, s=30, zorder=5)
             for i, v in enumerate(match_totals):
                 if v > 0:
@@ -1122,7 +1314,7 @@ class AnalyticsService:
         view        = InfluencersDashboardView(self, guild, period_key=period_key)
         await self._post_dashboard(guild, "dashboard-influencers", "influencers_dashboard", embed, file, view)
 
-    # ── Dashboard: Apostas no Servidor ───────────────────────────────────────
+    # ── Dashboard: Apostas ────────────────────────────────────────────────────
 
     async def _render_apostas_dashboard(self, period_key: str = "daily") -> tuple[discord.Embed, discord.File]:
         cfg       = MATCH_PERIODS[period_key]
@@ -1134,11 +1326,13 @@ class AnalyticsService:
 
         total      = await _safe_count(col, query)
         ativas     = await _safe_count(col, {"status": {"$in": [
-            "aguardando_pagamento", "aguardando_inicio", "em_andamento", "aguardando_premio"
+            "aguardando_pagamento", "aguardando_inicio", "em_andamento",
+            "aguardando_partida", "partida_iniciada", "aguardando_premio",
         ]}})
-        aguardando = await _safe_count(col, {"status": "aguardando_pagamento"})
+        aguardando = await _safe_count(col, {"status": {"$in": [
+            "aguardando_pagamento", "aguardando_partida",
+        ]}})
 
-        # Valor mais apostado no período
         val_agg = await _safe_aggregate(col, [
             {"$match": query},
             {"$group": {"_id": "$bet_value", "c": {"$sum": 1}}},
@@ -1148,7 +1342,6 @@ class AnalyticsService:
         top_val       = val_agg[0]["_id"] if val_agg else 0
         top_val_count = val_agg[0]["c"]   if val_agg else 0
 
-        # Mediador mais frequente: busca no periodo, fallback para todos os tempos
         med_agg = await _safe_aggregate(col, [
             {"$match": {**query, "mediator_id": {"$ne": None}}},
             {"$group": {"_id": "$mediator_id", "c": {"$sum": 1}}},
@@ -1165,7 +1358,6 @@ class AnalyticsService:
         top_med_id    = med_agg[0]["_id"] if med_agg else None
         top_med_count = med_agg[0]["c"]   if med_agg else 0
 
-        # Série temporal
         group_expr = {"$dateToString": {"format": cfg["bucket_format"], "date": "$created_at"}}
         rows = await _safe_aggregate(col, [
             {"$match": query},
@@ -1179,7 +1371,6 @@ class AnalyticsService:
         row_map   = {r["_id"]: r["c"] for r in rows}
         y_vals    = [row_map.get(k, 0) for k in slot_keys]
 
-        # ── Linha reta (sem spline) ───────────────────────────────────────────
         fig, ax = plt.subplots(figsize=(14, 6), facecolor=BG_COLOR)
         _style_axis(ax)
         x = np.arange(len(slot_keys))
@@ -1187,7 +1378,6 @@ class AnalyticsService:
         ax.fill_between(x, y_vals, color=BLUE, alpha=0.18)
         ax.plot(x, y_vals, color=BLUE, linewidth=2.5, marker="o", markersize=5, zorder=4)
 
-        # Anotações nos pontos com valor > 0
         for i, v in enumerate(y_vals):
             if v > 0:
                 ax.annotate(
@@ -1287,6 +1477,7 @@ class AnalyticsService:
         ax.set_ylabel("Membros", color=MUTED, fontsize=9)
         ax.set_title("Member Joins and Leaves History", color=TEXT_COLOR, fontsize=11, fontweight="bold")
         ax.legend(facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, fontsize=8, framealpha=0.7)
+        ax.set_ylim(bottom=0, top=max(max(max(y_joins, default=0), max(y_leaves, default=0)) * 1.2, 1))
 
         sign = lambda n: f"+{n}" if n >= 0 else str(n)
         _add_fig_header(

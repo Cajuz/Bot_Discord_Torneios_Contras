@@ -4,229 +4,331 @@ import discord
 from datetime import datetime, timedelta, timezone
 from config.database import db
 from utils.logger import logger
+from utils.datetime_utils import utcnow
 
 
-CAMPO_PAGAMENTO_CONFIRMADO = "pagamento_confirmado"
-CAMPO_MEDIADOR_ID = "mediator_id"
-CAMPO_DATA_INICIO = "started_at"
-CAMPO_DATA_FIM = "completed_at"
-CAMPO_VALOR = "bet_value"
-CAMPO_STATUS = "status"
+# ── Campos do documento ───────────────────────────────────────────────────────
+CAMPO_MEDIADOR_ID  = "mediator_id"
+CAMPO_DATA_INICIO  = "created_at"       # FIX: era started_at — mas created_at é o campo garantido no modelo
+CAMPO_DATA_FIM     = "completed_at"
+CAMPO_VALOR        = "bet_value"
+CAMPO_STATUS       = "status"
 
-STATUS_CONCLUIDO = "finalizado"
-STATUS_CANCELADO = "cancelado"
+# ── Status válidos ────────────────────────────────────────────────────────────
+STATUS_FINALIZADO_LIST = [
+    "aguardando_premio",
+    "finalizado",
+    "concluido",
+]
+STATUS_CANCELADO_LIST = [
+    "cancelado",
+]
+STATUS_VALIDOS = STATUS_FINALIZADO_LIST + STATUS_CANCELADO_LIST
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Service
+# ══════════════════════════════════════════════════════════════════════════════
 
 class FaturamentoMediadorService:
-    async def buscar_partidas_do_banco(self, discord_id: str):
+
+    async def buscar_partidas_do_banco(self, discord_id: str, dias: int = 30):
+        """
+        Busca partidas do mediador diretamente no banco já filtradas por período.
+        FIX: antes buscava TODAS as partidas e filtrava em Python — muito lento.
+        Agora usa query com índice.
+        """
         try:
             collection = db.get_collection("matches")
-            cursor = collection.find({CAMPO_MEDIADOR_ID: str(discord_id)})
+            since      = utcnow() - timedelta(days=dias)
 
-            partidas = []
-            async for documento in cursor:
-                partidas.append(documento)
+            cursor = collection.find({
+                CAMPO_MEDIADOR_ID: str(discord_id),
+                CAMPO_STATUS:      {"$in": STATUS_VALIDOS},
+                CAMPO_DATA_INICIO: {"$gte": since},         # FIX: filtra no banco
+            })
 
-            logger.info(f"[Faturamento] Encontradas {len(partidas)} partidas para mediator_id={discord_id}")
+            partidas = await cursor.to_list(length=None)
+            logger.info(
+                f"[Faturamento] {len(partidas)} partidas para mediator_id={discord_id} "
+                f"nos últimos {dias} dias"
+            )
             return partidas
 
         except Exception as e:
-            logger.error(f"[Faturamento] Erro ao buscar partidas no banco: {e}")
+            logger.error(f"[Faturamento] Erro ao buscar partidas: {e}")
             return []
 
+    async def calcular_stats(self, partidas: list, mediador_id: str) -> dict:
+        """
+        Calcula todas as estatísticas de faturamento de uma lista de partidas.
+        Separa finalizadas de canceladas.
+        """
+        now = utcnow()
 
-class FaturamentoView(discord.ui.View):
-    def __init__(self, service: FaturamentoMediadorService, partidas: list, mediador_id: str, nome_mediador: str, avatar_url: str):
-        super().__init__(timeout=180)
-        self.service = service
-        self.partidas = partidas
-        self.mediador_id = str(mediador_id)
-        self.nome_mediador = nome_mediador
-        self.avatar_url = avatar_url
+        total_faturado    = 0.0
+        total_segundos    = 0
+        finalizadas       = 0
+        canceladas        = 0
+        vol_canceladas    = 0.0
 
-    async def gerar_embed(self, dias: int) -> discord.Embed:
-        total_faturado = 0.0
-        total_segundos_trabalhados = 0
-
-        agora = datetime.now(timezone.utc)
-        limite = agora - timedelta(days=dias)
-
-        for partida in self.partidas:
-            id_mediador_partida = str(partida.get(CAMPO_MEDIADOR_ID, ""))
-            status_partida = partida.get(CAMPO_STATUS)
-
-            status_valido = status_partida in [STATUS_CONCLUIDO, STATUS_CANCELADO]
-            pagamento_ok = partida.get(CAMPO_PAGAMENTO_CONFIRMADO, False) is True
-
-            if id_mediador_partida != self.mediador_id:
-                continue
-            if not pagamento_ok:
-                continue
-            if not status_valido:
+        for p in partidas:
+            if str(p.get(CAMPO_MEDIADOR_ID, "")) != str(mediador_id):
                 continue
 
-            data_inicio = partida.get(CAMPO_DATA_INICIO)
-            if not data_inicio:
+            status = p.get(CAMPO_STATUS, "")
+            valor  = float(p.get(CAMPO_VALOR, 0) or 0)
+
+            # ── Canceladas: conta separado, não entra no faturamento ──────────
+            if status in STATUS_CANCELADO_LIST:
+                canceladas   += 1
+                vol_canceladas += valor
                 continue
 
-            if data_inicio.tzinfo is None:
-                data_inicio = data_inicio.replace(tzinfo=timezone.utc)
-
-            if data_inicio < limite:
+            # ── Finalizadas: entra no faturamento ─────────────────────────────
+            if status not in STATUS_FINALIZADO_LIST:
                 continue
 
-            valor = float(partida.get(CAMPO_VALOR, 0.0) or 0.0)
+            finalizadas    += 1
             total_faturado += valor
 
-            data_fim = partida.get(CAMPO_DATA_FIM) or agora
-            if data_fim.tzinfo is None:
-                data_fim = data_fim.replace(tzinfo=timezone.utc)
+            inicio = p.get(CAMPO_DATA_INICIO)
+            fim    = p.get(CAMPO_DATA_FIM) or now
+            if inicio:
+                if inicio.tzinfo is None:
+                    inicio = inicio.replace(tzinfo=timezone.utc)
+                if fim.tzinfo is None:
+                    fim = fim.replace(tzinfo=timezone.utc)
+                delta = (fim - inicio).total_seconds()
+                if delta > 0:
+                    total_segundos += int(delta)
 
-            tempo_partida = data_fim - data_inicio
-            if tempo_partida.total_seconds() > 0:
-                total_segundos_trabalhados += int(tempo_partida.total_seconds())
-
-        total_horas = total_segundos_trabalhados / 3600
+        total_horas   = total_segundos / 3600
         media_por_hora = total_faturado / total_horas if total_horas > 0 else 0.0
 
-        valor_total = f"R$ {total_faturado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        media_hora = f"R$ {media_por_hora:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        horas_fmt = int(total_horas)
-        minutos_fmt = int((total_horas - horas_fmt) * 60)
-        tempo_formatado = f"{horas_fmt}h {minutos_fmt}min"
+        return {
+            "total_faturado":  total_faturado,
+            "finalizadas":     finalizadas,
+            "canceladas":      canceladas,
+            "vol_canceladas":  vol_canceladas,
+            "total_horas":     total_horas,
+            "media_por_hora":  media_por_hora,
+        }
 
-        embed = discord.Embed(color=0xFFA500)
-        embed.title = f"💰 Faturamento de @{self.nome_mediador}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers de formatação
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _brl(v: float) -> str:
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def _horas(total_horas: float) -> str:
+    h = int(total_horas)
+    m = int((total_horas - h) * 60)
+    return f"{h}h {m}min"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# View
+# ══════════════════════════════════════════════════════════════════════════════
+
+class FaturamentoView(discord.ui.View):
+    def __init__(
+        self,
+        service:       FaturamentoMediadorService,
+        mediador_id:   str,
+        nome_mediador: str,
+        avatar_url:    str,
+    ):
+        super().__init__(timeout=180)
+        self.service       = service
+        self.mediador_id   = str(mediador_id)
+        self.nome_mediador = nome_mediador
+        self.avatar_url    = avatar_url
+
+    async def gerar_embed(self, dias: int) -> discord.Embed:
+        # FIX: busca já filtrada no banco pelo período correto
+        partidas = await self.service.buscar_partidas_do_banco(self.mediador_id, dias)
+        stats    = await self.service.calcular_stats(partidas, self.mediador_id)
 
         periodo_texto = "Hoje" if dias == 1 else f"Últimos {dias} dias"
-        embed.add_field(name="Período", value=f"`{periodo_texto}`", inline=False)
-        embed.add_field(name="Total", value=f"`{valor_total}`", inline=False)
-        embed.add_field(name="Horas trabalhadas", value=f"`{tempo_formatado}`", inline=False)
-        embed.add_field(name="Média por hora", value=f"`{media_hora}`", inline=False)
 
+        embed = discord.Embed(
+            title = f"💰 Faturamento — @{self.nome_mediador}",
+            color = 0xFFA500,
+        )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
 
+        embed.add_field(name="📅 Período",           value=f"`{periodo_texto}`",                     inline=False)
+        embed.add_field(name="✅ Finalizadas",        value=f"`{stats['finalizadas']} partidas`",     inline=True)
+        embed.add_field(name="❌ Canceladas",         value=f"`{stats['canceladas']} partidas`",      inline=True)
+        embed.add_field(name="\u200b",               value="\u200b",                                 inline=True)  # spacer
+        embed.add_field(name="💵 Total faturado",    value=f"`{_brl(stats['total_faturado'])}`",     inline=True)
+        embed.add_field(name="🚫 Vol. canceladas",   value=f"`{_brl(stats['vol_canceladas'])}`",     inline=True)
+        embed.add_field(name="\u200b",               value="\u200b",                                 inline=True)  # spacer
+        embed.add_field(name="⏱️ Horas trabalhadas", value=f"`{_horas(stats['total_horas'])}`",      inline=True)
+        embed.add_field(name="📈 Média por hora",    value=f"`{_brl(stats['media_por_hora'])}`",     inline=True)
+
+        embed.set_footer(text=f"Atualizado {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         return embed
 
-    async def atualizar_faturamento(self, interaction: discord.Interaction, dias: int):
+    async def _atualizar(self, interaction: discord.Interaction, dias: int):
+        await interaction.response.defer()
         embed = await self.gerar_embed(dias)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
 
-    @discord.ui.button(label="Hoje", style=discord.ButtonStyle.primary, custom_id="faturamento_hoje")
+    @discord.ui.button(label="Hoje",   style=discord.ButtonStyle.primary,   custom_id="fat_hoje")
     async def botao_hoje(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.atualizar_faturamento(interaction, 1)
+        await self._atualizar(interaction, 1)
 
-    @discord.ui.button(label="3 dias", style=discord.ButtonStyle.primary, custom_id="faturamento_3dias")
+    @discord.ui.button(label="3 dias", style=discord.ButtonStyle.secondary, custom_id="fat_3dias")
     async def botao_3dias(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.atualizar_faturamento(interaction, 3)
+        await self._atualizar(interaction, 3)
 
-    @discord.ui.button(label="7 dias", style=discord.ButtonStyle.primary, custom_id="faturamento_7dias")
+    @discord.ui.button(label="7 dias", style=discord.ButtonStyle.secondary, custom_id="fat_7dias")
     async def botao_7dias(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.atualizar_faturamento(interaction, 7)
+        await self._atualizar(interaction, 7)
 
+    @discord.ui.button(label="30 dias", style=discord.ButtonStyle.secondary, custom_id="fat_30dias")
+    async def botao_30dias(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._atualizar(interaction, 30)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Relatório Geral (TXT)
+# ══════════════════════════════════════════════════════════════════════════════
 
 class RelatorioGeralView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Gerar Relatório Geral (TXT)",
-        style=discord.ButtonStyle.secondary,
-        custom_id="relatorio_geral_txt"
+        label     = "Gerar Relatório Geral (TXT)",
+        style     = discord.ButtonStyle.secondary,
+        custom_id = "relatorio_geral_txt",
     )
     async def gerar_relatorio_txt(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         try:
             collection = db.get_collection("matches")
-            data_atual = datetime.now(timezone.utc)
-            limite_mensal = data_atual - timedelta(days=30)
+            since      = utcnow() - timedelta(days=30)
 
-            query = {
-                CAMPO_STATUS: {"$in": [STATUS_CONCLUIDO, STATUS_CANCELADO]},
-                CAMPO_PAGAMENTO_CONFIRMADO: True,
-                CAMPO_DATA_INICIO: {"$gte": limite_mensal}
-            }
+            # FIX: não filtra mais por pagamento_confirmado (campo removido do modelo)
+            # FIX: inclui canceladas no relatório separadas
+            cursor = collection.find({
+                CAMPO_STATUS:      {"$in": STATUS_VALIDOS},
+                CAMPO_DATA_INICIO: {"$gte": since},
+            })
 
-            cursor = collection.find(query)
+            faturamento_por_mediador: dict[str, dict] = {}
+            total_geral      = 0.0
+            total_canceladas = 0
+            total_fin        = 0
 
-            faturamento_por_mediador = {}
-            total_geral = 0.0
-            partidas_encontradas = 0
+            async for p in cursor:
+                m_id   = str(p.get(CAMPO_MEDIADOR_ID) or "Desconhecido")
+                valor  = float(p.get(CAMPO_VALOR, 0) or 0)
+                status = p.get(CAMPO_STATUS, "")
 
-            async for partida in cursor:
-                partidas_encontradas += 1
+                if m_id not in faturamento_por_mediador:
+                    faturamento_por_mediador[m_id] = {
+                        "total":      0.0,
+                        "segundos":   0,
+                        "fin":        0,
+                        "canc":       0,
+                        "vol_canc":   0.0,
+                    }
 
-                m_id = str(partida.get(CAMPO_MEDIADOR_ID, "Desconhecido"))
-                valor = float(partida.get(CAMPO_VALOR, 0.0) or 0.0)
+                entry = faturamento_por_mediador[m_id]
 
-                inicio = partida.get(CAMPO_DATA_INICIO)
-                fim = partida.get(CAMPO_DATA_FIM)
-                segundos = 0
+                if status in STATUS_CANCELADO_LIST:
+                    entry["canc"]     += 1
+                    entry["vol_canc"] += valor
+                    total_canceladas  += 1
+                    continue
 
+                # finalizadas
+                entry["fin"]   += 1
+                entry["total"] += valor
+                total_geral    += valor
+                total_fin      += 1
+
+                inicio = p.get(CAMPO_DATA_INICIO)
+                fim    = p.get(CAMPO_DATA_FIM)
+                now    = utcnow()
                 if inicio:
                     if inicio.tzinfo is None:
                         inicio = inicio.replace(tzinfo=timezone.utc)
+                    fim = fim or now
+                    if fim.tzinfo is None:
+                        fim = fim.replace(tzinfo=timezone.utc)
+                    delta = (fim - inicio).total_seconds()
+                    if delta > 0:
+                        entry["segundos"] += int(delta)
 
-                    if fim:
-                        if fim.tzinfo is None:
-                            fim = fim.replace(tzinfo=timezone.utc)
-                        segundos = max(0, int((fim - inicio).total_seconds()))
-                    else:
-                        segundos = max(0, int((datetime.now(timezone.utc) - inicio).total_seconds()))
-
-                if m_id not in faturamento_por_mediador:
-                    faturamento_por_mediador[m_id] = {"total": 0.0, "segundos": 0}
-
-                faturamento_por_mediador[m_id]["total"] += valor
-                faturamento_por_mediador[m_id]["segundos"] += segundos
-                total_geral += valor
-
-            logger.info(f"[Faturamento] Partidas mensais encontradas: {partidas_encontradas}")
+            logger.info(
+                f"[Faturamento] Relatório: {total_fin} finalizadas, "
+                f"{total_canceladas} canceladas, {len(faturamento_por_mediador)} mediadores"
+            )
 
             data_str = datetime.now().strftime("%d/%m/%Y %H:%M")
             linhas = [
-                "============================================================",
-                f"FATURAMENTO MENSAL - GERADO EM {data_str}",
-                "============================================================",
-                "Período: Últimos 30 dias",
-                f"Total de mediadores ativos no relatório: {len(faturamento_por_mediador)}",
-                f"Faturamento Total da Plataforma: R$ {total_geral:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                "=" * 70,
+                f"FATURAMENTO MENSAL — GERADO EM {data_str}",
+                "=" * 70,
+                f"Período:              Últimos 30 dias",
+                f"Mediadores ativos:    {len(faturamento_por_mediador)}",
+                f"Partidas finalizadas: {total_fin}",
+                f"Partidas canceladas:  {total_canceladas}",
+                f"Faturamento total:    {_brl(total_geral)}",
                 "",
-                "RANKING DE FATURAMENTO (POR LUCRO):",
-                "------------------------------------------------------------",
-                " Pos. | Mediador ID           | Faturamento   | Horas",
-                "------------------------------------------------------------"
+                "RANKING POR FATURAMENTO:",
+                "-" * 70,
+                f"{'Pos':>3} | {'Mediador ID':<22} | {'Faturado':>13} | {'Fin':>4} | {'Canc':>4} | {'Horas':>6}",
+                "-" * 70,
             ]
 
             ranking = sorted(
                 faturamento_por_mediador.items(),
                 key=lambda x: x[1]["total"],
-                reverse=True
+                reverse=True,
             )
 
-            for i, (m_id, dados) in enumerate(ranking, 1):
-                valor_fmt = f"R$ {dados['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                horas = int(dados["segundos"] / 3600)
-                linhas.append(f"{i:3}° | {m_id:21} | {valor_fmt:13} | {horas}h")
+            for i, (m_id, d) in enumerate(ranking, 1):
+                horas     = int(d["segundos"] / 3600)
+                valor_fmt = _brl(d["total"])
+                linhas.append(
+                    f"{i:3}° | {m_id:<22} | {valor_fmt:>13} | {d['fin']:>4} | {d['canc']:>4} | {horas:>5}h"
+                )
 
-            linhas.append("------------------------------------------------------------")
-            conteudo_final = "\n".join(linhas)
+            linhas += [
+                "-" * 70,
+                "",
+                "DETALHES DE CANCELAMENTOS:",
+                "-" * 70,
+            ]
+            for m_id, d in ranking:
+                if d["canc"] > 0:
+                    linhas.append(
+                        f"  {m_id} — {d['canc']} canceladas | Vol: {_brl(d['vol_canc'])}"
+                    )
 
-            buffer = io.BytesIO(conteudo_final.encode("utf-8"))
+            conteudo = "\n".join(linhas)
+            buffer   = io.BytesIO(conteudo.encode("utf-8"))
             filename = f"relatorio_mensal_{datetime.now().strftime('%Y-%m-%d')}.txt"
-            arquivo = discord.File(fp=buffer, filename=filename)
 
             await interaction.followup.send(
-                "✅ Relatório mensal gerado com sucesso!",
-                file=arquivo,
-                ephemeral=True
+                "✅ Relatório mensal gerado!",
+                file    = discord.File(fp=buffer, filename=filename),
+                ephemeral = True,
             )
 
         except Exception as e:
             logger.error(f"[Faturamento] Erro ao gerar TXT: {e}")
             await interaction.followup.send(
-                "❌ Ocorreu um erro ao processar os dados do banco.",
-                ephemeral=True
+                "❌ Erro ao processar os dados do banco.",
+                ephemeral=True,
             )

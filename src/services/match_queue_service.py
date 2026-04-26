@@ -401,6 +401,19 @@ class MatchQueueService:
 
         queue.status = MatchQueue.STATUS_EXPIRED
         await self._save_queue(queue)
+
+        # Cancela a partida no banco se já foi criada
+        if queue.match_id:
+            try:
+                await match_service.cancel_match(
+                    str(queue.match_id),
+                    cancelled_by=None,
+                    reason="Confirmação expirada ou jogador recusou",
+                )
+                logger.info(f"[Queue] Partida {queue.match_id} cancelada por expiração de fila")
+            except Exception as e:
+                logger.warning(f"[Queue] Erro ao cancelar partida na expiração: {e}")
+
         not_confirmed = queue.pending_confirmations()
         embed = discord.Embed(
             title="Tempo Esgotado",
@@ -585,12 +598,10 @@ class ConfirmationView(discord.ui.View):
         label="Recusar", style=discord.ButtonStyle.red,
         custom_id="decline_match_btn", emoji="✖"
     )
+    
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
         from bson import ObjectId
         queue_id = self._parse_queue_id(interaction)
-        if not queue_id:
-            await interaction.response.send_message("Esta fila não existe mais.", ephemeral=True)
-            return
 
         collection = db.get_collection("match_queues")
         try:
@@ -609,24 +620,30 @@ class ConfirmationView(discord.ui.View):
                 "Você não está nesta partida.", ephemeral=True)
             return
 
-        if queue.status in (MatchQueue.STATUS_MATCHED, MatchQueue.STATUS_EXPIRED):
-            await interaction.response.send_message(
-                "Esta fila já foi encerrada.", ephemeral=True)
-            return
-
         parent_channel = (
             interaction.channel.parent
             if hasattr(interaction.channel, "parent")
             else interaction.channel
         )
 
-        await interaction.response.send_message("Você recusou a partida.", ephemeral=True)
-        self.service._cancel_countdown(queue_id)
+        # Cancela a partida no banco se já foi criada antes da recusa
+        col = db.get_collection("matches")
+        existing_match = await col.find_one({
+            "player_ids": {"$in": [str(interaction.user.id)]},
+            "status": {"$in": Match.ACTIVE_STATUSES}
+        })
+        if existing_match:
+            await match_service.cancel_match(
+                str(existing_match["_id"]),
+                cancelled_by=interaction.user.id,
+                reason="Jogador recusou a partida",
+            )
+
         await self.service.remove_player_from_queue(
             queue.channel_name, queue.bet_value, queue.gel_type, interaction.user.id)
+        await interaction.response.send_message("Você recusou a partida.", ephemeral=True)
         await self.service._expire_queue(
-            queue, self.bot or interaction.client, parent_channel,
-            self.conf_msg or interaction.message, interaction.channel)
+            queue, self.bot or interaction.client, parent_channel, None, interaction.channel)
 
 
 match_queue_service = MatchQueueService()

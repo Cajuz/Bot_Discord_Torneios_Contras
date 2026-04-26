@@ -172,7 +172,6 @@ class ChannelSetupService:
         await self.setup_health_check(guild)
         await self.setup_avisos(guild)
         await self.regras(guild)
-        await self.setup_aprovar_mediadores(guild)
         await self.setup_historico_exposed(guild)
         await self.setup_mediadores_afks(guild)
         await self.setup_cadastro_mediador(guild)
@@ -351,7 +350,7 @@ class ChannelSetupService:
 
     async def regras(self, guild: discord.Guild):
         await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(), None)
-
+        
     async def setup_avisos(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📢 Avisos",
@@ -364,19 +363,7 @@ class ChannelSetupService:
         embed.set_footer(text="Fique atento às novidades!")
         await self._post_panel(guild, AVISOS_CHANNEL, embed, None)
 
-    async def setup_aprovar_mediadores(self, guild: discord.Guild):
-        embed = discord.Embed(
-            title="⚡ Aprovação de Mediadores",
-            description=(
-                "Pedidos para se tornar mediador aparecem automaticamente aqui.\n\n"
-                "**Controllers / Adm:** revise o perfil e use os botões do card para "
-                "**aprovar** ou **recusar** o candidato.\n\n"
-                "Apenas o bot posta neste canal."
-            ),
-            color=0xFFD54F,
-        )
-        embed.set_footer(text="Apenas leitura — cards gerados automaticamente.")
-        await self._post_panel(guild, APROVAR_MEDIADORES_CHANNEL, embed, None)
+    
 
     async def setup_historico_exposed(self, guild: discord.Guild):
         embed = discord.Embed(
