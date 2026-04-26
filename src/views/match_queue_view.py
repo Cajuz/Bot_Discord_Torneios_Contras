@@ -38,7 +38,7 @@ def _channel_label(channel_name: str) -> str:
 
 
 def is_1x1_mob(channel_name: str) -> bool:
-    return channel_name.lower().startswith("📱1x1-mob")
+    return channel_name.lower().startswith("📲1x1-mob")
 
 
 def is_mob(channel_name: str) -> bool:
@@ -60,14 +60,17 @@ def is_misto(channel_name: str) -> bool:
 def get_misto_max_emus(channel_name: str) -> int:
     """
     Retorna quantos botões de emulador o canal misto deve ter:
-      2v2-misto → 1 emu
-      3v3-misto → 2 emus
-      4v4-misto → 3 emus
+      2x2-misto → 1 emu
+      3x3-misto → 2 emus
+      4x4-misto → 3 emus
+    FIX: usa re.search + aceita tanto 'x' quanto 'v' como separador,
+    ignorando emojis e outros prefixos no nome do canal.
     """
     name = channel_name.lower()
-    match = re.match(r".*?(\d+)v\d+-misto", name)
-    if match:
-        n = int(match.group(1))
+    # FIX: re.search (em vez de re.match) + [xv] para aceitar 4x4 e 4v4
+    m = re.search(r"(\d+)[xv]\d+-misto", name)
+    if m:
+        n = int(m.group(1))
         return max(1, n - 1)
     return 1
 
@@ -138,7 +141,7 @@ def create_match_queue_embed(
         normal_status  = "🔒 Confirmando..." if locked_gel in ("normal", "all")    else f"{queue_normal_count}/{max_players}"
         fullump_status = "🔒 Confirmando..." if locked_gel in ("fullump", "all")   else f"{queue_infinito_count}/{max_players}"
         embed.add_field(name="Fila Normal",      value=normal_status,  inline=True)
-        embed.add_field(name="Full Ump e Xm8",   value=fullump_status, inline=True)
+        embed.add_field(name="🔫 Full Ump e Xm8", value=fullump_status, inline=True)
 
     elif is_misto(channel_name):
         max_emus = get_misto_max_emus(channel_name)
@@ -193,7 +196,8 @@ class MatchQueueView(discord.ui.View):
         self.btn_sair.emoji = cancelar_emoji
         self.btn_gel_normal.emoji = gel_emoji
         self.btn_gel_infinito.emoji = gel_emoji
-        self.btn_full_ump_xm8.emoji = aprovar_emoji
+        # FIX: emoji de arma fixo no lugar do aprovar_emoji
+        self.btn_full_ump_xm8.emoji = "🔫"
 
         if channel_name:
             if is_1x1_mob(channel_name):
@@ -271,7 +275,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "infinito", ch, bet)
 
-    # ── Botões Mobile / Emulador ────────────────────────────────
+    # ── Botões Mobile / Emulador ─────────────────────────────
 
     @discord.ui.button(
         label="ENTRAR NA FILA",
@@ -295,7 +299,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "fullump", ch, bet)
 
-    # ── Botões Misto ────────────────────────────────────────────
+    # ── Botões Misto ──────────────────────────────────────────
 
     @discord.ui.button(
         label="1 Emu",
@@ -330,7 +334,7 @@ class MatchQueueView(discord.ui.View):
         ch, bet = self._parse_context(interaction)
         await self._handle_join(interaction, "emu3", ch, bet)
 
-    # ── Sair (universal) ────────────────────────────────────────
+    # ── Sair (universal) ─────────────────────────────────────────
 
     @discord.ui.button(
         label="SAIR DA FILA",
