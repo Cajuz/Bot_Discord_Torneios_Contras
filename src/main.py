@@ -169,7 +169,7 @@ async def _ensure_db_indexes():
     _30_dias = 60 * 60 * 24 * 30  # 2_592_000 segundos
 
     try:
-        # ── active_threads ──────────────────────────────────────
+        # ── active_threads ───────────────────────────────────
         await db.get_collection("active_threads").create_index(
             "thread_id", unique=True, background=True
         )
@@ -177,7 +177,7 @@ async def _ensure_db_indexes():
             "created_at", expireAfterSeconds=_30_dias, background=True
         )
 
-        # ── thread_pool ─────────────────────────────────────────
+        # ── thread_pool ───────────────────────────────────
         await db.get_collection("thread_pool").create_index(
             "thread_id", unique=True, background=True
         )
@@ -185,7 +185,7 @@ async def _ensure_db_indexes():
             "created_at", expireAfterSeconds=_30_dias, background=True
         )
 
-        # ── matches ─────────────────────────────────────────────
+        # ── matches ─────────────────────────────────────
         await db.get_collection("matches").create_index(
             "thread_id", unique=True, sparse=True, background=True
         )
@@ -193,19 +193,19 @@ async def _ensure_db_indexes():
             "created_at", expireAfterSeconds=_30_dias, background=True
         )
 
-        # ── influencer_live_rooms ────────────────────────────────
+        # ── influencer_live_rooms ────────────────────────
         await db.get_collection("influencer_live_rooms").create_index(
             [("influencer_id", 1), ("guild_id", 1)],
             unique=True, background=True,
         )
 
-        # ── influencer_live_queues ───────────────────────────────
+        # ── influencer_live_queues ───────────────────────
         await db.get_collection("influencer_live_queues").create_index(
             [("influencer_id", 1), ("guild_id", 1)],
             unique=True, background=True,
         )
 
-        # ── mediator_live_queues ─────────────────────────────────
+        # ── mediator_live_queues ────────────────────────
         await db.get_collection("mediator_live_queues").create_index(
             "guild_id", unique=True, background=True,
         )
@@ -451,6 +451,20 @@ async def on_member_join(member: discord.Member):
     svc = getattr(bot, "_onboarding_service", None)
     if svc:
         await svc.handle_new_member(member)
+
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    """
+    BUG2+BUG3-FIX: limpa estado de onboarding quando membro sai ou é kickado/banido.
+    Cancela cleanup task, remove do pending set e deleta canal de verificação.
+    """
+    svc = getattr(bot, "_onboarding_service", None)
+    if svc:
+        try:
+            await svc.handle_member_leave(member)
+        except Exception as e:
+            logger.warning(f"[on_member_remove] Erro no handle_member_leave: {e}")
 
 
 @bot.event
