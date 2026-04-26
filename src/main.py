@@ -241,6 +241,12 @@ async def on_ready():
     guild = bot.guilds[0] if bot.guilds else None
     log_success(f"Bot online: {bot.user} (ID: {bot.user.id})")
 
+    # ── Garante índices depois da conexão estar totalmente estável ────────
+    try:
+        await _ensure_db_indexes()
+    except Exception as e:
+        logger.warning(f"[DB] Falha ao garantir índices no on_ready: {e}")
+
     try:
         synced = await bot.tree.sync()
         logger.info(f"[SlashCommands] {len(synced)} comandos sincronizados")
@@ -270,6 +276,7 @@ async def on_ready():
         )
         from views.blacklist_view           import BlacklistCheckView
         from views.mediator_register_view   import MediatorRegisterView
+        from views.captcha_button_view      import CaptchaButtonView
         from cogs.renewal_dashboard_cog     import ContractPanelView
         from services.faturamento_mediador  import RelatorioGeralView
         from services.match_queue_service   import ConfirmationView
@@ -277,6 +284,7 @@ async def on_ready():
         from views.rules_view               import RulesView, ConfirmationView as RulesConfirmationView
         # Influencer Live
         from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
+        from views.influencer_live_control_view import ContraControlView
         from views.influencer_live_match_view import ContraConfirmView, ContraResultView
         from views.influencer_live_admin_view import InfluencerLiveAdminView
         from views.live_contra_setup_view     import LiveContraSetupView
@@ -316,14 +324,20 @@ async def on_ready():
             # Influencer Live
             ContraRoomView(influencer_id=0, guild_id=0),
             ControllerLivePanelView(),
+            ContraControlView(influencer_id=0, guild_id=0),
             ContraConfirmView(match_id="__persistent__", challenger_id=0, influencer_id=0),
             ContraResultView(match_id="__persistent__", influencer_id=0, challenger_id=0, guild_id=0),
             InfluencerLiveAdminView(),
             LiveContraSetupView(),
+            # CAPTCHA — registro para manter callbacks após restart
+            CaptchaButtonView,
         ]
 
         for view in persistent_views:
             try:
+                if isinstance(view, type):
+                    logger.info(f"[views] Ignorando registro automático de classe não-instanciável: {view.__name__}")
+                    continue
                 bot.add_view(view)
             except Exception as e:
                 logger.warning(f"[views] Erro ao registrar {type(view).__name__}: {e}")
@@ -630,8 +644,6 @@ async def main():
     await db.connect()
     log_success("MongoDB conectado!")
     set_bot(bot)
-
-    await _ensure_db_indexes()
 
     for cog in COGS:
         try:
