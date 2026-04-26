@@ -17,9 +17,9 @@ class InfluencerLiveRoomService:
     def _col(self):
         return db.get_collection(COLLECTION)
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # ATIVAR SALA
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def ativar_sala(
         self,
@@ -29,6 +29,7 @@ class InfluencerLiveRoomService:
         game_mode: str,
         entry_value: float,
         custom_rules: str | None = None,
+        ctrl_channel: discord.TextChannel | None = None,  # reutiliza canal já criado
     ) -> dict:
         # Validações
         if not InfluencerLiveRoom.validate_platform(platform):
@@ -52,9 +53,12 @@ class InfluencerLiveRoomService:
 
         from services.channel_service import permission_service
 
-        # Cria ambos os canais
-        contra_channel  = await permission_service.create_contra_channel(guild, influencer)
-        control_channel = await permission_service.create_control_channel(guild, influencer)
+        # Canal público sempre criado aqui
+        contra_channel = await permission_service.create_contra_channel(guild, influencer)
+
+        # Canal de controle: reutiliza o já criado no setup ou cria novo
+        if ctrl_channel is None:
+            ctrl_channel = await permission_service.create_control_channel(guild, influencer)
 
         now = utcnow()
         doc = {
@@ -68,8 +72,8 @@ class InfluencerLiveRoomService:
             "custom_rules":         custom_rules,
             "channel_id":           str(contra_channel.id),
             "channel_name":         contra_channel.name,
-            "control_channel_id":   str(control_channel.id),
-            "control_channel_name": control_channel.name,
+            "control_channel_id":   str(ctrl_channel.id),
+            "control_channel_name": ctrl_channel.name,
             "total_matches":        0,
             "queue_size":           0,
             "created_at":           now,
@@ -84,11 +88,11 @@ class InfluencerLiveRoomService:
         view  = ContraRoomView(influencer_id=influencer.id, guild_id=guild.id)
         await contra_channel.send(embed=embed, view=view)
 
-        # Painel de controle no control-contra-*
+        # Painel de controle no control-contra-* (substitui o painel de setup)
         from views.influencer_live_control_view import ContraControlView, build_control_embed
         ctrl_embed = build_control_embed(room)
         ctrl_view  = ContraControlView(influencer_id=influencer.id, guild_id=guild.id)
-        await control_channel.send(embed=ctrl_embed, view=ctrl_view)
+        await ctrl_channel.send(embed=ctrl_embed, view=ctrl_view)
 
         logger.info(
             f"[InfluencerLiveRoom] Sala ativada — {influencer.name} "
@@ -98,12 +102,12 @@ class InfluencerLiveRoomService:
             "ok": True, "msg": "Sala ativada.",
             "room": room,
             "channel": contra_channel,
-            "control_channel": control_channel,
+            "control_channel": ctrl_channel,
         }
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # DESATIVAR SALA
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def desativar_sala(
         self,
@@ -122,7 +126,6 @@ class InfluencerLiveRoomService:
 
         room = InfluencerLiveRoom(doc)
 
-        # Limpa fila — expulsa todos
         from services.influencer_live_queue_service import influencer_live_queue_service
         await influencer_live_queue_service.clear_queue(
             influencer_id=str(influencer.id),
@@ -130,11 +133,7 @@ class InfluencerLiveRoomService:
         )
 
         from services.channel_service import permission_service
-
-        # Deleta contra-*
         await permission_service.delete_contra_channel(guild, room.channel_name)
-
-        # Deleta control-contra-*
         if room.control_channel_name:
             await permission_service.delete_control_channel(guild, room.control_channel_name)
 
@@ -150,9 +149,9 @@ class InfluencerLiveRoomService:
         )
         return {"ok": True, "msg": "Sala desativada. Canais removidos e fila encerrada."}
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # EDITAR SALA
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def editar_sala(
         self,
@@ -164,7 +163,6 @@ class InfluencerLiveRoomService:
         custom_rules: str | None = None,
     ) -> dict:
         col = self._col()
-        # Aceita sala ativa OU pausada
         doc = await col.find_one({
             "influencer_id": influencer_id,
             "guild_id":      guild_id,
@@ -197,9 +195,9 @@ class InfluencerLiveRoomService:
         logger.info(f"[InfluencerLiveRoom] Sala editada — influencer {influencer_id}")
         return {"ok": True, "msg": "Sala atualizada.", "room": room}
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # GET / LIST
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def get_room(self, influencer_id: str, guild_id: str) -> dict:
         doc = await self._col().find_one({
@@ -216,12 +214,11 @@ class InfluencerLiveRoomService:
         rooms  = [InfluencerLiveRoom(d) async for d in cursor]
         return {"ok": True, "rooms": rooms}
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # UPDATE QUEUE SIZE
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def update_queue_size(self, influencer_id: str, guild_id: str, delta: int):
-        # Aceita sala ativa OU pausada para não perder sync do cache
         await self._col().update_one(
             {
                 "influencer_id": influencer_id,
@@ -231,9 +228,9 @@ class InfluencerLiveRoomService:
             {"$inc": {"queue_size": delta}, "$set": {"updated_at": utcnow()}},
         )
 
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
     # STATS
-    # ════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════
 
     async def get_stats(self, guild_id: str) -> dict:
         today_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
