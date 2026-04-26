@@ -85,8 +85,8 @@ class LiveContraSetupView(View):
         if existing["ok"]:
             room = existing["room"]
             await interaction.response.send_message(
-                f"❌ Você já tem uma sala ativa (`{room.platform} · {room.game_mode}`).\
-\nAcesse seu canal de controle para gerenciá-la ou desativá-la.",
+                f"❌ Você já tem uma sala ativa (`{room.platform} · {room.game_mode}`).\n"
+                "Acesse seu canal de controle para gerenciá-la ou desativá-la.",
                 ephemeral=True,
             )
             return
@@ -117,8 +117,8 @@ class LiveContraSessionView(View):
     View ephemeral de configuração da sala.
     Mantém estado da seleção até o influencer clicar em Criar.
 
-    FIX: custom_id dos botões dinâmicos incluem o influencer_id para
-    evitar conflito entre sessões e falha de interação pós-restart.
+    FIX: custom_id de selects e botões incluem influencer_id para
+    evitar conflito entre sessões simultâneas e falha pós-restart.
     """
 
     def __init__(self, influencer_id: int, guild_id: int):
@@ -132,16 +132,13 @@ class LiveContraSessionView(View):
         self.entry_value: float | None = None
         self.custom_rules: str | None = None
 
-        # Adiciona os selects
-        self.add_item(PlatformSelect())
-        self.add_item(GameModeSelect())
+        # FIX: custom_id único por influencer para evitar conflito de interação
+        self.add_item(PlatformSelect(influencer_id))
+        self.add_item(GameModeSelect(influencer_id))
         self._refresh_criar_button()
 
     def _refresh_criar_button(self):
-        """Remove e re-adiciona os botões com estado atualizado.
-        FIX: custom_id inclui influencer_id para evitar conflito de interação.
-        """
-        # Remove botões existentes (não selects)
+        """Remove e re-adiciona os botões com estado atualizado."""
         self.children = [c for c in self.children if isinstance(c, Select)]
 
         can_create = (
@@ -150,7 +147,7 @@ class LiveContraSessionView(View):
             and self.entry_value is not None
         )
 
-        uid = self.influencer_id  # usado para tornar custom_id único por usuário
+        uid = self.influencer_id
 
         regras_btn = Button(
             label="📋 Regras" + (" ✅" if self.custom_rules is not None else ""),
@@ -187,7 +184,6 @@ class LiveContraSessionView(View):
         if interaction.user.id != self.influencer_id:
             await interaction.response.send_message("❌ Esta sessão não é sua.", ephemeral=True)
             return
-
         modal = _RegrasModalSession(session_view=self)
         await interaction.response.send_modal(modal)
 
@@ -195,7 +191,6 @@ class LiveContraSessionView(View):
         if interaction.user.id != self.influencer_id:
             await interaction.response.send_message("❌ Esta sessão não é sua.", ephemeral=True)
             return
-
         modal = _ValorModalSession(session_view=self)
         await interaction.response.send_modal(modal)
 
@@ -284,10 +279,11 @@ class LiveContraSessionView(View):
         await interaction.edit_original_response(embed=embed, view=self)
 
 
-# ── Selects ─────────────────────────────────────────────────────────────────────────────
+# ── Selects ──────────────────────────────────────────────────────────────────
 
 class PlatformSelect(Select):
-    def __init__(self):
+    # FIX: custom_id único por influencer_id evita conflito entre sessões simultâneas
+    def __init__(self, influencer_id: int):
         options = [
             discord.SelectOption(label="📱 Mobile",    value="Mobile",   description="Free Fire Mobile"),
             discord.SelectOption(label="🖥️ Emulador", value="Emulador", description="Free Fire Emulador"),
@@ -296,7 +292,7 @@ class PlatformSelect(Select):
         super().__init__(
             placeholder="Selecione a Plataforma...",
             options=options,
-            custom_id="session_select_platform",
+            custom_id=f"session_select_platform_{influencer_id}",
             row=0,
         )
 
@@ -307,13 +303,11 @@ class PlatformSelect(Select):
             return
 
         view.selected_platform = self.values[0]
-        # Se o modo selecionado for incompatível com a nova plataforma, limpa
         if view.selected_game_mode:
             allowed = InfluencerLiveRoom.MODES_BY_PLATFORM.get(view.selected_platform, InfluencerLiveRoom.GAME_MODES)
             if view.selected_game_mode not in allowed:
                 view.selected_game_mode = None
 
-        # Atualiza as opções do GameModeSelect
         for item in view.children:
             if isinstance(item, GameModeSelect):
                 item._update_options(view.selected_platform)
@@ -323,11 +317,12 @@ class PlatformSelect(Select):
 
 
 class GameModeSelect(Select):
-    def __init__(self):
+    # FIX: custom_id único por influencer_id
+    def __init__(self, influencer_id: int):
         super().__init__(
             placeholder="Selecione o Tipo...",
             options=self._build_options(None),
-            custom_id="session_select_gamemode",
+            custom_id=f"session_select_gamemode_{influencer_id}",
             row=1,
         )
 
@@ -351,7 +346,7 @@ class GameModeSelect(Select):
         await view._update_message(interaction)
 
 
-# ── Modais internos da sessão ──────────────────────────────────────────────────────────────────
+# ── Modais internos da sessão ─────────────────────────────────────────────────
 
 class _RegrasModalSession(Modal, title="Regras da Sala"):
     regras = TextInput(
