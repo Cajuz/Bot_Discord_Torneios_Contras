@@ -100,12 +100,38 @@ class ContraRoomView(View):
     """
     Painel público no canal contra-<influencer>.
     Qualquer Membro pode clicar em Jogar Contra para entrar na fila.
+
+    FIX: influencer_id e guild_id são opcionais no __init__ para suportar
+    o registro como persistent view no boot. Quando não informados,
+    são recuperados do embed da mensagem no momento da interação.
     """
 
-    def __init__(self, influencer_id: int, guild_id: int):
+    def __init__(self, influencer_id: int = 0, guild_id: int = 0):
         super().__init__(timeout=None)
         self.influencer_id = influencer_id
         self.guild_id      = guild_id
+
+    def _resolve_ids(self, interaction: discord.Interaction) -> tuple[int, int]:
+        """
+        Retorna (influencer_id, guild_id) resolvidos.
+        Se a view foi carregada como persistent (sem parâmetros), tenta
+        extrair o influencer_id do título do embed para evitar falha de interação.
+        """
+        inf_id   = self.influencer_id
+        guild_id = self.guild_id or interaction.guild_id
+
+        if not inf_id and interaction.message and interaction.message.embeds:
+            try:
+                title = interaction.message.embeds[0].title or ""
+                # Título: "⚔️ Sala Contra — <@123456789>"
+                import re
+                match = re.search(r"<@(\d+)>", title)
+                if match:
+                    inf_id = int(match.group(1))
+            except Exception as e:
+                logger.error(f"[ContraRoomView] Erro ao resolver influencer_id do embed: {e}")
+
+        return inf_id, guild_id
 
     @discord.ui.button(
         label="⚔️ Jogar Contra",
@@ -117,25 +143,32 @@ class ContraRoomView(View):
         from services.influencer_live_queue_service import influencer_live_queue_service
         from services.influencer_live_room_service  import influencer_live_room_service
 
-        # Verifica se a sala está ativa
+        inf_id, g_id = self._resolve_ids(interaction)
+
+        if not inf_id:
+            await interaction.response.send_message(
+                "❌ Não foi possível identificar a sala. Contate um administrador.",
+                ephemeral=True,
+            )
+            return
+
         room_result = await influencer_live_room_service.get_room(
-            influencer_id=str(self.influencer_id),
-            guild_id=str(self.guild_id),
+            influencer_id=str(inf_id),
+            guild_id=str(g_id),
         )
         if not room_result["ok"] or room_result["room"].status != "active":
             await interaction.response.send_message(
                 "❌ A sala está fechada ou pausada no momento.", ephemeral=True)
             return
 
-        # Influencer não pode entrar na própria fila
-        if interaction.user.id == self.influencer_id:
+        if interaction.user.id == inf_id:
             await interaction.response.send_message(
                 "❌ Você não pode entrar na fila da sua própria sala.", ephemeral=True)
             return
 
         result = await influencer_live_queue_service.enter_queue(
-            influencer_id=str(self.influencer_id),
-            guild_id=str(self.guild_id),
+            influencer_id=str(inf_id),
+            guild_id=str(g_id),
             player_id=str(interaction.user.id),
         )
 
@@ -148,7 +181,7 @@ class ContraRoomView(View):
             )
             logger.info(
                 f"[ContraRoom] {interaction.user.name} entrou na fila "
-                f"— influencer {self.influencer_id} — posição {pos}"
+                f"— influencer {inf_id} — posição {pos}"
             )
         else:
             await interaction.response.send_message(
@@ -163,9 +196,18 @@ class ContraRoomView(View):
     async def leave_queue(self, interaction: discord.Interaction, button: Button):
         from services.influencer_live_queue_service import influencer_live_queue_service
 
+        inf_id, g_id = self._resolve_ids(interaction)
+
+        if not inf_id:
+            await interaction.response.send_message(
+                "❌ Não foi possível identificar a sala. Contate um administrador.",
+                ephemeral=True,
+            )
+            return
+
         result = await influencer_live_queue_service.leave_queue(
-            influencer_id=str(self.influencer_id),
-            guild_id=str(self.guild_id),
+            influencer_id=str(inf_id),
+            guild_id=str(g_id),
             player_id=str(interaction.user.id),
         )
 
@@ -185,9 +227,18 @@ class ContraRoomView(View):
     async def view_queue(self, interaction: discord.Interaction, button: Button):
         from services.influencer_live_queue_service import influencer_live_queue_service
 
+        inf_id, g_id = self._resolve_ids(interaction)
+
+        if not inf_id:
+            await interaction.response.send_message(
+                "❌ Não foi possível identificar a sala. Contate um administrador.",
+                ephemeral=True,
+            )
+            return
+
         result = await influencer_live_queue_service.get_fila(
-            influencer_id=str(self.influencer_id),
-            guild_id=str(self.guild_id),
+            influencer_id=str(inf_id),
+            guild_id=str(g_id),
         )
 
         if not result["ok"]:
@@ -205,7 +256,7 @@ class ContraRoomView(View):
         )
         embed.add_field(
             name="Influencer",
-            value=f"<@{self.influencer_id}>",
+            value=f"<@{inf_id}>",
             inline=True,
         )
         embed.add_field(
@@ -231,7 +282,7 @@ class ContraRoomView(View):
 class ControllerLivePanelView(View):
     """
     Painel no canal #painel-mediador-live.
-    Apenas Controllers Live veem o canal — botões para entrar/sair da fila live.
+    Apenas Controllers Live vêem o canal — botões para entrar/sair da fila live.
     """
 
     def __init__(self):
