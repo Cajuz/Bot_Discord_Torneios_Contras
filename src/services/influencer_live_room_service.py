@@ -17,9 +17,9 @@ class InfluencerLiveRoomService:
     def _col(self):
         return db.get_collection(COLLECTION)
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # ATIVAR SALA
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def ativar_sala(
         self,
@@ -101,9 +101,9 @@ class InfluencerLiveRoomService:
             "control_channel": control_channel,
         }
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # DESATIVAR SALA
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def desativar_sala(
         self,
@@ -150,9 +150,9 @@ class InfluencerLiveRoomService:
         )
         return {"ok": True, "msg": "Sala desativada. Canais removidos e fila encerrada."}
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # EDITAR SALA
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def editar_sala(
         self,
@@ -164,13 +164,14 @@ class InfluencerLiveRoomService:
         custom_rules: str | None = None,
     ) -> dict:
         col = self._col()
+        # Aceita sala ativa OU pausada
         doc = await col.find_one({
             "influencer_id": influencer_id,
             "guild_id":      guild_id,
-            "status":        "active",
+            "status":        {"$in": ["active", "paused"]},
         })
         if not doc:
-            return {"ok": False, "msg": "Nenhuma sala ativa encontrada."}
+            return {"ok": False, "msg": "Nenhuma sala ativa ou pausada encontrada."}
 
         if platform is not None and not InfluencerLiveRoom.validate_platform(platform):
             return {"ok": False, "msg": f"Plataforma inválida: `{platform}`."}
@@ -196,9 +197,9 @@ class InfluencerLiveRoomService:
         logger.info(f"[InfluencerLiveRoom] Sala editada — influencer {influencer_id}")
         return {"ok": True, "msg": "Sala atualizada.", "room": room}
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # GET / LIST
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def get_room(self, influencer_id: str, guild_id: str) -> dict:
         doc = await self._col().find_one({
@@ -215,19 +216,24 @@ class InfluencerLiveRoomService:
         rooms  = [InfluencerLiveRoom(d) async for d in cursor]
         return {"ok": True, "rooms": rooms}
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # UPDATE QUEUE SIZE
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def update_queue_size(self, influencer_id: str, guild_id: str, delta: int):
+        # Aceita sala ativa OU pausada para não perder sync do cache
         await self._col().update_one(
-            {"influencer_id": influencer_id, "guild_id": guild_id, "status": "active"},
+            {
+                "influencer_id": influencer_id,
+                "guild_id":      guild_id,
+                "status":        {"$in": ["active", "paused"]},
+            },
             {"$inc": {"queue_size": delta}, "$set": {"updated_at": utcnow()}},
         )
 
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
     # STATS
-    # ══════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════
 
     async def get_stats(self, guild_id: str) -> dict:
         today_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
