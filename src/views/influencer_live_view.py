@@ -39,13 +39,14 @@ def build_contra_room_embed(room, queue_size: int = 0) -> discord.Embed:
         color=color,
         timestamp=utcnow(),
     )
-    embed.add_field(name="Status",           value=status_label,                    inline=True)
-    embed.add_field(name="Modo",             value=f"`{room.game_mode}`",            inline=True)
-    embed.add_field(name="Valor de Entrada", value=f"R$ `{room.entry_value:.2f}`",   inline=True)
-    embed.add_field(name="Jogadores na Fila", value=f"`{queue_size}`",              inline=True)
+    embed.add_field(name="Status",            value=status_label,                    inline=True)
+    embed.add_field(name="Plataforma",        value=f"`{room.platform}`",            inline=True)
+    embed.add_field(name="Modo",              value=f"`{room.game_mode}`",            inline=True)
+    embed.add_field(name="Valor de Entrada",  value=f"R$ `{room.entry_value:.2f}`",   inline=True)
+    embed.add_field(name="Jogadores na Fila", value=f"`{queue_size}`",               inline=True)
 
     if room.custom_rules:
-        embed.add_field(name="Regras Especiais", value=room.custom_rules, inline=False)
+        embed.add_field(name="📋 Regras Especiais", value=room.custom_rules, inline=False)
 
     embed.set_footer(text="SOLAR E-SPORTS · Modo Contra · Apenas leitura")
     return embed
@@ -64,6 +65,7 @@ def build_contra_match_started_embed(
     )
     embed.add_field(name="🎥 Influencer",  value=influencer.mention,             inline=True)
     embed.add_field(name="⚔️ Desafiante", value=challenger.mention,             inline=True)
+    embed.add_field(name="🖥️ Plataforma", value=f"`{room.platform}`",            inline=True)
     embed.add_field(name="🎮 Modo",        value=f"`{room.game_mode}`",            inline=True)
     embed.add_field(name="💰 Valor",       value=f"R$ `{room.entry_value:.2f}`",   inline=True)
     embed.set_footer(
@@ -112,11 +114,6 @@ class ContraRoomView(View):
         self.guild_id      = guild_id
 
     def _resolve_ids(self, interaction: discord.Interaction) -> tuple[int, int]:
-        """
-        Retorna (influencer_id, guild_id) resolvidos.
-        Se a view foi carregada como persistent (sem parâmetros), tenta
-        extrair o influencer_id do título do embed para evitar falha de interação.
-        """
         inf_id   = self.influencer_id
         guild_id = self.guild_id or interaction.guild_id
 
@@ -152,9 +149,7 @@ class ContraRoomView(View):
             return
 
         room_result = await influencer_live_room_service.get_room(
-            influencer_id=str(inf_id),
-            guild_id=str(g_id),
-        )
+            influencer_id=str(inf_id), guild_id=str(g_id))
         if not room_result["ok"] or room_result["room"].status != "active":
             await interaction.response.send_message(
                 "❌ A sala está fechada ou pausada no momento.", ephemeral=True)
@@ -183,8 +178,7 @@ class ContraRoomView(View):
                 f"— influencer {inf_id} — posição {pos}"
             )
         else:
-            await interaction.response.send_message(
-                f"❌ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
     @discord.ui.button(
         label="🚪 Sair da Fila",
@@ -211,11 +205,9 @@ class ContraRoomView(View):
         )
 
         if result["ok"]:
-            await interaction.response.send_message(
-                "✅ Você saiu da fila.", ephemeral=True)
+            await interaction.response.send_message("✅ Você saiu da fila.", ephemeral=True)
         else:
-            await interaction.response.send_message(
-                f"❌ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
     @discord.ui.button(
         label="📊 Ver Fila",
@@ -236,13 +228,10 @@ class ContraRoomView(View):
             return
 
         result = await influencer_live_queue_service.get_fila(
-            influencer_id=str(inf_id),
-            guild_id=str(g_id),
-        )
+            influencer_id=str(inf_id), guild_id=str(g_id))
 
         if not result["ok"]:
-            await interaction.response.send_message(
-                f"❌ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
             return
 
         queue   = result["queue"]
@@ -253,7 +242,7 @@ class ContraRoomView(View):
             color=THEME_LIVE,
             timestamp=utcnow(),
         )
-        embed.add_field(name="Influencer",       value=f"<@{inf_id}>",     inline=True)
+        embed.add_field(name="Influencer",        value=f"<@{inf_id}>",     inline=True)
         embed.add_field(name="Jogadores na Fila", value=f"`{len(players)}`", inline=True)
 
         if players:
@@ -312,8 +301,7 @@ class ControllerLivePanelView(View):
                 f"[ControllerLive] {interaction.user.name} entrou na fila — posição {pos}"
             )
         else:
-            await interaction.response.send_message(
-                f"⚠️ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ {result['msg']}", ephemeral=True)
 
     @discord.ui.button(
         label="Sair da Fila Live",
@@ -333,8 +321,7 @@ class ControllerLivePanelView(View):
             await interaction.response.send_message(
                 "✅ Você saiu da fila Controller Live.", ephemeral=True)
         else:
-            await interaction.response.send_message(
-                f"⚠️ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ {result['msg']}", ephemeral=True)
 
     @discord.ui.button(
         label="Ver Fila Live",
@@ -394,5 +381,4 @@ class ControllerLivePanelView(View):
                 ephemeral=True,
             )
         else:
-            await interaction.response.send_message(
-                f"❌ {result['msg']}", ephemeral=True)
+            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
