@@ -8,9 +8,11 @@ FLUXO DE EDIÇÃO COM STAGING:
   - "🔄 Resetar" descarta as mudanças e recarrega os valores do banco.
   - Ao salvar, o card público (contra-<influencer>) é sincronizado automaticamente.
 
-ARQUITETURA DE PERSISTENT VIEW COM custom_id DINÂMICO:
-  - Reconstituída via on_interaction no main.py pós-restart.
-  - NÃO registrada via bot.add_view no boot.
+REGRA DISCORD — OBRIGATÓRIO:
+  Toda interação deve ser respondida em até 3 segundos.
+  Por isso QUALQUER await de I/O (banco, rede) deve vir DEPOIS do
+  defer()/edit_message()/send_modal(). Caso contrário o Discord retorna
+  "erro interno" e a interação expira.
 """
 from __future__ import annotations
 import discord
@@ -22,8 +24,7 @@ from utils.datetime_utils import utcnow
 THEME_LIVE = 0xE91E63
 
 # ─── Staging cache (em memória) ─────────────────────────────────────────────
-# key: "influencer_id:guild_id"  →  dict com campos pendentes de salvar
-_pending: dict[str, dict] = {}
+_pending: dict[str, dict] = {}  # key: "influencer_id:guild_id"
 
 def _key(influencer_id: int, guild_id: int) -> str:
     return f"{influencer_id}:{guild_id}"
@@ -37,10 +38,6 @@ def build_control_embed(
     room: InfluencerLiveRoom,
     pending: dict | None = None,
 ) -> discord.Embed:
-    """
-    pending: dict com campos staged ainda não salvos.
-    Quando presente, exibe os valores pendentes e marca o embed como "não salvo".
-    """
     status_map = {
         "active":   ("🟢 Aberta",  discord.Colour.green()),
         "paused":   ("⏸️ Pausada", discord.Colour.orange()),
@@ -48,13 +45,12 @@ def build_control_embed(
     }
     status_label, color = status_map.get(room.status, ("❓", discord.Colour.greyple()))
 
-    # Usa valores pendentes se existirem, senão os da sala
-    platform    = pending.get("platform",    room.platform)    if pending else room.platform
-    game_mode   = pending.get("game_mode",   room.game_mode)   if pending else room.game_mode
-    entry_value = pending.get("entry_value", room.entry_value) if pending else room.entry_value
-    custom_rules= pending.get("custom_rules",room.custom_rules)if pending else room.custom_rules
+    platform     = pending.get("platform",     room.platform)     if pending else room.platform
+    game_mode    = pending.get("game_mode",    room.game_mode)    if pending else room.game_mode
+    entry_value  = pending.get("entry_value",  room.entry_value)  if pending else room.entry_value
+    custom_rules = pending.get("custom_rules", room.custom_rules) if pending else room.custom_rules
 
-    has_pending = bool(pending)
+    has_pending  = bool(pending)
     title_suffix = "  ⚠️ *não salvo*" if has_pending else ""
 
     embed = discord.Embed(
@@ -67,14 +63,14 @@ def build_control_embed(
         color=discord.Colour.orange() if has_pending else color,
         timestamp=utcnow(),
     )
-    embed.add_field(name="Status",      value=status_label,                     inline=True)
-    embed.add_field(name="Plataforma",  value=f"`{platform}`",                  inline=True)
-    embed.add_field(name="Tipo",        value=f"`{game_mode}`",                 inline=True)
-    embed.add_field(name="Valor",       value=f"R$ `{entry_value:.2f}`",        inline=True)
-    embed.add_field(name="Fila",        value=f"`{room.queue_size}` jogadores", inline=True)
-    embed.add_field(name="Partidas",    value=f"`{room.total_matches}` realizadas", inline=True)
+    embed.add_field(name="Status",     value=status_label,                      inline=True)
+    embed.add_field(name="Plataforma", value=f"`{platform}`",                   inline=True)
+    embed.add_field(name="Tipo",       value=f"`{game_mode}`",                  inline=True)
+    embed.add_field(name="Valor",      value=f"R$ `{entry_value:.2f}`",         inline=True)
+    embed.add_field(name="Fila",       value=f"`{room.queue_size}` jogadores",  inline=True)
+    embed.add_field(name="Partidas",   value=f"`{room.total_matches}` realizadas", inline=True)
     if custom_rules:
-        embed.add_field(name="Regras",  value=custom_rules,                     inline=False)
+        embed.add_field(name="Regras", value=custom_rules, inline=False)
     if has_pending:
         embed.add_field(
             name="📝 Alterações pendentes",
@@ -88,7 +84,7 @@ def build_control_embed(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# MODAIS
+# MODAIS  —  defer() SEMPRE na primeira linha antes de qualquer await de I/O
 # ════════════════════════════════════════════════════════════════════════════
 
 class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
@@ -105,9 +101,10 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
         self._influencer_id = influencer_id
         self._guild_id      = guild_id
         self._control_msg   = control_msg
-        self.valor.default  = str(current)
+        self.valor.default  = str(current) if current else ""
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1º: validação síncrona (sem I/O)
         raw = self.valor.value.strip().replace(",", ".")
         try:
             val = float(raw)
@@ -117,6 +114,10 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
             await interaction.response.send_message("❌ Valor inválido. Ex: `5.00`", ephemeral=True)
             return
 
+        # 2º: responde ao Discord imediatamente (< 3s)
+        await interaction.response.defer()
+
+        # 3º: I/O após defer
         k = _key(self._influencer_id, self._guild_id)
         _pending.setdefault(k, {})["entry_value"] = val
 
@@ -126,10 +127,9 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
         if room_result["ok"]:
             embed = build_control_embed(room_result["room"], _pending.get(k))
             view  = ContraControlView(self._influencer_id, self._guild_id)
-            await interaction.response.defer()
             await self._control_msg.edit(embed=embed, view=view)
         else:
-            await interaction.response.send_message(f"❌ {room_result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {room_result['msg']}", ephemeral=True)
 
 
 class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
@@ -150,9 +150,12 @@ class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
             self.regras.default = current
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1º: responde ao Discord imediatamente (< 3s) — sem I/O antes!
+        await interaction.response.defer()
+
+        # 2º: I/O após defer
         k = _key(self._influencer_id, self._guild_id)
-        # Armazena "" para indicar limpeza; service converte "" → None
-        _pending.setdefault(k, {})["custom_rules"] = self.regras.value
+        _pending.setdefault(k, {})["custom_rules"] = self.regras.value  # "" = limpar
 
         from services.influencer_live_room_service import influencer_live_room_service
         room_result = await influencer_live_room_service.get_room(
@@ -160,18 +163,16 @@ class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
         if room_result["ok"]:
             embed = build_control_embed(room_result["room"], _pending.get(k))
             view  = ContraControlView(self._influencer_id, self._guild_id)
-            await interaction.response.defer()
             await self._control_msg.edit(embed=embed, view=view)
         else:
-            await interaction.response.send_message(f"❌ {room_result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {room_result['msg']}", ephemeral=True)
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# HELPER — sincroniza o card público do canal contra-<influencer>
+# HELPER — sincroniza o card público
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _sync_public_card(guild: discord.Guild, room: InfluencerLiveRoom):
-    """Edita o painel público do canal contra-<influencer> com os novos parâmetros."""
     try:
         channel = guild.get_channel(int(room.channel_id))
         if not channel:
@@ -179,9 +180,7 @@ async def _sync_public_card(guild: discord.Guild, room: InfluencerLiveRoom):
         from views.influencer_live_view import build_contra_room_embed, ContraRoomView
         from services.influencer_live_queue_service import influencer_live_queue_service
         q = await influencer_live_queue_service.get_fila(
-            influencer_id=str(room.influencer_id),
-            guild_id=str(room.guild_id),
-        )
+            influencer_id=str(room.influencer_id), guild_id=str(room.guild_id))
         queue_size = len(q["queue"].players) if q["ok"] else room.queue_size
         pub_embed = build_contra_room_embed(room, queue_size=queue_size)
         pub_view  = ContraRoomView(influencer_id=int(room.influencer_id), guild_id=int(room.guild_id))
@@ -267,7 +266,7 @@ class ContraControlView(View):
             or interaction.user.guild_permissions.administrator
         )
 
-    # ── Selects (apenas staging) ──────────────────────────────────────────
+    # ── Selects ────────────────────────────────────────────────────────────
 
     async def _select_platform(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
@@ -278,9 +277,11 @@ class ContraControlView(View):
         if not val:
             await interaction.response.send_message("❌ Selecione uma plataforma.", ephemeral=True)
             return
+        # Responde ao Discord ANTES do I/O
+        await interaction.response.defer()
         k = _key(self.influencer_id, self.guild_id)
         _pending.setdefault(k, {})["platform"] = val
-        await self._update_embed(interaction)
+        await self._rebuild_embed_after_defer(interaction, k)
 
     async def _select_gamemode(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
@@ -291,36 +292,34 @@ class ContraControlView(View):
         if not val:
             await interaction.response.send_message("❌ Selecione um tipo.", ephemeral=True)
             return
+        # Responde ao Discord ANTES do I/O
+        await interaction.response.defer()
         k = _key(self.influencer_id, self.guild_id)
         _pending.setdefault(k, {})["game_mode"] = val
-        await self._update_embed(interaction)
+        await self._rebuild_embed_after_defer(interaction, k)
 
-    async def _update_embed(self, interaction: discord.Interaction):
-        """Atualiza o embed com os valores pendentes (sem salvar no banco)."""
+    async def _rebuild_embed_after_defer(self, interaction: discord.Interaction, k: str):
+        """Chama o banco APÓS defer() e atualiza a mensagem."""
         from services.influencer_live_room_service import influencer_live_room_service
-        k = _key(self.influencer_id, self.guild_id)
-        result = await influencer_live_room_service.get_room(str(self.influencer_id), str(self.guild_id))
+        result = await influencer_live_room_service.get_room(
+            str(self.influencer_id), str(self.guild_id))
         if result["ok"]:
             embed = build_control_embed(result["room"], _pending.get(k))
             view  = ContraControlView(self.influencer_id, self.guild_id)
-            try:
-                await interaction.response.edit_message(embed=embed, view=view)
-            except discord.InteractionResponded:
-                await interaction.edit_original_response(embed=embed, view=view)
+            await interaction.edit_original_response(embed=embed, view=view)
         else:
-            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {result['msg']}", ephemeral=True)
 
-    # ── Botões de modal (apenas staging) ─────────────────────────────────
+    # ── Botões de modal ─────────────────────────────────────────────────────────
 
     async def _edit_valor(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
-        from services.influencer_live_room_service import influencer_live_room_service
+        # Usa valor do staging se existir (sem I/O), senão 0.0
         k = _key(self.influencer_id, self.guild_id)
-        room_result = await influencer_live_room_service.get_room(str(self.influencer_id), str(self.guild_id))
-        current = _pending.get(k, {}).get("entry_value",
-                  room_result["room"].entry_value if room_result["ok"] else 0.0)
+        current = _pending.get(k, {}).get("entry_value", 0.0)
+        # send_modal() é a resposta ao Discord — sem await de I/O antes
         await interaction.response.send_modal(
             _EditValorModal(self.influencer_id, self.guild_id, current, interaction.message))
 
@@ -328,15 +327,13 @@ class ContraControlView(View):
         if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
-        from services.influencer_live_room_service import influencer_live_room_service
         k = _key(self.influencer_id, self.guild_id)
-        room_result = await influencer_live_room_service.get_room(str(self.influencer_id), str(self.guild_id))
-        current = _pending.get(k, {}).get("custom_rules",
-                  room_result["room"].custom_rules if room_result["ok"] else None)
+        current = _pending.get(k, {}).get("custom_rules", None)
+        # send_modal() é a resposta ao Discord — sem await de I/O antes
         await interaction.response.send_modal(
             _EditRegrasModal(self.influencer_id, self.guild_id, current, interaction.message))
 
-    # ── Atualizar Sala (persiste tudo de uma vez) ─────────────────────────
+    # ── Atualizar Sala ─────────────────────────────────────────────────────────
 
     async def _salvar(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
@@ -349,6 +346,9 @@ class ContraControlView(View):
                 "ℹ️ Nenhuma alteração pendente para salvar.", ephemeral=True)
             return
 
+        # Responde ao Discord ANTES do I/O
+        await interaction.response.defer()
+
         from services.influencer_live_room_service import influencer_live_room_service
         result = await influencer_live_room_service.editar_sala(
             influencer_id=str(self.influencer_id),
@@ -356,55 +356,50 @@ class ContraControlView(View):
             **staged,
         )
         if not result["ok"]:
-            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {result['msg']}", ephemeral=True)
             return
 
-        # Limpa staging
         _pending.pop(k, None)
-
         room  = result["room"]
         embed = build_control_embed(room)
         view  = ContraControlView(self.influencer_id, self.guild_id)
-        try:
-            await interaction.response.edit_message(embed=embed, view=view)
-        except discord.InteractionResponded:
-            await interaction.edit_original_response(embed=embed, view=view)
-
-        # Sincroniza o card público do canal contra-<influencer>
+        await interaction.edit_original_response(embed=embed, view=view)
         await _sync_public_card(interaction.guild, room)
         logger.info(f"[ContraControl] Sala atualizada por {interaction.user.name} — {staged}")
 
-    # ── Resetar (descarta staging) ────────────────────────────────────────
+    # ── Resetar ──────────────────────────────────────────────────────────────
 
     async def _resetar(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
+        # Responde ao Discord ANTES do I/O
+        await interaction.response.defer()
         k = _key(self.influencer_id, self.guild_id)
         _pending.pop(k, None)
         from services.influencer_live_room_service import influencer_live_room_service
-        result = await influencer_live_room_service.get_room(str(self.influencer_id), str(self.guild_id))
+        result = await influencer_live_room_service.get_room(
+            str(self.influencer_id), str(self.guild_id))
         if result["ok"]:
             embed = build_control_embed(result["room"])
             view  = ContraControlView(self.influencer_id, self.guild_id)
-            try:
-                await interaction.response.edit_message(embed=embed, view=view)
-            except discord.InteractionResponded:
-                await interaction.edit_original_response(embed=embed, view=view)
+            await interaction.edit_original_response(embed=embed, view=view)
         else:
-            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {result['msg']}", ephemeral=True)
 
-    # ── Ver Fila ──────────────────────────────────────────────────────────
+    # ── Ver Fila ───────────────────────────────────────────────────────────────
 
     async def _view_queue(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
             await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
             return
+        # Responde ao Discord ANTES do I/O
+        await interaction.response.defer(ephemeral=True)
         from services.influencer_live_queue_service import influencer_live_queue_service
         result = await influencer_live_queue_service.get_fila(
             influencer_id=str(self.influencer_id), guild_id=str(self.guild_id))
         if not result["ok"]:
-            await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
+            await interaction.followup.send(f"❌ {result['msg']}", ephemeral=True)
             return
         queue   = result["queue"]
         players = queue.players
@@ -416,9 +411,9 @@ class ContraControlView(View):
             embed.add_field(name="Jogadores", value="\n".join(lines), inline=False)
         else:
             embed.add_field(name="Jogadores", value="Nenhum na fila.", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
-    # ── Desativar ─────────────────────────────────────────────────────────
+    # ── Desativar ─────────────────────────────────────────────────────────────
 
     async def _desativar(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
@@ -460,7 +455,6 @@ class _ConfirmDesativarView(View):
             await interaction.followup.send(
                 "✅ Sala desativada. Canais removidos e fila encerrada.", ephemeral=True)
             logger.info(f"[ContraControl] Sala desativada por {interaction.user.name}")
-            # Limpa staging se existir
             _pending.pop(_key(self.influencer_id, self.guild_id), None)
         else:
             await interaction.followup.send(f"❌ {result['msg']}", ephemeral=True)
