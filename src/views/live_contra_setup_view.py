@@ -274,7 +274,17 @@ class ContraSetupChannelView(View):
             self.entry_value,
             self.custom_rules,
         )
-        await interaction.edit_original_response(embed=embed, view=self)
+        if interaction.type == discord.InteractionType.modal_submit:
+            # Modal submit: confirmar a interação e editar a mensagem de setup diretamente
+            await interaction.response.defer()
+            if self._setup_msg:
+                await self._setup_msg.edit(embed=embed, view=self)
+        else:
+            # Select / Button: editar a mensagem que contém o componente
+            try:
+                await interaction.response.edit_message(embed=embed, view=self)
+            except discord.InteractionResponded:
+                await interaction.edit_original_response(embed=embed, view=self)
 
     def _check_owner(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.influencer.id
