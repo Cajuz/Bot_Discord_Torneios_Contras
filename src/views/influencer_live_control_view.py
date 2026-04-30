@@ -134,10 +134,19 @@ class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
 async def _refresh_control_panel(interaction: discord.Interaction, room: InfluencerLiveRoom):
     embed = build_control_embed(room)
     view  = ContraControlView(influencer_id=room.influencer_id, guild_id=room.guild_id)
-    try:
-        await interaction.response.edit_message(embed=embed, view=view)
-    except discord.InteractionResponded:
-        await interaction.edit_original_response(embed=embed, view=view)
+    if interaction.type == discord.InteractionType.modal_submit:
+        # Modal submit: confirmar a interação e editar a mensagem do painel diretamente
+        await interaction.response.defer()
+        if interaction.message:
+            await interaction.message.edit(embed=embed, view=view)
+        else:
+            await interaction.edit_original_response(embed=embed, view=view)
+    else:
+        # Select / Button: editar a mensagem que contém o componente
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+        except discord.InteractionResponded:
+            await interaction.edit_original_response(embed=embed, view=view)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
