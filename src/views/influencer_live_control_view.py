@@ -50,7 +50,6 @@ def build_control_embed(room: InfluencerLiveRoom) -> discord.Embed:
     embed.add_field(name="Partidas",    value=f"`{room.total_matches}` realizadas", inline=True)
     if room.custom_rules:
         embed.add_field(name="Regras",  value=room.custom_rules,               inline=False)
-    # FIX: IDs no footer para recuperação pós-restart via on_interaction
     embed.set_footer(
         text=f"SOLAR E-SPORTS · Control · influencer:{room.influencer_id} guild:{room.guild_id}"
     )
@@ -70,10 +69,17 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
         max_length=10,
     )
 
-    def __init__(self, influencer_id: int, guild_id: int, current: float):
+    def __init__(
+        self,
+        influencer_id: int,
+        guild_id: int,
+        current: float,
+        control_msg: discord.Message,
+    ):
         super().__init__()
         self._influencer_id = influencer_id
         self._guild_id      = guild_id
+        self._control_msg   = control_msg
         self.valor.default  = str(current)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -86,6 +92,7 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
             await interaction.response.send_message(
                 "❌ Valor inválido. Ex: `5.00`", ephemeral=True)
             return
+
         from services.influencer_live_room_service import influencer_live_room_service
         result = await influencer_live_room_service.editar_sala(
             influencer_id=str(self._influencer_id),
@@ -93,7 +100,13 @@ class _EditValorModal(Modal, title="Atualizar Valor de Entrada"):
             entry_value=val,
         )
         if result["ok"]:
-            await _refresh_control_panel(interaction, result["room"])
+            await interaction.response.defer()
+            embed = build_control_embed(result["room"])
+            view  = ContraControlView(
+                influencer_id=self._influencer_id,
+                guild_id=self._guild_id,
+            )
+            await self._control_msg.edit(embed=embed, view=view)
         else:
             await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
@@ -107,46 +120,52 @@ class _EditRegrasModal(Modal, title="Atualizar Regras da Sala"):
         max_length=500,
     )
 
-    def __init__(self, influencer_id: int, guild_id: int, current: str | None):
+    def __init__(
+        self,
+        influencer_id: int,
+        guild_id: int,
+        current: str | None,
+        control_msg: discord.Message,
+    ):
         super().__init__()
         self._influencer_id = influencer_id
         self._guild_id      = guild_id
+        self._control_msg   = control_msg
         if current:
             self.regras.default = current
 
     async def on_submit(self, interaction: discord.Interaction):
         from services.influencer_live_room_service import influencer_live_room_service
+        # Passa string vazia explicitamente para permitir limpar as regras
         result = await influencer_live_room_service.editar_sala(
             influencer_id=str(self._influencer_id),
             guild_id=str(self._guild_id),
-            custom_rules=self.regras.value or None,
+            custom_rules=self.regras.value,   # "" ou texto — service converte "" → None
         )
         if result["ok"]:
-            await _refresh_control_panel(interaction, result["room"])
+            await interaction.response.defer()
+            embed = build_control_embed(result["room"])
+            view  = ContraControlView(
+                influencer_id=self._influencer_id,
+                guild_id=self._guild_id,
+            )
+            await self._control_msg.edit(embed=embed, view=view)
         else:
             await interaction.response.send_message(f"❌ {result['msg']}", ephemeral=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPER
+# HELPER — usado apenas por selects e botões (não por modais)
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _refresh_control_panel(interaction: discord.Interaction, room: InfluencerLiveRoom):
+    """Atualiza o painel a partir de uma interação de Select ou Button."""
     embed = build_control_embed(room)
     view  = ContraControlView(influencer_id=room.influencer_id, guild_id=room.guild_id)
-    if interaction.type == discord.InteractionType.modal_submit:
-        # Modal submit: confirmar a interação e editar a mensagem do painel diretamente
-        await interaction.response.defer()
-        if interaction.message:
-            await interaction.message.edit(embed=embed, view=view)
-        else:
-            await interaction.edit_original_response(embed=embed, view=view)
-    else:
-        # Select / Button: editar a mensagem que contém o componente
-        try:
-            await interaction.response.edit_message(embed=embed, view=view)
-        except discord.InteractionResponded:
-            await interaction.edit_original_response(embed=embed, view=view)
+    try:
+        await interaction.response.edit_message(embed=embed, view=view)
+    except discord.InteractionResponded:
+        await interaction.edit_original_response(embed=embed, view=view)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -285,8 +304,15 @@ class ContraControlView(View):
         room_result = await influencer_live_room_service.get_room(
             str(self.influencer_id), str(self.guild_id))
         current = room_result["room"].entry_value if room_result["ok"] else 0.0
+        # Passa interaction.message para o modal editar o painel diretamente
         await interaction.response.send_modal(
-            _EditValorModal(self.influencer_id, self.guild_id, current))
+            _EditValorModal(
+                self.influencer_id,
+                self.guild_id,
+                current,
+                interaction.message,
+            )
+        )
 
     async def _edit_regras(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
@@ -296,8 +322,15 @@ class ContraControlView(View):
         room_result = await influencer_live_room_service.get_room(
             str(self.influencer_id), str(self.guild_id))
         current = room_result["room"].custom_rules if room_result["ok"] else None
+        # Passa interaction.message para o modal editar o painel diretamente
         await interaction.response.send_modal(
-            _EditRegrasModal(self.influencer_id, self.guild_id, current))
+            _EditRegrasModal(
+                self.influencer_id,
+                self.guild_id,
+                current,
+                interaction.message,
+            )
+        )
 
     async def _view_queue(self, interaction: discord.Interaction):
         if not self._is_authorized(interaction):
