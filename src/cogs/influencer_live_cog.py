@@ -12,15 +12,6 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
         self.bot = bot
 
     # ─────────────────────────────────────────────────────────────
-    # Evento: membro entra na fila do canal contra
-    # ─────────────────────────────────────────────────────────────
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction):
-        """Captura interações das views do influencer live que não são tratadas pelo bot."""
-        pass  # As views já são persistentes e se auto-gerenciam via custom_id
-
-    # ─────────────────────────────────────────────────────────────
     # /encerrar_sala — Influencer encerra sua sala ativa
     # ─────────────────────────────────────────────────────────────
 
@@ -37,15 +28,20 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
 
             if not (is_adm or is_inf):
                 await interaction.followup.send(
-                    "❌ Apenas **Influencers** podem usar este comando.", ephemeral=True
-                )
+                    "❌ Apenas **Influencers** podem usar este comando.", ephemeral=True)
+                return
+
+            # FIX: desativar_sala recebe discord.Member, não influencer_id
+            member = interaction.guild.get_member(interaction.user.id)
+            if not member:
+                await interaction.followup.send(
+                    "❌ Não foi possível resolver seu perfil no servidor.", ephemeral=True)
                 return
 
             from services.influencer_live_room_service import influencer_live_room_service
-
             result = await influencer_live_room_service.desativar_sala(
                 guild=interaction.guild,
-                influencer_id=str(interaction.user.id),
+                influencer=member,
             )
 
             if not result["ok"]:
@@ -53,8 +49,7 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
                 return
 
             await interaction.followup.send(
-                "✅ Sua sala foi encerrada e os canais foram removidos.", ephemeral=True
-            )
+                "✅ Sua sala foi encerrada e os canais foram removidos.", ephemeral=True)
             logger.info(f"[InfluencerLiveCog] Sala encerrada por {interaction.user.name}")
 
         except Exception as e:
@@ -75,14 +70,15 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
         try:
             from services.influencer_live_room_service import influencer_live_room_service
 
-            rooms = await influencer_live_room_service.list_active_rooms(
+            # FIX: list_active_rooms retorna {"ok": True, "rooms": [...]}
+            result = await influencer_live_room_service.list_active_rooms(
                 guild_id=str(interaction.guild_id)
             )
+            rooms = result.get("rooms", []) if result.get("ok") else []
 
             if not rooms:
                 await interaction.followup.send(
-                    "📭 Nenhuma sala ativa no momento.", ephemeral=True
-                )
+                    "📭 Nenhuma sala ativa no momento.", ephemeral=True)
                 return
 
             embed = discord.Embed(
@@ -96,6 +92,7 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
                         f"**Plataforma:** `{room.platform}`\n"
                         f"**Tipo:** `{room.game_mode}`\n"
                         f"**Valor:** R$ `{room.entry_value:.2f}`\n"
+                        f"**Fila:** `{room.queue_size}` jogadores\n"
                         f"**Status:** `{room.status}`"
                     ),
                     inline=True,
@@ -122,11 +119,12 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
     ):
         await interaction.response.defer(ephemeral=True)
         try:
+            # FIX: desativar_sala recebe discord.Member, não influencer_id
             from services.influencer_live_room_service import influencer_live_room_service
-
             result = await influencer_live_room_service.desativar_sala(
                 guild=interaction.guild,
-                influencer_id=str(membro.id),
+                influencer=membro,
+                forced_by=interaction.user,
             )
 
             if not result["ok"]:
@@ -134,11 +132,9 @@ class InfluencerLiveCog(commands.Cog, name="InfluencerLive"):
                 return
 
             await interaction.followup.send(
-                f"✅ Sala de {membro.mention} encerrada.", ephemeral=True
-            )
+                f"✅ Sala de {membro.mention} encerrada.", ephemeral=True)
             logger.info(
-                f"[InfluencerLiveCog] Sala de {membro.name} encerrada por ADM {interaction.user.name}"
-            )
+                f"[InfluencerLiveCog] Sala de {membro.name} encerrada por ADM {interaction.user.name}")
 
         except Exception as e:
             logger.error(f"[InfluencerLiveCog] /forcar_encerrar: {e}", exc_info=True)
