@@ -11,6 +11,9 @@ from models.influencer_live_room import InfluencerLiveRoom
 
 COLLECTION = "influencer_live_rooms"
 
+# Sentinel: distingue "não enviado" de "enviado vazio" em custom_rules
+_UNSET = object()
+
 
 class InfluencerLiveRoomService:
 
@@ -29,9 +32,8 @@ class InfluencerLiveRoomService:
         game_mode: str,
         entry_value: float,
         custom_rules: str | None = None,
-        ctrl_channel: discord.TextChannel | None = None,  # reutiliza canal já criado
+        ctrl_channel: discord.TextChannel | None = None,
     ) -> dict:
-        # Validações
         if not InfluencerLiveRoom.validate_platform(platform):
             return {"ok": False, "msg": f"Plataforma inválida: `{platform}`. Use: {', '.join(InfluencerLiveRoom.PLATFORMS)}"}
 
@@ -53,10 +55,8 @@ class InfluencerLiveRoomService:
 
         from services.channel_service import permission_service
 
-        # Canal público sempre criado aqui
         contra_channel = await permission_service.create_contra_channel(guild, influencer)
 
-        # Canal de controle: reutiliza o já criado no setup ou cria novo
         if ctrl_channel is None:
             ctrl_channel = await permission_service.create_control_channel(guild, influencer)
 
@@ -82,13 +82,11 @@ class InfluencerLiveRoomService:
         await col.insert_one(doc)
         room = InfluencerLiveRoom(doc)
 
-        # Painel público no contra-*
         from views.influencer_live_view import ContraRoomView, build_contra_room_embed
         embed = build_contra_room_embed(room, queue_size=0)
         view  = ContraRoomView(influencer_id=influencer.id, guild_id=guild.id)
         await contra_channel.send(embed=embed, view=view)
 
-        # Painel de controle no control-contra-* (substitui o painel de setup)
         from views.influencer_live_control_view import ContraControlView, build_control_embed
         ctrl_embed = build_control_embed(room)
         ctrl_view  = ContraControlView(influencer_id=influencer.id, guild_id=guild.id)
@@ -160,7 +158,7 @@ class InfluencerLiveRoomService:
         entry_value: float | None = None,
         platform: str | None = None,
         game_mode: str | None = None,
-        custom_rules: str | None = None,
+        custom_rules: object = _UNSET,  # usa sentinel para distinguir "não enviado" de "limpar"
     ) -> dict:
         col = self._col()
         doc = await col.find_one({
@@ -183,10 +181,15 @@ class InfluencerLiveRoomService:
             return {"ok": False, "msg": "O valor deve ser maior que zero."}
 
         updates: dict = {"updated_at": utcnow()}
-        if entry_value  is not None: updates["entry_value"]  = entry_value
-        if platform     is not None: updates["platform"]     = platform
-        if game_mode    is not None: updates["game_mode"]    = game_mode
-        if custom_rules is not None: updates["custom_rules"] = custom_rules
+        if entry_value is not None:
+            updates["entry_value"] = entry_value
+        if platform is not None:
+            updates["platform"] = platform
+        if game_mode is not None:
+            updates["game_mode"] = game_mode
+        if custom_rules is not _UNSET:
+            # String vazia ou None → limpa as regras; qualquer texto → salva
+            updates["custom_rules"] = custom_rules.strip() if isinstance(custom_rules, str) and custom_rules.strip() else None
 
         await col.update_one({"_id": doc["_id"]}, {"$set": updates})
         doc.update(updates)
