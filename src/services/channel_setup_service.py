@@ -40,7 +40,7 @@ from services.channel_service import (
     CATEGORY_CONTRAS, MEDIADOR_LIVE_PANEL_CHANNEL, LIVE_CONTRA_CHANNEL,
     CONTROLLER_LIVE_ROLE_NAME,
     # Comissão
-    COMISSAO_PAINEL_CHANNEL, COMISSAO_HISTORICO_CHANNEL, COMISSAO_ADMIN_CHANNEL,
+    COMISSAO_HISTORICO_CHANNEL, COMISSAO_ADMIN_CHANNEL,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -181,7 +181,7 @@ class ChannelSetupService:
         await self.setup_alertas_adm(guild)
         await self.setup_mediador_live_panel(guild)
         await self.setup_live_contra(guild)
-        await self.setup_comissao(guild)          # ← COMISSÃO
+        await self.setup_comissao(guild)
         logger.info("[ChannelSetup] Todos os painéis postados")
 
 
@@ -353,7 +353,7 @@ class ChannelSetupService:
 
     async def regras(self, guild: discord.Guild):
         await self._post_panel(guild, REGRAS_CHANNEL, ServerRules.get_rules_embed(), None)
-        
+
     async def setup_avisos(self, guild: discord.Guild):
         embed = discord.Embed(
             title="📢 Avisos",
@@ -365,8 +365,6 @@ class ChannelSetupService:
         )
         embed.set_footer(text="Fique atento às novidades!")
         await self._post_panel(guild, AVISOS_CHANNEL, embed, None)
-
-    
 
     async def setup_historico_exposed(self, guild: discord.Guild):
         embed = discord.Embed(
@@ -465,10 +463,6 @@ class ChannelSetupService:
         logger.info("[ChannelSetup] Painel Controller Live postado")
 
     async def setup_live_contra(self, guild: discord.Guild):
-        """
-        Posta o painel de criação de sala no canal #live-contra.
-        Apenas Influencers (e ADM) veem e interagem com esse canal.
-        """
         from views.live_contra_setup_view import LiveContraSetupView, build_live_contra_embed
 
         embed = build_live_contra_embed()
@@ -478,28 +472,24 @@ class ChannelSetupService:
     async def setup_comissao(self, guild: discord.Guild):
         """
         Posta os painéis da categoria 💼 | COMISSÃO.
-        - #painel-comissao  → Mediador consulta sua própria comissão via botão
-        - #historico-comissao → Log automático de pagamentos (somente leitura)
-        - #comissao-controle  → ADM gerencia e força pagamentos
+        - #historico-comissao  → Cabeçalho de log (somente ADM/bot)
+        - #comissao-controle   → ADM: config atual + edição + pagamentos
         """
         from views.comissao_view import (
-            ComissaoPanelView, build_comissao_panel_embed,
             build_comissao_historico_embed,
-            ComissaoAdminView, build_comissao_admin_embed,
+            build_comissao_admin_embed,
+            ComissaoAdminView,
         )
 
-        await self._post_panel(
-            guild, COMISSAO_PAINEL_CHANNEL,
-            build_comissao_panel_embed(), ComissaoPanelView(),
-        )
         await self._post_panel(
             guild, COMISSAO_HISTORICO_CHANNEL,
             build_comissao_historico_embed(), None,
             clear=False, once=True,
         )
+        admin_embed = await build_comissao_admin_embed(str(guild.id))
         await self._post_panel(
             guild, COMISSAO_ADMIN_CHANNEL,
-            build_comissao_admin_embed(), ComissaoAdminView(),
+            admin_embed, ComissaoAdminView(),
         )
         logger.info("[ChannelSetup] Painéis de Comissão postados")
 

@@ -1,9 +1,8 @@
 """comissao_view.py — Painéis da categoria 💼 | COMISSÃO.
 
-Três painéis:
-  1. #painel-comissao   → Mediador consulta sua própria comissão via botão
-  2. #historico-comissao → Cabeçalho de log (bot posta entradas automaticamente)
-  3. #comissao-controle  → ADM visualiza resumo e força pagamento manual
+Dois painéis (painel-comissao foi removido):
+  1. #historico-comissao  → Log automático de pagamentos (somente ADM/bot)
+  2. #comissao-controle   → ADM: config atual de comissão + edição + ver pendentes + pagar
 """
 from __future__ import annotations
 
@@ -15,20 +14,6 @@ from utils.logger import logger
 # ══════════════════════════════════════════════════════════
 # EMBEDS
 # ══════════════════════════════════════════════════════════
-
-def build_comissao_panel_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="💼 Minha Comissão",
-        description=(
-            "Clique no botão abaixo para consultar o saldo de comissão acumulado.\n\n"
-            "As comissões são calculadas automaticamente ao final de cada partida "
-            "mediada e ficam disponíveis para saque conforme as regras do servidor."
-        ),
-        color=0xFFD54F,
-    )
-    embed.set_footer(text="SOLAR E-SPORTS · Comissão · Consulta disponível para Mediadores")
-    return embed
-
 
 def build_comissao_historico_embed() -> discord.Embed:
     embed = discord.Embed(
@@ -45,81 +30,99 @@ def build_comissao_historico_embed() -> discord.Embed:
     return embed
 
 
-def build_comissao_admin_embed() -> discord.Embed:
+async def build_comissao_admin_embed(guild_id: str | None = None) -> discord.Embed:
+    """Monta o embed do painel de controle com a config atual de comissão."""
+    from services.commission_service import commission_service, DEFAULT_MATCH, DEFAULT_LIVE
+
+    if guild_id:
+        cfg = await commission_service.get_config(guild_id)
+        match = cfg["match"]
+        live  = cfg["live"]
+    else:
+        match = DEFAULT_MATCH
+        live  = DEFAULT_LIVE
+
+    def fmt(scheme: dict) -> str:
+        threshold = scheme.get("fixed_threshold", 20.0)
+        fee       = scheme.get("fixed_fee", 2.0)
+        pct       = scheme.get("pct", 0.10)
+        return (
+            f"Limite taxa fixa: **R$ {threshold:.2f}**\n"
+            f"Taxa fixa (por jogador): **R$ {fee:.2f}**\n"
+            f"Percentual (aposta > limite): **{pct * 100:.1f}%**"
+        )
+
     embed = discord.Embed(
         title="🔐 Controle de Comissões — ADM",
-        description=(
-            "Painel administrativo para gestão de comissões dos mediadores.\n\n"
-            "🔍 **Ver Pendentes** — lista mediadores com saldo a pagar\n"
-            "✅ **Marcar como Pago** — registra pagamento manual para um mediador\n"
-            "📊 **Relatório Geral** — exporta resumo completo de comissões"
-        ),
+        description="Configuração atual e gestão de pagamentos dos mediadores.",
         color=0xFF6B35,
+    )
+    embed.add_field(name="⚔️ Stand (partidas normais)", value=fmt(match), inline=False)
+    embed.add_field(name="🎥 Influencer Live",           value=fmt(live),  inline=False)
+    embed.add_field(
+        name="Ações disponíveis",
+        value=(
+            "✏️ **Editar Stand** — altera taxa das partidas normais\n"
+            "✏️ **Editar Live** — altera taxa das partidas de live\n"
+            "🔍 **Ver Pendentes** — mediadores com saldo a pagar\n"
+            "✅ **Marcar como Pago** — registra pagamento manual"
+        ),
+        inline=False,
     )
     embed.set_footer(text="SOLAR E-SPORTS · Comissão ADM · Restrito à administração")
     return embed
 
 
 # ══════════════════════════════════════════════════════════
-# VIEWS
+# VIEW — CONTROLE ADM
 # ══════════════════════════════════════════════════════════
 
-class ComissaoPanelView(View):
-    """Painel público — Mediador consulta sua própria comissão."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @button(
-        label="💼 Ver Minha Comissão",
-        style=discord.ButtonStyle.primary,
-        custom_id="comissao:ver_minha",
-    )
-    async def ver_comissao(self, interaction: discord.Interaction, btn: Button):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            from config.database import db
-            mediador_id = str(interaction.user.id)
-            doc = await db.get_collection("comissoes").find_one({"mediador_id": mediador_id})
-
-            if not doc:
-                await interaction.followup.send(
-                    "Você não possui comissões registradas ainda.", ephemeral=True
-                )
-                return
-
-            saldo_pendente = doc.get("saldo_pendente", 0.0)
-            total_recebido = doc.get("total_recebido", 0.0)
-            partidas       = doc.get("partidas_mediadas", 0)
-
-            embed = discord.Embed(
-                title="💼 Sua Comissão",
-                color=0xFFD54F,
-            )
-            embed.add_field(name="Saldo Pendente",   value=f"R$ {saldo_pendente:.2f}", inline=True)
-            embed.add_field(name="Total Recebido",   value=f"R$ {total_recebido:.2f}", inline=True)
-            embed.add_field(name="Partidas Mediadas", value=str(partidas),              inline=True)
-            embed.set_footer(text="SOLAR E-SPORTS · Dados atualizados em tempo real")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"[ComissaoPanelView] ver_comissao erro: {e}", exc_info=True)
-            await interaction.followup.send(
-                "Erro ao consultar comissão. Tente novamente.", ephemeral=True
-            )
-
-
 class ComissaoAdminView(View):
-    """Painel ADM — Ver pendentes, marcar como pago, relatório."""
+    """Painel ADM — config de comissão, ver pendentes, marcar como pago."""
 
     def __init__(self):
         super().__init__(timeout=None)
 
-    # ── Ver pendentes ─────────────────────────────────────────
+    # ── Editar Stand ──────────────────────────────────────
+    @button(
+        label="✏️ Editar Stand",
+        style=discord.ButtonStyle.primary,
+        custom_id="comissao:editar_match",
+        row=0,
+    )
+    async def editar_match(self, interaction: discord.Interaction, btn: Button):
+        from services.commission_service import commission_service
+        cfg = await commission_service.get_match_config(str(interaction.guild_id))
+        await interaction.response.send_modal(_EditarComissaoModal(
+            tipo="match",
+            current_threshold=cfg.get("fixed_threshold", 20.0),
+            current_fee=cfg.get("fixed_fee", 2.0),
+            current_pct=cfg.get("pct", 0.10),
+        ))
+
+    # ── Editar Live ───────────────────────────────────────
+    @button(
+        label="✏️ Editar Live",
+        style=discord.ButtonStyle.primary,
+        custom_id="comissao:editar_live",
+        row=0,
+    )
+    async def editar_live(self, interaction: discord.Interaction, btn: Button):
+        from services.commission_service import commission_service
+        cfg = await commission_service.get_live_config(str(interaction.guild_id))
+        await interaction.response.send_modal(_EditarComissaoModal(
+            tipo="live",
+            current_threshold=cfg.get("fixed_threshold", 20.0),
+            current_fee=cfg.get("fixed_fee", 2.0),
+            current_pct=cfg.get("pct", 0.10),
+        ))
+
+    # ── Ver pendentes ─────────────────────────────────────
     @button(
         label="🔍 Ver Pendentes",
         style=discord.ButtonStyle.secondary,
         custom_id="comissao:ver_pendentes",
+        row=1,
     )
     async def ver_pendentes(self, interaction: discord.Interaction, btn: Button):
         await interaction.response.defer(ephemeral=True)
@@ -136,9 +139,8 @@ class ComissaoAdminView(View):
 
             linhas = []
             for d in docs:
-                mid  = d.get("mediador_id", "?")
-                nome = d.get("nome", mid)
-                val  = d.get("saldo_pendente", 0.0)
+                mid = d.get("mediador_id", "?")
+                val = d.get("saldo_pendente", 0.0)
                 linhas.append(f"<@{mid}> — **R$ {val:.2f}**")
 
             embed = discord.Embed(
@@ -153,52 +155,109 @@ class ComissaoAdminView(View):
             logger.error(f"[ComissaoAdminView] ver_pendentes erro: {e}", exc_info=True)
             await interaction.followup.send("Erro ao buscar pendentes.", ephemeral=True)
 
-    # ── Marcar como pago ──────────────────────────────────────
+    # ── Marcar como pago ──────────────────────────────────
     @button(
         label="✅ Marcar como Pago",
         style=discord.ButtonStyle.success,
         custom_id="comissao:marcar_pago",
+        row=1,
     )
     async def marcar_pago(self, interaction: discord.Interaction, btn: Button):
         await interaction.response.send_modal(_MarcarPagoModal())
 
-    # ── Relatório geral ───────────────────────────────────────
-    @button(
-        label="📊 Relatório Geral",
-        style=discord.ButtonStyle.primary,
-        custom_id="comissao:relatorio",
-    )
-    async def relatorio(self, interaction: discord.Interaction, btn: Button):
+
+# ══════════════════════════════════════════════════════════
+# MODAL — Editar configuração de comissão
+# ══════════════════════════════════════════════════════════
+
+class _EditarComissaoModal(discord.ui.Modal):
+    def __init__(
+        self,
+        tipo: str,           # "match" ou "live"
+        current_threshold: float,
+        current_fee: float,
+        current_pct: float,
+    ):
+        label_tipo = "Stand (partidas normais)" if tipo == "match" else "Influencer Live"
+        super().__init__(title=f"✏️ Editar Comissão — {label_tipo}")
+        self.tipo = tipo
+
+        self.threshold = discord.ui.TextInput(
+            label="Limite taxa fixa (R$)",
+            placeholder="Ex: 20.00",
+            default=str(current_threshold),
+            min_length=1,
+            max_length=10,
+        )
+        self.fee = discord.ui.TextInput(
+            label="Taxa fixa por jogador (R$)",
+            placeholder="Ex: 2.00",
+            default=str(current_fee),
+            min_length=1,
+            max_length=10,
+        )
+        self.pct = discord.ui.TextInput(
+            label="Percentual (aposta > limite, ex: 10 = 10%)",
+            placeholder="Ex: 10",
+            default=str(round(current_pct * 100, 4)),
+            min_length=1,
+            max_length=10,
+        )
+        self.add_item(self.threshold)
+        self.add_item(self.fee)
+        self.add_item(self.pct)
+
+    async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            from config.database import db
-            from utils.datetime_utils import utcnow
+            def parse(val: str) -> float:
+                return float(val.strip().replace(",", "."))
 
-            cursor = db.get_collection("comissoes").find({}).sort("saldo_pendente", -1).limit(50)
-            docs   = await cursor.to_list(length=50)
+            threshold_val = parse(self.threshold.value)
+            fee_val       = parse(self.fee.value)
+            pct_raw       = parse(self.pct.value)
+            pct_val       = pct_raw / 100  # converte % para decimal
 
-            if not docs:
-                await interaction.followup.send("Nenhuma comissão registrada.", ephemeral=True)
+            if threshold_val < 0 or fee_val < 0 or pct_val < 0:
+                await interaction.followup.send("❌ Valores não podem ser negativos.", ephemeral=True)
                 return
 
-            total_pendente  = sum(d.get("saldo_pendente", 0.0)  for d in docs)
-            total_pago      = sum(d.get("total_recebido", 0.0)  for d in docs)
-            total_partidas  = sum(d.get("partidas_mediadas", 0) for d in docs)
+            from services.commission_service import commission_service
+            guild_id = str(interaction.guild_id)
 
-            embed = discord.Embed(
-                title="📊 Relatório Geral de Comissões",
-                color=0xFF6B35,
+            if self.tipo == "match":
+                await commission_service.update_match(guild_id, threshold_val, fee_val, pct_val)
+                tipo_label = "Stand (partidas normais)"
+            else:
+                await commission_service.update_live(guild_id, threshold_val, fee_val, pct_val)
+                tipo_label = "Influencer Live"
+
+            # Atualiza o embed do painel no canal comissao-controle
+            from services.channel_service import COMISSAO_ADMIN_CHANNEL
+            ch = discord.utils.get(interaction.guild.text_channels, name=COMISSAO_ADMIN_CHANNEL)
+            if ch:
+                novo_embed = await build_comissao_admin_embed(guild_id)
+                async for msg in ch.history(limit=10):
+                    if msg.author == interaction.guild.me and msg.embeds:
+                        await msg.edit(embed=novo_embed)
+                        break
+
+            await interaction.followup.send(
+                f"✅ **{tipo_label}** atualizado:\n"
+                f"— Limite taxa fixa: **R$ {threshold_val:.2f}**\n"
+                f"— Taxa fixa/jogador: **R$ {fee_val:.2f}**\n"
+                f"— Percentual: **{pct_raw:.2f}%**",
+                ephemeral=True,
             )
-            embed.add_field(name="Total Pendente",    value=f"R$ {total_pendente:.2f}",  inline=True)
-            embed.add_field(name="Total Já Pago",     value=f"R$ {total_pago:.2f}",      inline=True)
-            embed.add_field(name="Partidas Mediadas", value=str(total_partidas),          inline=True)
-            embed.add_field(name="Mediadores",        value=str(len(docs)),               inline=True)
-            embed.set_footer(text=f"Gerado em {utcnow().strftime('%d/%m/%Y %H:%M')} UTC · SOLAR E-SPORTS")
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
+        except ValueError:
+            await interaction.followup.send(
+                "❌ Valor inválido. Use números com ponto ou vírgula (ex: 2.50 ou 2,50).",
+                ephemeral=True,
+            )
         except Exception as e:
-            logger.error(f"[ComissaoAdminView] relatorio erro: {e}", exc_info=True)
-            await interaction.followup.send("Erro ao gerar relatório.", ephemeral=True)
+            logger.error(f"[_EditarComissaoModal] on_submit erro: {e}", exc_info=True)
+            await interaction.followup.send("Erro ao salvar configuração.", ephemeral=True)
 
 
 # ══════════════════════════════════════════════════════════
@@ -261,7 +320,6 @@ class _MarcarPagoModal(discord.ui.Modal, title="Marcar Comissão como Paga"):
                 },
             )
 
-            # Log no canal historico-comissao
             from services.channel_service import COMISSAO_HISTORICO_CHANNEL
             ch = discord.utils.get(interaction.guild.text_channels, name=COMISSAO_HISTORICO_CHANNEL)
             if ch:
@@ -269,9 +327,9 @@ class _MarcarPagoModal(discord.ui.Modal, title="Marcar Comissão como Paga"):
                     title="✅ Comissão Paga",
                     color=0x2ECC71,
                 )
-                log_embed.add_field(name="Mediador", value=f"<@{mediador_id}>",           inline=True)
-                log_embed.add_field(name="Valor",    value=f"R$ {valor_float:.2f}",       inline=True)
-                log_embed.add_field(name="Pago por", value=interaction.user.mention,      inline=True)
+                log_embed.add_field(name="Mediador", value=f"<@{mediador_id}>",      inline=True)
+                log_embed.add_field(name="Valor",    value=f"R$ {valor_float:.2f}",  inline=True)
+                log_embed.add_field(name="Pago por", value=interaction.user.mention, inline=True)
                 if self.observacao.value:
                     log_embed.add_field(name="Obs", value=self.observacao.value, inline=False)
                 log_embed.set_footer(text=agora.strftime("%d/%m/%Y %H:%M") + " UTC")
