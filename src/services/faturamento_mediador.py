@@ -8,11 +8,14 @@ from utils.datetime_utils import utcnow
 
 
 # ── Campos do documento ───────────────────────────────────────────────────────
-CAMPO_MEDIADOR_ID  = "mediator_id"
-CAMPO_DATA_INICIO  = "created_at"       # FIX: era started_at — mas created_at é o campo garantido no modelo
-CAMPO_DATA_FIM     = "completed_at"
-CAMPO_VALOR        = "bet_value"
-CAMPO_STATUS       = "status"
+CAMPO_MEDIADOR_ID       = "mediator_id"
+CAMPO_DATA_INICIO       = "created_at"       # FIX: era started_at — mas created_at é o campo garantido no modelo
+CAMPO_DATA_FIM          = "completed_at"
+CAMPO_VALOR             = "bet_value"
+CAMPO_STATUS            = "status"
+CAMPO_COMISSAO_PLAYER   = "commission_per_player"
+CAMPO_COMISSAO_TOTAL    = "commission_total"
+CAMPO_PLAYER_IDS        = "player_ids"
 
 # ── Status válidos ────────────────────────────────────────────────────────────
 STATUS_FINALIZADO_LIST = [
@@ -62,35 +65,40 @@ class FaturamentoMediadorService:
     async def calcular_stats(self, partidas: list, mediador_id: str) -> dict:
         """
         Calcula todas as estatísticas de faturamento de uma lista de partidas.
-        Separa finalizadas de canceladas.
+        Separa finalizadas de canceladas. Inclui totais de comissão.
         """
         now = utcnow()
 
-        total_faturado    = 0.0
-        total_segundos    = 0
-        finalizadas       = 0
-        canceladas        = 0
-        vol_canceladas    = 0.0
+        total_faturado       = 0.0
+        total_segundos       = 0
+        finalizadas          = 0
+        canceladas           = 0
+        vol_canceladas       = 0.0
+        total_comissao       = 0.0   # soma das comissões cobradas (finalizadas)
+        total_comissao_canc  = 0.0   # comissão de canceladas (informativo)
 
         for p in partidas:
             if str(p.get(CAMPO_MEDIADOR_ID, "")) != str(mediador_id):
                 continue
 
-            status = p.get(CAMPO_STATUS, "")
-            valor  = float(p.get(CAMPO_VALOR, 0) or 0)
+            status    = p.get(CAMPO_STATUS, "")
+            valor     = float(p.get(CAMPO_VALOR, 0) or 0)
+            comissao  = float(p.get(CAMPO_COMISSAO_TOTAL) or 0)
 
-            # ── Canceladas: conta separado, não entra no faturamento ──────────
+            # ── Canceladas ───────────────────────────────────────────────────
             if status in STATUS_CANCELADO_LIST:
-                canceladas   += 1
-                vol_canceladas += valor
+                canceladas           += 1
+                vol_canceladas       += valor
+                total_comissao_canc  += comissao
                 continue
 
-            # ── Finalizadas: entra no faturamento ─────────────────────────────
+            # ── Finalizadas ──────────────────────────────────────────────────
             if status not in STATUS_FINALIZADO_LIST:
                 continue
 
-            finalizadas    += 1
-            total_faturado += valor
+            finalizadas      += 1
+            total_faturado   += valor
+            total_comissao   += comissao
 
             inicio = p.get(CAMPO_DATA_INICIO)
             fim    = p.get(CAMPO_DATA_FIM) or now
@@ -103,16 +111,18 @@ class FaturamentoMediadorService:
                 if delta > 0:
                     total_segundos += int(delta)
 
-        total_horas   = total_segundos / 3600
+        total_horas    = total_segundos / 3600
         media_por_hora = total_faturado / total_horas if total_horas > 0 else 0.0
 
         return {
-            "total_faturado":  total_faturado,
-            "finalizadas":     finalizadas,
-            "canceladas":      canceladas,
-            "vol_canceladas":  vol_canceladas,
-            "total_horas":     total_horas,
-            "media_por_hora":  media_por_hora,
+            "total_faturado":      total_faturado,
+            "finalizadas":         finalizadas,
+            "canceladas":          canceladas,
+            "vol_canceladas":      vol_canceladas,
+            "total_horas":         total_horas,
+            "media_por_hora":      media_por_hora,
+            "total_comissao":      total_comissao,
+            "total_comissao_canc": total_comissao_canc,
         }
 
 
@@ -166,10 +176,16 @@ class FaturamentoView(discord.ui.View):
         embed.add_field(name="❌ Canceladas",         value=f"`{stats['canceladas']} partidas`",      inline=True)
         embed.add_field(name="\u200b",               value="\u200b",                                 inline=True)  # spacer
         embed.add_field(name="💵 Total faturado",    value=f"`{_brl(stats['total_faturado'])}`",     inline=True)
+        embed.add_field(name="🏦 Comissão arrecadada", value=f"`{_brl(stats['total_comissao'])}`",   inline=True)
         embed.add_field(name="🚫 Vol. canceladas",   value=f"`{_brl(stats['vol_canceladas'])}`",     inline=True)
-        embed.add_field(name="\u200b",               value="\u200b",                                 inline=True)  # spacer
         embed.add_field(name="⏱️ Horas trabalhadas", value=f"`{_horas(stats['total_horas'])}`",      inline=True)
         embed.add_field(name="📈 Média por hora",    value=f"`{_brl(stats['media_por_hora'])}`",     inline=True)
+        if stats["total_comissao_canc"] > 0:
+            embed.add_field(
+                name="🏦 Comissão s/ canceladas",
+                value=f"`{_brl(stats['total_comissao_canc'])}`",
+                inline=True,
+            )
 
         embed.set_footer(text=f"Atualizado {utcnow().strftime('%d/%m/%Y %H:%M')} UTC")
         return embed
@@ -224,14 +240,16 @@ class RelatorioGeralView(discord.ui.View):
             })
 
             faturamento_por_mediador: dict[str, dict] = {}
-            total_geral      = 0.0
-            total_canceladas = 0
-            total_fin        = 0
+            total_geral           = 0.0
+            total_canceladas      = 0
+            total_fin             = 0
+            total_comissao_geral  = 0.0
 
             async for p in cursor:
-                m_id   = str(p.get(CAMPO_MEDIADOR_ID) or "Desconhecido")
-                valor  = float(p.get(CAMPO_VALOR, 0) or 0)
-                status = p.get(CAMPO_STATUS, "")
+                m_id     = str(p.get(CAMPO_MEDIADOR_ID) or "Desconhecido")
+                valor    = float(p.get(CAMPO_VALOR, 0) or 0)
+                status   = p.get(CAMPO_STATUS, "")
+                comissao = float(p.get(CAMPO_COMISSAO_TOTAL) or 0)
 
                 if m_id not in faturamento_por_mediador:
                     faturamento_por_mediador[m_id] = {
@@ -240,6 +258,7 @@ class RelatorioGeralView(discord.ui.View):
                         "fin":        0,
                         "canc":       0,
                         "vol_canc":   0.0,
+                        "comissao":   0.0,
                     }
 
                 entry = faturamento_por_mediador[m_id]
@@ -251,10 +270,12 @@ class RelatorioGeralView(discord.ui.View):
                     continue
 
                 # finalizadas
-                entry["fin"]   += 1
-                entry["total"] += valor
-                total_geral    += valor
-                total_fin      += 1
+                entry["fin"]     += 1
+                entry["total"]   += valor
+                entry["comissao"] += comissao
+                total_geral      += valor
+                total_fin        += 1
+                total_comissao_geral += comissao
 
                 inicio = p.get(CAMPO_DATA_INICIO)
                 fim    = p.get(CAMPO_DATA_FIM)
@@ -276,19 +297,20 @@ class RelatorioGeralView(discord.ui.View):
 
             data_str = datetime.now().strftime("%d/%m/%Y %H:%M")
             linhas = [
-                "=" * 70,
+                "=" * 76,
                 f"FATURAMENTO MENSAL — GERADO EM {data_str}",
-                "=" * 70,
+                "=" * 76,
                 f"Período:              Últimos 30 dias",
                 f"Mediadores ativos:    {len(faturamento_por_mediador)}",
                 f"Partidas finalizadas: {total_fin}",
                 f"Partidas canceladas:  {total_canceladas}",
                 f"Faturamento total:    {_brl(total_geral)}",
+                f"Comissão total:       {_brl(total_comissao_geral)}",
                 "",
                 "RANKING POR FATURAMENTO:",
-                "-" * 70,
-                f"{'Pos':>3} | {'Mediador ID':<22} | {'Faturado':>13} | {'Fin':>4} | {'Canc':>4} | {'Horas':>6}",
-                "-" * 70,
+                "-" * 76,
+                f"{'Pos':>3} | {'Mediador ID':<22} | {'Faturado':>13} | {'Comissão':>12} | {'Fin':>4} | {'Canc':>4} | {'Horas':>6}",
+                "-" * 76,
             ]
 
             ranking = sorted(
@@ -298,17 +320,18 @@ class RelatorioGeralView(discord.ui.View):
             )
 
             for i, (m_id, d) in enumerate(ranking, 1):
-                horas     = int(d["segundos"] / 3600)
-                valor_fmt = _brl(d["total"])
+                horas        = int(d["segundos"] / 3600)
+                valor_fmt    = _brl(d["total"])
+                comissao_fmt = _brl(d["comissao"])
                 linhas.append(
-                    f"{i:3}° | {m_id:<22} | {valor_fmt:>13} | {d['fin']:>4} | {d['canc']:>4} | {horas:>5}h"
+                    f"{i:3}° | {m_id:<22} | {valor_fmt:>13} | {comissao_fmt:>12} | {d['fin']:>4} | {d['canc']:>4} | {horas:>5}h"
                 )
 
             linhas += [
-                "-" * 70,
+                "-" * 76,
                 "",
                 "DETALHES DE CANCELAMENTOS:",
-                "-" * 70,
+                "-" * 76,
             ]
             for m_id, d in ranking:
                 if d["canc"] > 0:

@@ -30,6 +30,32 @@ class MatchService:
         await col.update_one({"_id": ObjectId(match_id)}, {"$set": fields})
         return await col.find_one({"_id": ObjectId(match_id)})
 
+    # ── Snapshot de comissão ─────────────────────────────────────────
+
+    async def _snapshot_commission(self, match_id: str, match_doc: dict) -> dict:
+        """
+        Calcula e persiste commission_per_player e commission_total no documento
+        da partida (snapshot no momento do encerramento).
+        Retorna dict com {taxa, total} para uso imediato.
+        """
+        bet_value = float(match_doc.get("bet_value", 0) or 0)
+        guild_id  = str(match_doc.get("guild_id", ""))
+        try:
+            scheme = await commission_service.get_match_config(guild_id) if guild_id else {}
+            taxa   = commission_service.calculate_per_player(bet_value, scheme)
+        except Exception as e:
+            logger.warning(f"[MatchService] commission snapshot fallback: {e}")
+            taxa = commission_service.calculate_per_player(bet_value, {})
+
+        num_players = len(match_doc.get("player_ids", [])) or 2
+        total       = taxa * num_players
+
+        await self._update(match_id, {
+            "commission_per_player": round(taxa, 2),
+            "commission_total":      round(total, 2),
+        })
+        return {"taxa": taxa, "total": total}
+
     # ── Histórico ─────────────────────────────────────────────────────
 
     async def _post_history(self, match_doc: dict, outcome: str = "finalizado"):
@@ -55,15 +81,13 @@ class MatchService:
 
     async def _build_history_embed(self, match: dict, outcome: str) -> discord.Embed:
         bet_value = match.get("bet_value", 0)
-        guild_id  = str(match.get("guild_id", ""))
 
-        # Usa commission_service para calcular a taxa correta por servidor
-        if guild_id:
-            scheme = await commission_service.get_match_config(guild_id)
-            taxa   = commission_service.calculate_per_player(bet_value, scheme)
-        else:
-            # fallback: usa defaults se guild_id não disponível
-            taxa = commission_service.calculate_per_player(bet_value, {})
+        # Usa snapshot salvo no documento (mais confiável que recalcular)
+        taxa = float(match.get("commission_per_player") or 0)
+        if not taxa:
+            guild_id = str(match.get("guild_id", ""))
+            scheme   = await commission_service.get_match_config(guild_id) if guild_id else {}
+            taxa     = commission_service.calculate_per_player(bet_value, scheme)
 
         total_por_jogador = bet_value + taxa
         premio            = bet_value * 2
@@ -189,6 +213,8 @@ class MatchService:
                 "premio_confirmado_jogador": False,
                 "cancelled_by":              None,
                 "cancel_reason":             None,
+                "commission_per_player":     None,
+                "commission_total":          None,
                 "created_at":                utcnow(),
                 "updated_at":                utcnow(),
                 "started_at":                None,
@@ -305,6 +331,10 @@ class MatchService:
                 Match.STATUS_PARTIDA_INICIADA,
             ):
                 return None
+
+            # Salva snapshot de comissão antes de finalizar
+            await self._snapshot_commission(match_id, match)
+
             result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
                 "premio_confirmado_jogador": True,
@@ -329,6 +359,10 @@ class MatchService:
                 return None
             if match["status"] in (Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO):
                 return None
+
+            # Salva snapshot de comissão antes de cancelar
+            await self._snapshot_commission(match_id, match)
+
             result = await self._update(match_id, {
                 "status":       Match.STATUS_CANCELADO,
                 "cancelled_by": str(cancelled_by),
@@ -349,6 +383,13 @@ class MatchService:
         forced_by: int,
     ) -> Optional[Dict[str, Any]]:
         try:
+            match = await self._find(match_id)
+            if not match:
+                return None
+
+            # Salva snapshot de comissão antes de forçar finalização
+            await self._snapshot_commission(match_id, match)
+
             result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
                 "vencedor":                  vencedor,
