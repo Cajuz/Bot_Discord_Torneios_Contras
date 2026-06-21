@@ -365,6 +365,7 @@ async def on_ready():
         from views.influencer_live_view       import ContraRoomView, ControllerLivePanelView
         from views.influencer_live_admin_view import InfluencerLiveAdminView
         from views.live_contra_setup_view     import LiveContraSetupView
+        from views.comissao_view              import ComissaoPanelView, ComissaoAdminView
 
         persistent_views = [
             TicketPanelView(),
@@ -402,6 +403,9 @@ async def on_ready():
             InfluencerLiveAdminView(),
             LiveContraSetupView(),
             CaptchaButtonView,
+            # ── Comissão
+            ComissaoPanelView(),
+            ComissaoAdminView(),
         ]
 
         for view in persistent_views:
