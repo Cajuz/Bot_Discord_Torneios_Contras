@@ -280,6 +280,7 @@ class ContraResultView(View):
 
         from services.match_service import match_service
         from services.influencer_live_queue_service import influencer_live_queue_service
+        from services.commission_service import commission_service
         from views.influencer_live_view import build_contra_match_result_embed
         from config.discord_bot import get_bot
 
@@ -295,7 +296,16 @@ class ContraResultView(View):
             return
 
         bet_value = updated.get("bet_value", 0.0)
-        prize     = bet_value * 2
+
+        # Calcula prêmio descontando a taxa de comissão live configurada no servidor
+        try:
+            live_scheme = await commission_service.get_live_config(str(self.guild_id))
+            total_fee   = commission_service.calculate(bet_value, live_scheme)
+        except Exception as exc:
+            logger.warning(f"[ContraMatch] Erro ao buscar comissão live, usando taxa 0: {exc}")
+            total_fee = 0.0
+
+        prize = round(bet_value * 2 - total_fee, 2)
 
         winner = interaction.guild.get_member(winner_id) or await interaction.guild.fetch_member(winner_id)
         loser  = interaction.guild.get_member(loser_id)  or await interaction.guild.fetch_member(loser_id)
@@ -317,7 +327,8 @@ class ContraResultView(View):
         )
         logger.info(
             f"[ContraMatch] Resultado — match {self.match_id} "
-            f"vencedor {winner_id} por {interaction.user.name}"
+            f"vencedor {winner_id} por {interaction.user.name} | "
+            f"prize={prize} (bet={bet_value} fee={total_fee})"
         )
 
     async def _influencer_wins(self, interaction: discord.Interaction):
