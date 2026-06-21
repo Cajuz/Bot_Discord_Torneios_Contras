@@ -8,6 +8,7 @@ import discord
 
 from config.database import db
 from models.match import Match
+from services.commission_service import commission_service
 from utils.datetime_utils import utcnow
 from utils.logger import logger, log_success
 
@@ -46,15 +47,24 @@ class MatchService:
             history_ch = discord.utils.get(guild.text_channels, name="historico-partidas")
             if not history_ch:
                 return
-            embed = self._build_history_embed(match_doc, outcome)
+            embed = await self._build_history_embed(match_doc, outcome)
             await history_ch.send(embed=embed)
             logger.info(f"[History] Partida {match_doc['_id']} postada em #historico-partidas")
         except Exception as e:
             logger.warning(f"[History] Erro ao postar histórico: {e}")
 
-    def _build_history_embed(self, match: dict, outcome: str) -> discord.Embed:
-        bet_value         = match.get("bet_value", 0)
-        taxa              = bet_value * 0.25
+    async def _build_history_embed(self, match: dict, outcome: str) -> discord.Embed:
+        bet_value = match.get("bet_value", 0)
+        guild_id  = str(match.get("guild_id", ""))
+
+        # Usa commission_service para calcular a taxa correta por servidor
+        if guild_id:
+            scheme = await commission_service.get_match_config(guild_id)
+            taxa   = commission_service.calculate_per_player(bet_value, scheme)
+        else:
+            # fallback: usa defaults se guild_id não disponível
+            taxa = commission_service.calculate_per_player(bet_value, {})
+
         total_por_jogador = bet_value + taxa
         premio            = bet_value * 2
 
@@ -189,138 +199,13 @@ class MatchService:
             result = await col.insert_one(match_data)
             match_data["_id"] = result.inserted_id
             logger.info(
-                f"✅ Partida criada: {result.inserted_id} | "
-                f"{match_type} R${bet_value} ({gel_type})"
+                f"✅ Partida criada: {result.inserted_id} | guild={guild_id} | "
+                f"bet={bet_value} | mediator={mediator_id}"
             )
             return match_data
         except Exception as e:
-            logger.error(f"Erro ao criar partida: {e}")
-            raise
-
-    # ── Criação — fluxo Influencer Live ──────────────────────────────
-
-    async def create_live_match(
-        self,
-        guild_id:      str,
-        influencer_id: str,
-        challenger_id: str,
-        entry_value:   float,
-        game_mode:     str,
-        mediator_id:   str | None = None,
-        channel_id:    str | None = None,
-        channel_name:  str = "",
-    ) -> Dict[str, Any]:
-        """
-        Cria uma partida do fluxo Influencer Live.
-        Armazena flow_type='influencer_live' para diferenciação de stats.
-        """
-        try:
-            match_data = {
-                "guild_id":                  str(guild_id),
-                "channel_id":                str(channel_id) if channel_id else None,
-                "channel_name":              channel_name,
-                "match_type":                game_mode,
-                "platform":                  "influencer_live",
-                "flow_type":                 "influencer_live",
-                "bet_value":                 float(entry_value),
-                "gel_type":                  "normal",
-                "influencer_id":             str(influencer_id),
-                "challenger_id":             str(challenger_id),
-                "player_ids":                [str(influencer_id), str(challenger_id)],
-                "max_players":               2,
-                "mediator_id":               str(mediator_id) if mediator_id else "pending",
-                "status":                    Match.STATUS_AGUARDANDO_PARTIDA,
-                "thread_id":                 None,
-                "time_blue":                 [],
-                "time_red":                  [],
-                "vencedor":                  None,
-                "winner_id":                 None,
-                "premio_confirmado_jogador": False,
-                "payment_confirmed":         False,
-                "cancelled_by":              None,
-                "cancel_reason":             None,
-                "created_at":                utcnow(),
-                "updated_at":                utcnow(),
-                "started_at":                None,
-                "completed_at":              None,
-                "cancelled_at":              None,
-            }
-            col    = self._get_collection()
-            result = await col.insert_one(match_data)
-            match_data["_id"] = result.inserted_id
-            logger.info(
-                f"[LiveMatch] ✅ Partida live criada: {result.inserted_id} | "
-                f"influencer={influencer_id} challenger={challenger_id} "
-                f"mode={game_mode} R${entry_value:.2f}"
-            )
-            return match_data
-        except Exception as e:
-            logger.error(f"[LiveMatch] Erro ao criar partida live: {e}")
-            raise
-
-    async def finish_live_match(
-        self,
-        match_id:  str,
-        vencedor:  str,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Encerra uma partida live declarando o vencedor.
-        vencedor: 'influencer' | 'challenger'
-        """
-        try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
-                logger.warning(f"[LiveMatch] finish_live_match: partida não encontrada {match_id}")
-                return None
-            if match_doc.get("status") in (Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO):
-                logger.warning(f"[LiveMatch] finish_live_match: partida já encerrada {match_id}")
-                return None
-
-            updated = await self._update(match_id, {
-                "status":       Match.STATUS_FINALIZADO,
-                "vencedor":     vencedor,
-                "winner_id":    match_doc.get("influencer_id") if vencedor == "influencer"
-                                else match_doc.get("challenger_id"),
-                "completed_at": utcnow(),
-            })
-            log_success(f"[LiveMatch] ✅ Partida live finalizada: {match_id} vencedor={vencedor}")
-            if updated:
-                asyncio.create_task(self._post_history(updated, outcome="finalizado"))
-            return updated
-        except Exception as e:
-            logger.error(f"[LiveMatch] Erro ao finalizar partida live {match_id}: {e}")
-            return None
-
-    async def register_payment_confirmation(
-        self,
-        match_id: str,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Registra confirmação de pagamento pelo desafiante.
-        Avança status para partida_iniciada (aguardando o influencer iniciar).
-        """
-        try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
-                logger.warning(f"[LiveMatch] register_payment_confirmation: não encontrado {match_id}")
-                return None
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
-                logger.warning(
-                    f"[LiveMatch] register_payment_confirmation: "
-                    f"status inválido '{match_doc.get('status')}' para {match_id}"
-                )
-                return None
-
-            updated = await self._update(match_id, {
-                "payment_confirmed": True,
-                "status":            Match.STATUS_PARTIDA_INICIADA,
-                "started_at":        utcnow(),
-            })
-            logger.info(f"[LiveMatch] 💰 Pagamento confirmado: {match_id}")
-            return updated
-        except Exception as e:
-            logger.error(f"[LiveMatch] Erro ao registrar pagamento {match_id}: {e}")
-            return None
+            logger.error(f"❌ Erro ao criar partida: {e}")
+            return {}
 
     # ── Leitura ──────────────────────────────────────────────────────
 
@@ -331,96 +216,52 @@ class MatchService:
             logger.error(f"Erro ao buscar partida {match_id}: {e}")
             return None
 
-    async def get_active_matches(self, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_active_match_for_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
         try:
             col = self._get_collection()
-            return await col.find(
-                {"status": {"$in": Match.ACTIVE_STATUSES}}
-            ).sort("created_at", -1).limit(limit).to_list(length=limit)
+            return await col.find_one({
+                "channel_id": str(channel_id),
+                "status": {"$nin": [Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO]}
+            })
         except Exception as e:
-            logger.error(f"Erro ao listar partidas ativas: {e}")
-            return []
-
-    async def get_matches_by_player(
-        self, player_id: int, limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        try:
-            col = self._get_collection()
-            return await col.find(
-                {"player_ids": str(player_id)}
-            ).sort("created_at", -1).limit(limit).to_list(length=limit)
-        except Exception as e:
-            logger.error(f"Erro ao buscar partidas do jogador {player_id}: {e}")
-            return []
-
-    async def get_matches_by_mediator(
-        self, mediator_id: int, limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        try:
-            col = self._get_collection()
-            return await col.find(
-                {"mediator_id": str(mediator_id)}
-            ).sort("created_at", -1).limit(limit).to_list(length=limit)
-        except Exception as e:
-            logger.error(f"Erro ao buscar partidas do mediador {mediator_id}: {e}")
-            return []
-
-    async def get_channel_stats(self, channel_name: str) -> Dict[str, int]:
-        try:
-            col       = self._get_collection()
-            total     = await col.count_documents({"channel_name": channel_name})
-            active    = await col.count_documents({
-                "channel_name": channel_name,
-                "status": {"$in": Match.ACTIVE_STATUSES}})
-            completed = await col.count_documents({
-                "channel_name": channel_name,
-                "status": Match.STATUS_FINALIZADO})
-            cancelled = await col.count_documents({
-                "channel_name": channel_name,
-                "status": Match.STATUS_CANCELADO})
-            return {"total": total, "active": active,
-                    "completed": completed, "cancelled": cancelled}
-        except Exception as e:
-            logger.error(f"Erro ao obter estatísticas do canal {channel_name}: {e}")
-            return {"total": 0, "active": 0, "completed": 0, "cancelled": 0}
-
-    # ── Fluxo linear ───────────────────────────────────────────────
-
-    async def update_thread_id(
-        self, match_id: str, thread_id: int
-    ) -> Optional[Dict[str, Any]]:
-        try:
-            return await self._update(match_id, {"thread_id": thread_id})
-        except Exception as e:
-            logger.error(f"Erro ao atualizar thread_id {match_id}: {e}")
+            logger.error(f"Erro ao buscar partida ativa para canal {channel_id}: {e}")
             return None
 
-    async def iniciar_partida(
-        self,
-        match_id:   str,
-        sala_id:    str,
-        sala_senha: str,
-        modo_jogo:  str = "Normal",
-    ) -> Optional[Dict[str, Any]]:
-        """aguardando_partida → partida_iniciada  (chamado pelo /sala)"""
+    # ── Atualização de status ────────────────────────────────────────
+
+    async def assign_thread(self, match_id: str, thread_id: int) -> Optional[Dict[str, Any]]:
         try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
+            return await self._update(match_id, {"thread_id": str(thread_id)})
+        except Exception as e:
+            logger.error(f"Erro ao atribuir thread {thread_id} à partida {match_id}: {e}")
+            return None
+
+    async def assign_teams(
+        self,
+        match_id: str,
+        time_blue: List[int],
+        time_red: List[int],
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return await self._update(match_id, {
+                "time_blue": [str(uid) for uid in time_blue],
+                "time_red":  [str(uid) for uid in time_red],
+            })
+        except Exception as e:
+            logger.error(f"Erro ao atribuir times à partida {match_id}: {e}")
+            return None
+
+    async def start_match(self, match_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            match = await self._find(match_id)
+            if not match:
                 return None
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PARTIDA:
-                logger.warning(
-                    f"iniciar_partida: status inválido '{match_doc.get('status')}' "
-                    f"(esperado: {Match.STATUS_AGUARDANDO_PARTIDA})")
+            if match["status"] != Match.STATUS_AGUARDANDO_PARTIDA:
                 return None
-            updated = await self._update(match_id, {
+            return await self._update(match_id, {
                 "status":     Match.STATUS_PARTIDA_INICIADA,
-                "sala_id":    sala_id,
-                "sala_senha": sala_senha,
-                "modo_jogo":  modo_jogo,
                 "started_at": utcnow(),
             })
-            logger.info(f"▶️ Partida iniciada via /sala: {match_id}")
-            return updated
         except Exception as e:
             logger.error(f"Erro ao iniciar partida {match_id}: {e}")
             return None
@@ -429,128 +270,97 @@ class MatchService:
         self,
         match_id:  str,
         vencedor:  str,
-        time_blue: List[int],
-        time_red:  List[int],
+        time_blue: List = None,
+        time_red:  List = None,
     ) -> Optional[Dict[str, Any]]:
-        """partida_iniciada → aguardando_premio  (chamado pelo !wt)"""
         try:
-            if vencedor not in ("blue", "red"):
-                logger.error(f"Vencedor inválido: {vencedor}")
+            match = await self._find(match_id)
+            if not match:
                 return None
-            match_doc = await self._find(match_id)
-            if not match_doc:
+            if match["status"] != Match.STATUS_PARTIDA_INICIADA:
                 return None
-            if match_doc.get("status") != Match.STATUS_PARTIDA_INICIADA:
-                logger.warning(
-                    f"set_winner: status inválido '{match_doc.get('status')}' "
-                    f"(esperado: {Match.STATUS_PARTIDA_INICIADA})")
-                return None
-            win_ids = time_blue if vencedor == "blue" else time_red
-            updated = await self._update(match_id, {
-                "status":    Match.STATUS_AGUARDANDO_PREMIO,
-                "vencedor":  vencedor,
-                "winner_id": str(win_ids[0]) if win_ids else None,
-                "time_blue": [str(p) for p in time_blue],
-                "time_red":  [str(p) for p in time_red],
-            })
-            logger.info(f"🏆 Vencedor declarado ({vencedor}): {match_id}")
-            return updated
+
+            fields = {
+                "status":   Match.STATUS_AGUARDANDO_PREMIO,
+                "vencedor": vencedor,
+            }
+            if vencedor == "blue" and time_blue:
+                fields["winner_id"] = str(time_blue[0])
+            elif vencedor == "red" and time_red:
+                fields["winner_id"] = str(time_red[0])
+
+            return await self._update(match_id, fields)
         except Exception as e:
-            logger.error(f"Erro ao declarar vencedor {match_id}: {e}")
+            logger.error(f"Erro ao definir vencedor da partida {match_id}: {e}")
             return None
 
-    async def confirm_prize_received(
-        self, match_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """aguardando_premio → finalizado  (botão do jogador vencedor)"""
+    async def confirm_prize_received(self, match_id: str) -> Optional[Dict[str, Any]]:
         try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
+            match = await self._find(match_id)
+            if not match:
                 return None
-            if match_doc.get("status") != Match.STATUS_AGUARDANDO_PREMIO:
-                logger.warning(
-                    f"confirm_prize_received: status inválido '{match_doc.get('status')}'")
+            if match["status"] not in (
+                Match.STATUS_AGUARDANDO_PREMIO,
+                Match.STATUS_AGUARDANDO_PARTIDA,
+                Match.STATUS_PARTIDA_INICIADA,
+            ):
                 return None
-            updated = await self._update(match_id, {
+            result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
                 "premio_confirmado_jogador": True,
                 "completed_at":              utcnow(),
             })
-            log_success(f"✅ Partida finalizada: {match_id}")
-            if updated:
-                asyncio.create_task(self._post_history(updated, outcome="finalizado"))
-            return updated
+            if result:
+                await self._post_history(result, "finalizado")
+            return result
         except Exception as e:
-            logger.error(f"Erro ao confirmar recebimento de prêmio {match_id}: {e}")
+            logger.error(f"Erro ao confirmar prêmio da partida {match_id}: {e}")
             return None
-
-    # ── Cancelamento ────────────────────────────────────────────────
 
     async def cancel_match(
         self,
         match_id:     str,
-        cancelled_by: int = None,
-        reason:       str = None,
+        cancelled_by: int,
+        reason:       str = "Cancelado",
     ) -> Optional[Dict[str, Any]]:
         try:
-            match_doc = await self._find(match_id)
-            if not match_doc:
+            match = await self._find(match_id)
+            if not match:
                 return None
-            if match_doc.get("status") in (
-                Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO
-            ):
-                logger.warning(f"cancel_match: partida já encerrada {match_id}")
+            if match["status"] in (Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO):
                 return None
-            updated = await self._update(match_id, {
-                "status":        Match.STATUS_CANCELADO,
-                "cancelled_by":  str(cancelled_by) if cancelled_by else None,
+            result = await self._update(match_id, {
+                "status":       Match.STATUS_CANCELADO,
+                "cancelled_by": str(cancelled_by),
                 "cancel_reason": reason,
-                "cancelled_at":  utcnow(),
+                "cancelled_at": utcnow(),
             })
-            logger.info(f"❌ Partida cancelada: {match_id}")
-            if updated:
-                asyncio.create_task(self._post_history(updated, outcome="cancelado"))
-            return updated
+            if result:
+                await self._post_history(result, "cancelado")
+            return result
         except Exception as e:
             logger.error(f"Erro ao cancelar partida {match_id}: {e}")
             return None
 
-    async def force_finish(
+    async def force_finish_match(
         self,
         match_id:  str,
         vencedor:  str,
-        time_blue: List[int],
-        time_red:  List[int],
-        forced_by: int = None,
+        forced_by: int,
     ) -> Optional[Dict[str, Any]]:
-        """Admin força encerramento independente do status atual."""
         try:
-            if vencedor not in ("blue", "red"):
-                return None
-            match_doc = await self._find(match_id)
-            if not match_doc:
-                return None
-            if match_doc.get("status") in (
-                Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO
-            ):
-                return None
-            win_ids = time_blue if vencedor == "blue" else time_red
-            updated = await self._update(match_id, {
+            result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
                 "vencedor":                  vencedor,
-                "winner_id":                 str(win_ids[0]) if win_ids else None,
-                "time_blue":                 [str(p) for p in time_blue],
-                "time_red":                  [str(p) for p in time_red],
                 "premio_confirmado_jogador": True,
                 "completed_at":              utcnow(),
-                "cancelled_by":              str(forced_by) if forced_by else None,
+                "forced_by":                 str(forced_by),
             })
-            log_success(f"⚡ Partida encerrada forçado: {match_id}")
-            if updated:
-                asyncio.create_task(self._post_history(updated, outcome="forcado"))
-            return updated
+            if result:
+                await self._post_history(result, "forcado")
+            return result
         except Exception as e:
-            logger.error(f"Erro ao forçar encerramento {match_id}: {e}")
+            logger.error(f"Erro ao forçar finalização da partida {match_id}: {e}")
             return None
 
 
