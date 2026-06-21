@@ -39,6 +39,8 @@ from services.channel_service import (
     # Influencer Live
     CATEGORY_CONTRAS, MEDIADOR_LIVE_PANEL_CHANNEL, LIVE_CONTRA_CHANNEL,
     CONTROLLER_LIVE_ROLE_NAME,
+    # Comissão
+    COMISSAO_PAINEL_CHANNEL, COMISSAO_HISTORICO_CHANNEL, COMISSAO_ADMIN_CHANNEL,
     permission_service,
 )
 from config.channels_config import ChannelsConfig
@@ -178,7 +180,8 @@ class ChannelSetupService:
         await self.setup_blacklist(guild)
         await self.setup_alertas_adm(guild)
         await self.setup_mediador_live_panel(guild)
-        await self.setup_live_contra(guild)          # ← NOVO
+        await self.setup_live_contra(guild)
+        await self.setup_comissao(guild)          # ← COMISSÃO
         logger.info("[ChannelSetup] Todos os painéis postados")
 
 
@@ -471,6 +474,34 @@ class ChannelSetupService:
         embed = build_live_contra_embed()
         await self._post_panel(guild, LIVE_CONTRA_CHANNEL, embed, LiveContraSetupView())
         logger.info("[ChannelSetup] Painel live-contra postado")
+
+    async def setup_comissao(self, guild: discord.Guild):
+        """
+        Posta os painéis da categoria 💼 | COMISSÃO.
+        - #painel-comissao  → Mediador consulta sua própria comissão via botão
+        - #historico-comissao → Log automático de pagamentos (somente leitura)
+        - #comissao-controle  → ADM gerencia e força pagamentos
+        """
+        from views.comissao_view import (
+            ComissaoPanelView, build_comissao_panel_embed,
+            build_comissao_historico_embed,
+            ComissaoAdminView, build_comissao_admin_embed,
+        )
+
+        await self._post_panel(
+            guild, COMISSAO_PAINEL_CHANNEL,
+            build_comissao_panel_embed(), ComissaoPanelView(),
+        )
+        await self._post_panel(
+            guild, COMISSAO_HISTORICO_CHANNEL,
+            build_comissao_historico_embed(), None,
+            clear=False, once=True,
+        )
+        await self._post_panel(
+            guild, COMISSAO_ADMIN_CHANNEL,
+            build_comissao_admin_embed(), ComissaoAdminView(),
+        )
+        logger.info("[ChannelSetup] Painéis de Comissão postados")
 
 
     # ══════════════════════════════════════════════════════════

@@ -123,6 +123,13 @@ MEDIADOR_LIVE_PANEL_CHANNEL  = "painel-mediador-live"
 LIVE_CONTRA_CHANNEL          = "live-contra"   # ← canal de criação de sala (só Influencer/ADM)
 
 
+# ── Canais — COMISSÃO ─────────────────────────────────────────────
+CATEGORY_COMISSAO           = "💼 | COMISSÃO"
+COMISSAO_PAINEL_CHANNEL     = "painel-comissao"
+COMISSAO_HISTORICO_CHANNEL  = "historico-comissao"
+COMISSAO_ADMIN_CHANNEL      = "comissao-controle"
+
+
 # ── Aliases legados ────────────────────────────────────────────────
 CATEGORY_ANALYTICS_NAME      = "📊 | ANALYTICS"
 EXPOSED_CHANNEL              = EXPOSED_CHANNEL_NAME
@@ -227,6 +234,12 @@ CHANNEL_STRUCTURE: dict[str, list[str]] = {
         LIVE_CONTRA_CHANNEL,
         MEDIADOR_LIVE_PANEL_CHANNEL,
     ],
+    # Comissão — painel de consulta + histórico + controle ADM
+    CATEGORY_COMISSAO: [
+        COMISSAO_PAINEL_CHANNEL,
+        COMISSAO_HISTORICO_CHANNEL,
+        COMISSAO_ADMIN_CHANNEL,
+    ],
 }
 
 
@@ -245,6 +258,8 @@ INTERACTION_ONLY_CHANNELS = {
     SOLICITAR_SUPORTE_CHANNEL,
     BLACKLIST_CHANNEL,
     RANKING_CHANNEL,
+    # Comissão — mediador consulta via botão
+    COMISSAO_PAINEL_CHANNEL,
 }
 
 
@@ -278,6 +293,8 @@ CHANNEL_VIEW_ONLY: dict[str, list[str]] = {
     MEDIADOR_LIVE_PANEL_CHANNEL: [CONTROLLER_LIVE_ROLE_NAME, ADM_ROLE_NAME],
     # live-contra — Influencer interage via botões, não digita
     LIVE_CONTRA_CHANNEL:         [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
+    # Comissão — histórico só ADM/Controller leem
+    COMISSAO_HISTORICO_CHANNEL:  [CONTROLLER_ROLE_NAME, ADM_ROLE_NAME],
 }
 
 
@@ -299,6 +316,8 @@ CHANNEL_PERMISSIONS: dict[str, list[str]] = {
     CHAT_INFLUENCERS_CHANNEL:   [INFLUENCER_ROLE_NAME, ADM_ROLE_NAME],
     BOAS_VINDAS_CHANNEL:        [],
     REGRAS_CHANNEL:             [],
+    # Comissão — controle apenas ADM
+    COMISSAO_ADMIN_CHANNEL:     [ADM_ROLE_NAME],
 }
 
 
@@ -375,6 +394,7 @@ class PermissionService:
             CATEGORY_STAFF, CATEGORY_LOGS, CATEGORY_ANALYTICS,
             CATEGORY_ANALISTAS, CATEGORY_MEDIACAO,
             CATEGORY_CONTRAS,
+            CATEGORY_COMISSAO,
         }
         if category_name in restricted_cats:
             overwrites = {guild.default_role: discord.PermissionOverwrite(
@@ -408,6 +428,26 @@ class PermissionService:
                 member_role = roles.get(MEMBER_ROLE_NAME)
                 if member_role:
                     overwrites[member_role] = discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False,
+                        use_application_commands=True,
+                    )
+
+            elif category_name == CATEGORY_COMISSAO:
+                # Controller e ADM veem a categoria; painel-comissao também é aberto a Mediador
+                ctrl_role = roles.get(CONTROLLER_ROLE_NAME) or discord.utils.get(
+                    guild.roles, name=CONTROLLER_ROLE_NAME)
+                if ctrl_role:
+                    overwrites[ctrl_role] = discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=False,
+                        use_application_commands=True,
+                    )
+
+                med_role = roles.get(MEDIADOR_ROLE_NAME) or discord.utils.get(
+                    guild.roles, name=MEDIADOR_ROLE_NAME)
+                if med_role:
+                    overwrites[med_role] = discord.PermissionOverwrite(
                         read_messages=True,
                         send_messages=False,
                         use_application_commands=True,
