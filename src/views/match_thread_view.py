@@ -8,6 +8,7 @@ from typing import Optional, List
 from config.database import db
 from models.match import Match
 from services.match_service import match_service
+from services.commission_service import commission_service
 from utils.logger import logger
 
 
@@ -52,13 +53,15 @@ def _base_name(thread_name: str) -> str:
     return thread_name.rsplit(": ", 1)[0] if ": " in thread_name else thread_name
 
 
-def _calc_values(bet_value: float) -> dict:
-    taxa              = bet_value * 0.25
-    total_por_jogador = bet_value + taxa
-    premio            = bet_value * 2
+async def _calc_values(bet_value: float, guild_id: str) -> dict:
+    """Calcula taxa e prêmio usando o CommissionService (config por servidor)."""
+    scheme             = await commission_service.get_match_config(guild_id)
+    taxa_por_jogador   = commission_service.calculate_per_player(bet_value, scheme)
+    total_por_jogador  = bet_value + taxa_por_jogador
+    premio             = bet_value * 2
     return {
         "bet":               bet_value,
-        "taxa":              taxa,
+        "taxa":              taxa_por_jogador,
         "total_por_jogador": total_por_jogador,
         "premio":            premio,
     }
@@ -71,7 +74,7 @@ async def _post_log(
     color: discord.Color = discord.Color.blurple()
 ):
     embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=f"Log de partida • {utcnow().strftime('%H:%M')}")
+    embed.set_footer(text=f"Log de partida \u2022 {utcnow().strftime('%H:%M')}")
     await channel.send(embed=embed)
 
 
@@ -84,7 +87,7 @@ def _try_return_to_pool(channel):
             )
         else:
             logger.warning(
-                f"[ThreadPool] thread_reuse_service indisponível "
+                f"[ThreadPool] thread_reuse_service indispon\u00edvel "
                 f"para thread {getattr(channel, 'id', '?')}"
             )
     except Exception as e:
@@ -95,29 +98,29 @@ def _try_return_to_pool(channel):
 # Embeds públicos
 # ───────────────────────────────────────────────
 
-def embed_match_created(match: dict) -> discord.Embed:
-    vals      = _calc_values(match["bet_value"])
+async def embed_match_created(match: dict, guild_id: str) -> discord.Embed:
+    vals      = await _calc_values(match["bet_value"], guild_id)
     time_blue = match.get("time_blue", [])
     time_red  = match.get("time_red",  [])
     gel       = match.get("gel_type",  "normal").capitalize()
     modo      = match.get("match_type","?").upper()
 
-    blue_str = "\n".join(f"• <@{uid}>" for uid in time_blue) or "—"
-    red_str  = "\n".join(f"• <@{uid}>" for uid in time_red)  or "—"
+    blue_str = "\n".join(f"\u2022 <@{uid}>" for uid in time_blue) or "\u2014"
+    red_str  = "\n".join(f"\u2022 <@{uid}>" for uid in time_red)  or "\u2014"
 
     embed = discord.Embed(
-        title="⚔️ Partida Criada!",
+        title="\u2694\ufe0f Partida Criada!",
         description=(
             f"**Modo:** {modo} | **GEL:** {gel}\n"
             f"**Mediador:** <@{match['mediator_id']}>"
         ),
         color=discord.Color.gold()
     )
-    embed.add_field(name="🔵 Time Blue", value=blue_str, inline=True)
-    embed.add_field(name="🔴 Time Red",  value=red_str,  inline=True)
-    embed.add_field(name="\u200b",       value="\u200b", inline=False)
+    embed.add_field(name="\U0001f535 Time Blue", value=blue_str, inline=True)
+    embed.add_field(name="\U0001f534 Time Red",  value=red_str,  inline=True)
+    embed.add_field(name="\u200b",               value="\u200b", inline=False)
     embed.add_field(
-        name="💰 Valores",
+        name="\U0001f4b0 Valores",
         value=(
             f"**Cada jogador paga ao mediador:** R$ {vals['total_por_jogador']:.2f}\n"
             f"*(R$ {vals['bet']:.2f} da fila + R$ {vals['taxa']:.2f} de taxa)*\n\n"
@@ -126,10 +129,10 @@ def embed_match_created(match: dict) -> discord.Embed:
         inline=False
     )
     embed.add_field(
-        name="⚠️ REGRAS DE PAGAMENTO",
+        name="\u26a0\ufe0f REGRAS DE PAGAMENTO",
         value=(
-            "✅ Pagamentos **somente via PIX**\n"
-            "🚫 **PROIBIDO usar:** Inter, Neon, PagBank"
+            "\u2705 Pagamentos **somente via PIX**\n"
+            "\U0001f6ab **PROIBIDO usar:** Inter, Neon, PagBank"
         ),
         inline=False
     )
@@ -137,31 +140,31 @@ def embed_match_created(match: dict) -> discord.Embed:
     return embed
 
 
-def embed_prize_instructions(match: dict) -> discord.Embed:
-    vals     = _calc_values(match["bet_value"])
+async def embed_prize_instructions(match: dict, guild_id: str) -> discord.Embed:
+    vals     = await _calc_values(match["bet_value"], guild_id)
     vencedor = match.get("vencedor", "blue")
-    label    = "🔵 Time Blue" if vencedor == "blue" else "🔴 Time Red"
+    label    = "\U0001f535 Time Blue" if vencedor == "blue" else "\U0001f534 Time Red"
     ids      = match.get("time_blue" if vencedor == "blue" else "time_red", [])
-    winners  = "\n".join(f"• <@{uid}>" for uid in ids) or "—"
+    winners  = "\n".join(f"\u2022 <@{uid}>" for uid in ids) or "\u2014"
 
     embed = discord.Embed(
-        title="🏆 Time Vencedor Declarado!",
+        title="\U0001f3c6 Time Vencedor Declarado!",
         description=f"**Vencedor:** {label}\n{winners}",
         color=discord.Color.green()
     )
     embed.add_field(
-        name="💰 Prêmio",
+        name="\U0001f4b0 Pr\u00eamio",
         value=(
             f"O **mediador** deve pagar **R$ {vals['premio']:.2f}** via PIX ao(s) vencedor(es).\n\n"
-            f"Após receber, clique no botão abaixo para confirmar e **fechar a partida**."
+            f"Ap\u00f3s receber, clique no bot\u00e3o abaixo para confirmar e **fechar a partida**."
         ),
         inline=False
     )
     embed.add_field(
-        name="⚠️ ATENÇÃO — REGRAS DE PAGAMENTO",
+        name="\u26a0\ufe0f ATEN\u00c7\u00c3O \u2014 REGRAS DE PAGAMENTO",
         value=(
-            "✅ Pagamentos **somente via PIX**\n"
-            "🚫 **PROIBIDO usar:** Inter, Neon, PagBank"
+            "\u2705 Pagamentos **somente via PIX**\n"
+            "\U0001f6ab **PROIBIDO usar:** Inter, Neon, PagBank"
         ),
         inline=False
     )
@@ -180,7 +183,7 @@ class PrizeConfirmView(discord.ui.View):
         self.winner_team    = winner_team
 
         btn = discord.ui.Button(
-            label="✅ Confirmar Recebimento do Prêmio",
+            label="\u2705 Confirmar Recebimento do Pr\u00eamio",
             style=discord.ButtonStyle.success,
             custom_id=f"prize_confirm_{match_id}"
         )
@@ -192,7 +195,7 @@ class PrizeConfirmView(discord.ui.View):
 
         if user_id not in self.winner_players:
             await interaction.response.send_message(
-                "❌ Apenas os jogadores vencedores podem confirmar.",
+                "\u274c Apenas os jogadores vencedores podem confirmar.",
                 ephemeral=True
             )
             return
@@ -200,35 +203,33 @@ class PrizeConfirmView(discord.ui.View):
         match_doc = await match_service.get_match(self.match_id)
         if not match_doc:
             await interaction.response.send_message(
-                "❌ Partida não encontrada.", ephemeral=True)
+                "\u274c Partida n\u00e3o encontrada.", ephemeral=True)
             return
 
         status = match_doc.get("status")
 
         # ── CORREÇÃO: checa o status antes de tentar finalizar ──────────
         if status == Match.STATUS_FINALIZADO:
-            # Já finalizado — só desabilita o botão
             for item in self.children:
                 item.disabled = True
-                item.label    = "✅ Prêmio Confirmado"
+                item.label    = "\u2705 Pr\u00eamio Confirmado"
             await interaction.response.edit_message(view=self)
             _try_return_to_pool(interaction.channel)
             return
 
         if status != Match.STATUS_AGUARDANDO_PREMIO:
-            # Status incorreto — orienta o jogador
             msgs = {
                 Match.STATUS_AGUARDANDO_PARTIDA: (
-                    "⏳ O mediador ainda não iniciou a partida via `/sala`."
+                    "\u23f3 O mediador ainda n\u00e3o iniciou a partida via `/sala`."
                 ),
                 Match.STATUS_PARTIDA_INICIADA: (
-                    "⏳ O mediador ainda não declarou o vencedor (`!wt blue` ou `!wt red`)."
+                    "\u23f3 O mediador ainda n\u00e3o declarou o vencedor (`!wt blue` ou `!wt red`)."
                 ),
                 Match.STATUS_CANCELADO: (
-                    "❌ Esta partida foi cancelada."
+                    "\u274c Esta partida foi cancelada."
                 ),
             }
-            msg = msgs.get(status, f"❌ Status inválido para confirmação: `{status}`")
+            msg = msgs.get(status, f"\u274c Status inv\u00e1lido para confirma\u00e7\u00e3o: `{status}`")
             await interaction.response.send_message(msg, ephemeral=True)
             return
         # ────────────────────────────────────────────────────────────────
@@ -236,25 +237,24 @@ class PrizeConfirmView(discord.ui.View):
         result = await match_service.confirm_prize_received(self.match_id)
         if not result:
             await interaction.response.send_message(
-                "❌ Erro ao finalizar partida. Tente novamente ou contate um admin.",
+                "\u274c Erro ao finalizar partida. Tente novamente ou contate um admin.",
                 ephemeral=True)
             return
 
-        # Sucesso
         for item in self.children:
             item.disabled = True
-            item.label    = "✅ Prêmio Confirmado"
+            item.label    = "\u2705 Pr\u00eamio Confirmado"
         await interaction.response.edit_message(view=self)
 
         if isinstance(interaction.channel, discord.Thread):
             await _update_thread_name(
                 interaction.channel,
                 _base_name(interaction.channel.name),
-                "Finalizado ✅"
+                "Finalizado \u2705"
             )
         embed = discord.Embed(
-            title="✅ Partida Encerrada!",
-            description="🎉 Prêmio confirmado pelos vencedores! Obrigado a todos.",
+            title="\u2705 Partida Encerrada!",
+            description="\U0001f389 Pr\u00eamio confirmado pelos vencedores! Obrigado a todos.",
             color=discord.Color.green()
         )
         await interaction.channel.send(embed=embed)
@@ -273,7 +273,7 @@ async def cmd_menu_partida(ctx):
     match = await _get_match_by_thread(ctx.channel.id)
     if not match:
         try:
-            await ctx.author.send("❌ Nenhuma partida encontrada neste tópico.")
+            await ctx.author.send("\u274c Nenhuma partida encontrada neste t\u00f3pico.")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
@@ -283,35 +283,36 @@ async def cmd_menu_partida(ctx):
         await ctx.message.delete()
         return
 
-    vals   = _calc_values(match["bet_value"])
-    status = match.get("status", "?")
+    guild_id = str(ctx.guild.id)
+    vals     = await _calc_values(match["bet_value"], guild_id)
+    status   = match.get("status", "?")
 
     embed = discord.Embed(
-        title="🎮 Painel do Mediador",
+        title="\U0001f3ae Painel do Mediador",
         description=(
             f"**Status atual:** `{status}`\n\n"
-            "**Comandos disponíveis na thread:**\n"
-            "`/sala` — informa ID e senha da sala (inicia a partida)\n"
-            "`!wt blue` ou `!wt red` — declara o vencedor\n"
-            "`!cancelar_match` — cancela a partida"
+            "**Comandos dispon\u00edveis na thread:**\n"
+            "`/sala` \u2014 informa ID e senha da sala (inicia a partida)\n"
+            "`!wt blue` ou `!wt red` \u2014 declara o vencedor\n"
+            "`!cancelar_match` \u2014 cancela a partida"
         ),
         color=discord.Color.blurple()
     )
     embed.add_field(
-        name="💰 Resumo Financeiro",
+        name="\U0001f4b0 Resumo Financeiro",
         value=(
             f"Cada jogador te paga: **R$ {vals['total_por_jogador']:.2f}**\n"
             f"*(R$ {vals['bet']:.2f} + R$ {vals['taxa']:.2f} de taxa)*\n\n"
-            f"Você paga ao vencedor: **R$ {vals['premio']:.2f}**"
+            f"Voc\u00ea paga ao vencedor: **R$ {vals['premio']:.2f}**"
         ),
         inline=False
     )
     embed.add_field(
-        name="⚠️ Lembrete",
-        value="🚫 **PROIBIDO:** Inter, Neon, PagBank\n✅ Apenas PIX",
+        name="\u26a0\ufe0f Lembrete",
+        value="\U0001f6ab **PROIBIDO:** Inter, Neon, PagBank\n\u2705 Apenas PIX",
         inline=False
     )
-    embed.set_footer(text="Esta mensagem foi enviada apenas para você via DM.")
+    embed.set_footer(text="Esta mensagem foi enviada apenas para voc\u00ea via DM.")
 
     try:
         await ctx.author.send(embed=embed)
@@ -322,7 +323,7 @@ async def cmd_menu_partida(ctx):
 
 
 async def cmd_winner_team(ctx, team: str):
-    """!wt blue|red — mediador declara o vencedor e dispara botão de confirmação."""
+    """!wt blue|red — mediador declara o vencedor e dispara bot\u00e3o de confirma\u00e7\u00e3o."""
     if not isinstance(ctx.channel, discord.Thread):
         await ctx.message.delete()
         return
@@ -331,7 +332,7 @@ async def cmd_winner_team(ctx, team: str):
     if team not in ("blue", "red"):
         try:
             await ctx.author.send(
-                "❌ Use: `!wt blue` ou `!wt red`")
+                "\u274c Use: `!wt blue` ou `!wt red`")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
@@ -349,7 +350,7 @@ async def cmd_winner_team(ctx, team: str):
     if match.get("status") != Match.STATUS_PARTIDA_INICIADA:
         try:
             await ctx.author.send(
-                f"❌ A partida ainda não foi iniciada via `/sala`. "
+                f"\u274c A partida ainda n\u00e3o foi iniciada via `/sala`. "
                 f"Status atual: `{match.get('status')}`")
         except discord.Forbidden:
             pass
@@ -368,33 +369,32 @@ async def cmd_winner_team(ctx, team: str):
     if not result:
         try:
             await ctx.author.send(
-                f"❌ Erro ao declarar vencedor. Status atual: `{match.get('status')}`")
+                f"\u274c Erro ao declarar vencedor. Status atual: `{match.get('status')}`")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
         return
 
-    label    = "🔵 Time Blue" if team == "blue" else "🔴 Time Red"
+    label    = "\U0001f535 Time Blue" if team == "blue" else "\U0001f534 Time Red"
     win_ids  = time_blue if team == "blue" else time_red
     mentions = " ".join(f"<@{uid}>" for uid in win_ids)
+    guild_id = str(ctx.guild.id)
 
     await _update_thread_name(
-        ctx.channel, _base_name(ctx.channel.name), f"Aguardando Prêmio 🏆")
+        ctx.channel, _base_name(ctx.channel.name), f"Aguardando Pr\u00eamio \U0001f3c6")
     await ctx.message.delete()
 
-    # Embed de vencedor + instruções do prêmio
     await ctx.channel.send(
-        embed=embed_prize_instructions({**match, "vencedor": team})
+        embed=await embed_prize_instructions({**match, "vencedor": team}, guild_id)
     )
 
-    # Botão para o vencedor confirmar recebimento e fechar a partida
     prize_view = PrizeConfirmView(
         match_id=str(match["_id"]),
         winner_players=win_ids,
         winner_team=team
     )
     await ctx.channel.send(
-        content=f"🏆 {mentions} — confirme o recebimento do prêmio!",
+        content=f"\U0001f3c6 {mentions} \u2014 confirme o recebimento do pr\u00eamio!",
         view=prize_view
     )
 
@@ -418,7 +418,7 @@ async def cmd_cancelar_match(ctx, reason: str = None):
     if match_obj.is_finished():
         try:
             await ctx.author.send(
-                f"❌ Partida já finalizada/cancelada. Status: `{match.get('status')}`")
+                f"\u274c Partida j\u00e1 finalizada/cancelada. Status: `{match.get('status')}`")
         except discord.Forbidden:
             pass
         await ctx.message.delete()
@@ -434,11 +434,11 @@ async def cmd_cancelar_match(ctx, reason: str = None):
         return
 
     await _update_thread_name(
-        ctx.channel, _base_name(ctx.channel.name), "Cancelado ❌")
+        ctx.channel, _base_name(ctx.channel.name), "Cancelado \u274c")
     await ctx.message.delete()
     await _post_log(
         ctx.channel,
-        "❌ Partida Cancelada",
+        "\u274c Partida Cancelada",
         f"Cancelada por <@{ctx.author.id}>."
         + (f"\n**Motivo:** {reason}" if reason else ""),
         discord.Color.red()
@@ -452,7 +452,7 @@ async def cmd_cancelar_match(ctx, reason: str = None):
 # ───────────────────────────────────────────────
 
 class MatchThreadView(discord.ui.View):
-    """Stub persistente — registrada no on_ready para sobreviver a reinicializações."""
+    """Stub persistente \u2014 registrada no on_ready para sobreviver a reinicializa\u00e7\u00f5es."""
     def __init__(self, match_id: str = "__persistent__"):
         super().__init__(timeout=None)
         self.match_id = match_id
