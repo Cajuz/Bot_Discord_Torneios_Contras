@@ -54,7 +54,7 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
         self.challenger_id = challenger_id
         self.guild_id      = guild_id
         self.mediator_id   = mediator_id
-        self.channel       = channel  # guardado para não depender de interaction.guild
+        self.channel       = channel
 
     async def on_submit(self, interaction: discord.Interaction):
         from services.match_service import match_service
@@ -74,8 +74,6 @@ class ContraPaymentModal(Modal, title="Confirmação de Pagamento"):
         )
         logger.info(f"[ContraMatch] Pagamento confirmado — match {self.match_id} player {self.player_id}")
 
-        # FIX BUG 5: usa self.channel.guild em vez de interaction.guild
-        # (mais robusto — interaction.guild pode ser None em edge cases)
         guild = self.channel.guild
         try:
             influencer = guild.get_member(self.influencer_id) or await guild.fetch_member(self.influencer_id)
@@ -153,8 +151,6 @@ class ContraConfirmView(View):
         self.add_item(btn_giveup)
 
     async def _confirm_presence(self, interaction: discord.Interaction):
-        # FIX BUG 6: challenger_id extraído do custom_id como fallback confiável
-        # ao invés de regex frágil no embed
         challenger_id = self.challenger_id
 
         if challenger_id and interaction.user.id != challenger_id:
@@ -280,10 +276,10 @@ class ContraResultView(View):
 
         from services.match_service import match_service
         from services.influencer_live_queue_service import influencer_live_queue_service
-        from services.commission_service import commission_service
         from views.influencer_live_view import build_contra_match_result_embed
         from config.discord_bot import get_bot
 
+        # finish_live_match já calcula taxa, credita mediador e retorna doc atualizado
         updated = await match_service.finish_live_match(
             match_id=self.match_id,
             vencedor=vencedor,
@@ -295,17 +291,9 @@ class ContraResultView(View):
             )
             return
 
-        bet_value = updated.get("bet_value", 0.0)
-
-        # Calcula prêmio descontando a taxa de comissão live configurada no servidor
-        try:
-            live_scheme = await commission_service.get_live_config(str(self.guild_id))
-            total_fee   = commission_service.calculate(bet_value, live_scheme)
-        except Exception as exc:
-            logger.warning(f"[ContraMatch] Erro ao buscar comissão live, usando taxa 0: {exc}")
-            total_fee = 0.0
-
-        prize = round(bet_value * 2 - total_fee, 2)
+        bet_value     = updated.get("bet_value", 0.0)
+        total_fee     = float(updated.get("commission_total") or 0.0)
+        prize         = round(bet_value * 2 - total_fee, 2)
 
         winner = interaction.guild.get_member(winner_id) or await interaction.guild.fetch_member(winner_id)
         loser  = interaction.guild.get_member(loser_id)  or await interaction.guild.fetch_member(loser_id)

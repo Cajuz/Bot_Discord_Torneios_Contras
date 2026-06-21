@@ -56,6 +56,58 @@ class MatchService:
         })
         return {"taxa": taxa, "total": total}
 
+    # ── Acumula comissão no saldo do mediador ─────────────────────────
+
+    async def _credit_mediator_commission(self, match_doc: dict, commission_total: float) -> None:
+        """
+        Incrementa saldo_pendente e partidas_mediadas na collection 'comissoes'
+        para o mediador responsável pela partida.
+        Só credita se commission_total > 0 e mediator_id presente.
+        """
+        mediator_id = str(match_doc.get("mediator_id", ""))
+        if not mediator_id or commission_total <= 0:
+            return
+        try:
+            nome = ""
+            try:
+                from config.discord_bot import get_bot
+                bot = get_bot()
+                guild_id = match_doc.get("guild_id")
+                if bot and guild_id:
+                    guild = bot.get_guild(int(guild_id))
+                    if guild:
+                        member = guild.get_member(int(mediator_id))
+                        if member:
+                            nome = member.display_name
+            except Exception:
+                pass
+
+            update = {
+                "$inc": {
+                    "saldo_pendente":    round(commission_total, 2),
+                    "partidas_mediadas": 1,
+                },
+                "$set": {"updated_at": utcnow()},
+                "$setOnInsert": {
+                    "total_recebido": 0.0,
+                    "mediador_id":    mediator_id,
+                },
+            }
+            if nome:
+                update["$set"]["nome"] = nome
+
+            await db.get_collection("comissoes").update_one(
+                {"mediador_id": mediator_id},
+                update,
+                upsert=True,
+            )
+            logger.info(
+                f"[MatchService] Comissão creditada: mediador={mediator_id} "
+                f"valor={commission_total:.2f}"
+            )
+        except Exception as e:
+            logger.error(f"[MatchService] _credit_mediator_commission erro: {e}", exc_info=True)
+
     # ── Histórico ─────────────────────────────────────────────────────
 
     async def _post_history(self, match_doc: dict, outcome: str = "finalizado"):
@@ -332,8 +384,8 @@ class MatchService:
             ):
                 return None
 
-            # Salva snapshot de comissão antes de finalizar
-            await self._snapshot_commission(match_id, match)
+            # Salva snapshot e obtém o total para creditar ao mediador
+            snap = await self._snapshot_commission(match_id, match)
 
             result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
@@ -342,6 +394,8 @@ class MatchService:
             })
             if result:
                 await self._post_history(result, "finalizado")
+                # Credita comissão no saldo do mediador
+                await self._credit_mediator_commission(result, snap["total"])
             return result
         except Exception as e:
             logger.error(f"Erro ao confirmar prêmio da partida {match_id}: {e}")
@@ -350,7 +404,7 @@ class MatchService:
     async def cancel_match(
         self,
         match_id:     str,
-        cancelled_by: int,
+        cancelled_by: int = 0,
         reason:       str = "Cancelado",
     ) -> Optional[Dict[str, Any]]:
         try:
@@ -360,17 +414,18 @@ class MatchService:
             if match["status"] in (Match.STATUS_FINALIZADO, Match.STATUS_CANCELADO):
                 return None
 
-            # Salva snapshot de comissão antes de cancelar
+            # Snapshot (taxa = 0 em partidas canceladas — sem crédito)
             await self._snapshot_commission(match_id, match)
 
             result = await self._update(match_id, {
-                "status":       Match.STATUS_CANCELADO,
-                "cancelled_by": str(cancelled_by),
+                "status":        Match.STATUS_CANCELADO,
+                "cancelled_by":  str(cancelled_by),
                 "cancel_reason": reason,
-                "cancelled_at": utcnow(),
+                "cancelled_at":  utcnow(),
             })
             if result:
                 await self._post_history(result, "cancelado")
+            # Partidas canceladas NÃO creditam comissão ao mediador
             return result
         except Exception as e:
             logger.error(f"Erro ao cancelar partida {match_id}: {e}")
@@ -387,8 +442,8 @@ class MatchService:
             if not match:
                 return None
 
-            # Salva snapshot de comissão antes de forçar finalização
-            await self._snapshot_commission(match_id, match)
+            # Salva snapshot e obtém o total para creditar ao mediador
+            snap = await self._snapshot_commission(match_id, match)
 
             result = await self._update(match_id, {
                 "status":                    Match.STATUS_FINALIZADO,
@@ -399,9 +454,58 @@ class MatchService:
             })
             if result:
                 await self._post_history(result, "forcado")
+                # Credita comissão no saldo do mediador
+                await self._credit_mediator_commission(result, snap["total"])
             return result
         except Exception as e:
             logger.error(f"Erro ao forçar finalização da partida {match_id}: {e}")
+            return None
+
+    # ── Live match finalization ──────────────────────────────────────
+
+    async def finish_live_match(
+        self,
+        match_id: str,
+        vencedor: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Finaliza uma partida do modo live e credita comissão ao mediador."""
+        try:
+            match = await self._find(match_id)
+            if not match:
+                return None
+
+            bet_value = float(match.get("bet_value", 0) or 0)
+            guild_id  = str(match.get("guild_id", ""))
+
+            try:
+                live_scheme  = await commission_service.get_live_config(guild_id) if guild_id else {}
+                commission_total = commission_service.calculate(bet_value, live_scheme)
+            except Exception as e:
+                logger.warning(f"[MatchService] finish_live_match commission fallback: {e}")
+                commission_total = commission_service.calculate(bet_value, {})
+
+            result = await self._update(match_id, {
+                "status":           Match.STATUS_FINALIZADO,
+                "vencedor":         vencedor,
+                "completed_at":     utcnow(),
+                "commission_total": round(commission_total, 2),
+            })
+            if result:
+                await self._credit_mediator_commission(result, commission_total)
+            return result
+        except Exception as e:
+            logger.error(f"Erro ao finalizar partida live {match_id}: {e}")
+            return None
+
+    async def register_payment_confirmation(self, match_id: str) -> Optional[Dict[str, Any]]:
+        """Registra confirmação de pagamento do desafiante no modo live."""
+        try:
+            return await self._update(match_id, {
+                "payment_confirmed": True,
+                "payment_confirmed_at": utcnow(),
+            })
+        except Exception as e:
+            logger.error(f"Erro ao registrar confirmação de pagamento {match_id}: {e}")
             return None
 
 
