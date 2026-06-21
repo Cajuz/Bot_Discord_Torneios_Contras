@@ -40,6 +40,7 @@ COGS = [
     "cogs.renewal_dashboard_cog",
     "cogs.alerts_cog",
     "cogs.moderation_cog",
+    "cogs.commission_cog",
 ]
 
 bot          = create_discord_bot()
